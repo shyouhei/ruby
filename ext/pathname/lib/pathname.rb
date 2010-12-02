@@ -476,9 +476,9 @@ class Pathname
     base_names.fill('..')
     relpath_names = base_names + dest_names
     if relpath_names.empty?
-      Pathname.new('.')
+      self.class.new('.')
     else
-      Pathname.new(File.join(*relpath_names))
+      self.class.new(File.join(*relpath_names))
     end
   end
 end

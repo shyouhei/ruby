@@ -30,6 +30,9 @@ class TestPathname < Test::Unit::TestCase
   DOSISH_DRIVE_LETTER = File.dirname("A:") == "A:."
   DOSISH_UNC = File.dirname("//") == "//"
 
+  class SuperPathname < Pathname
+  end
+
   def cleanpath_aggressive(path)
     Pathname.new(path).cleanpath.to_s
   end
@@ -203,6 +206,10 @@ class TestPathname < Test::Unit::TestCase
   defassert(:plus, '../../c', '..', '../c')
 
   defassert(:plus, 'a//b/d//e', 'a//b/c', '../d//e')
+
+  define_assertion(:plus) {
+    assert_instance_of(SuperPathname, SuperPathname.new('a') + 'b')
+  }
 
   def test_parent
     assert_equal(Pathname("."), Pathname("a").parent)

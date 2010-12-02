@@ -305,8 +305,8 @@ class Pathname
   # This method doesn't access the file system; it is pure string manipulation.
   #
   def +(other)
-    other = Pathname.new(other) unless Pathname === other
-    Pathname.new(plus(@path, other.to_s))
+    other = self.class.new(other) unless Pathname === other
+    self.class.new(plus(@path, other.to_s))
   end
 
   def plus(path1, path2) # -> path

@@ -580,6 +580,27 @@ rb_obj_tap(VALUE obj)
  *    New subclass: Baz
  */
 
+/* Document-method: method_added
+ *
+ * call-seq:
+ *    method_added(symbol)
+ *
+ * Invoked as a callback whenever a method is added to the receiver.
+ *
+ *    module Chatty
+ *      def Chatty.method_added(name)
+ *        puts "Adding #{name.inspect}"
+ *      end
+ *      def self.some_class_method() end
+ *      def some_instance_method() end
+ *    end
+ *
+ *  <em>produces:</em>
+ *
+ *    Adding :some_instance_method
+ *
+ */
+
 /*
  * Document-method: singleton_method_added
  *

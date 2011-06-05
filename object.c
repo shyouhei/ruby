@@ -582,10 +582,11 @@ rb_obj_tap(VALUE obj)
 
 /* Document-method: method_added
  *
- * call-seq:
+ *  call-seq:
  *    method_added(symbol)
  *
- * Invoked as a callback whenever a method is added to the receiver.
+ * Invoked as a callback whenever an instance method is added to the
+ * receiver.
  *
  *    module Chatty
  *      def Chatty.method_added(name)

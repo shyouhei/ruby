@@ -602,6 +602,32 @@ rb_obj_tap(VALUE obj)
  *
  */
 
+/* Document-method: method_removed
+ *
+ *  call-seq:
+ *    method_removed(symbol)
+ *
+ * Invoked as a callback whenever an instance method is removed from the
+ * receiver.
+ *
+ *    module Chatty
+ *      def Chatty.method_removed(name)
+ *        puts "Removing #{name.inspect}"
+ *      end
+ *      def self.some_class_method() end
+ *      def some_instance_method() end
+ *      class << self
+ *        remove_method :some_class_method
+ *      end
+ *      remove_method :some_instance_method
+ *    end
+ *
+ * <em>produces:</em>
+ *
+ *    Removing :some_instance_method
+ *
+ */
+
 /*
  * Document-method: singleton_method_added
  *

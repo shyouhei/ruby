@@ -198,27 +198,45 @@ class TestSignal < Test::Unit::TestCase
   end
 
   def test_signal_requiring
-    skip "limitation of GenerateConsoleCtrlEvent()" if /mswin|mingw/ =~ RUBY_PLATFORM
     t = Tempfile.new(%w"require_ensure_test .rb")
     t.puts "sleep"
     t.close
-    error = IO.popen([EnvUtil.rubybin, "-e", <<EOS, t.path]) do |child|
+    error = IO.popen([EnvUtil.rubybin, "-e", <<EOS, t.path, :err => File::NULL]) do |child|
+trap(:INT, "DEFAULT")
 th = Thread.new do
   begin
     require ARGV[0]
   ensure
     Marshal.dump($!, STDOUT)
+    STDOUT.flush
   end
 end
-STDOUT.puts
-STDOUT.flush
+Thread.pass while th.running?
+Process.kill(:INT, $$)
 th.join
 EOS
-      child.gets
-      Process.kill("INT", child.pid)
       Marshal.load(child)
     end
     t.close!
     assert_nil(error)
   end
+
+  def test_reserved_signal
+    assert_raise(ArgumentError) {
+      Signal.trap(:SEGV) {}
+    }
+    assert_raise(ArgumentError) {
+      Signal.trap(:BUS) {}
+    }
+    assert_raise(ArgumentError) {
+      Signal.trap(:ILL) {}
+    }
+    assert_raise(ArgumentError) {
+      Signal.trap(:FPE) {}
+    }
+    assert_raise(ArgumentError) {
+      Signal.trap(:VTALRM) {}
+    }
+  end
+
 end

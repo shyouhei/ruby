@@ -17,6 +17,7 @@
 #endif
 #include "ruby/ruby.h"
 #include "ruby/encoding.h"
+#include "internal.h"
 #include "eval_intern.h"
 #include "dln.h"
 #include <stdio.h>
@@ -50,12 +51,6 @@
 #ifndef HAVE_STDLIB_H
 char *getenv();
 #endif
-
-VALUE rb_parser_get_yydebug(VALUE);
-VALUE rb_parser_set_yydebug(VALUE, VALUE);
-
-const char *ruby_get_inplace_mode(void);
-void ruby_set_inplace_mode(const char *);
 
 #define DISABLE_BIT(bit) (1U << disable_##bit)
 enum disable_flag_bits {
@@ -164,8 +159,6 @@ usage(const char *name)
     while (*p)
 	printf("  %s\n", *p++);
 }
-
-VALUE rb_get_load_path(void);
 
 #ifdef MANGLED_PATH
 static VALUE
@@ -377,7 +370,6 @@ ruby_init_loadpath_safe(int safe_level)
 #elif defined(HAVE_DLADDR)
     Dl_info dli;
     if (dladdr((void *)(VALUE)expand_include_path, &dli)) {
-	VALUE rb_realpath_internal(VALUE basedir, VALUE path, int strict);
 	char fbuf[MAXPATHLEN];
 	char *f = dln_find_file_r(dli.dli_fname, getenv(PATH_ENV), fbuf, sizeof(fbuf));
 	VALUE fname = rb_str_new_cstr(f ? f : dli.dli_fname);
@@ -449,6 +441,9 @@ ruby_init_loadpath_safe(int safe_level)
     load_path = GET_VM()->load_path;
 
     if (safe_level == 0) {
+#ifdef MANGLED_PATH
+	rubylib_mangled_path("", 0);
+#endif
 	ruby_push_include(getenv("RUBYLIB"), identical_path);
     }
 
@@ -476,9 +471,6 @@ add_modules(VALUE *req_list, const char *mod)
     }
     rb_ary_push(list, rb_obj_freeze(rb_str_new2(mod)));
 }
-
-extern void Init_ext(void);
-extern VALUE rb_vm_top_self(void);
 
 static void
 require_libraries(VALUE *req_list)
@@ -568,8 +560,6 @@ process_sflag(int *sflag)
     }
 }
 
-NODE *rb_parser_append_print(VALUE, NODE *);
-NODE *rb_parser_while_loop(VALUE, NODE *, int, int);
 static long proc_options(long argc, char **argv, struct cmdline_options *opt, int envopt);
 
 static void
@@ -1101,8 +1091,6 @@ proc_options(long argc, char **argv, struct cmdline_options *opt, int envopt)
     return argc0 - argc;
 }
 
-void Init_prelude(void);
-
 static void
 ruby_init_prelude(void)
 {
@@ -1149,7 +1137,7 @@ uscore_get(void)
     VALUE line;
 
     line = rb_lastline_get();
-    if (TYPE(line) != T_STRING) {
+    if (!RB_TYPE_P(line, T_STRING)) {
 	rb_raise(rb_eTypeError, "$_ value need to be String (%s given)",
 		 NIL_P(line) ? "nil" : rb_obj_classname(line));
     }
@@ -1237,10 +1225,6 @@ rb_f_chomp(argc, argv)
     return str;
 }
 
-void rb_stdio_set_default_encoding(void);
-VALUE rb_parser_dump_tree(NODE *node, int comment);
-VALUE rb_realpath_internal(VALUE basedir, VALUE path, int strict);
-
 static VALUE
 process_options(int argc, char **argv, struct cmdline_options *opt)
 {
@@ -1325,12 +1309,12 @@ process_options(int argc, char **argv, struct cmdline_options *opt)
 #if defined DOSISH || defined __CYGWIN__
     translit_char(RSTRING_PTR(opt->script_name), '\\', '/');
 #endif
-    rb_obj_freeze(opt->script_name);
 
     ruby_init_loadpath_safe(opt->safe_level);
     rb_enc_find_index("encdb");
     lenc = rb_locale_encoding();
     rb_enc_associate(rb_progname, lenc);
+    rb_obj_freeze(rb_progname);
     parser = rb_parser_new();
     if (opt->dump & DUMP_BIT(yydebug)) {
 	rb_parser_set_yydebug(parser, Qtrue);
@@ -1358,6 +1342,7 @@ process_options(int argc, char **argv, struct cmdline_options *opt)
 	opt->intern.enc.index = -1;
     }
     rb_enc_associate(opt->script_name, lenc);
+    rb_obj_freeze(opt->script_name);
     {
 	long i;
 	VALUE load_path = GET_VM()->load_path;
@@ -1542,6 +1527,7 @@ load_file_internal(VALUE arg)
 	if ((fd = open(fname, mode)) < 0) {
 	    rb_load_fail(fname);
 	}
+        rb_update_max_fd(fd);
 
 	f = rb_io_fdopen(fd, mode, fname);
     }
@@ -1644,6 +1630,18 @@ load_file_internal(VALUE arg)
     tree = rb_parser_compile_file(parser, fname, f, line_start);
     rb_funcall(f, set_encoding, 1, rb_parser_encoding(parser));
     if (script && tree && rb_parser_end_seen_p(parser)) {
+	/*
+	 * DATA is a File that contains the data section of the executed file.
+	 * To create a data section use <tt>__END__</tt>:
+	 *
+	 *   $ cat t.rb
+	 *   puts DATA.gets
+	 *   __END__
+	 *   hello world!
+	 *
+	 *   $ ruby t.rb
+	 *   hello world!
+	 */
 	rb_define_global_const("DATA", f);
     }
     else if (f != rb_stdin) {
@@ -1698,7 +1696,7 @@ void
 ruby_script(const char *name)
 {
     if (name) {
-	rb_progname = rb_obj_freeze(rb_external_str_new(name, strlen(name)));
+	rb_progname = rb_external_str_new(name, strlen(name));
 	rb_vm_set_progname(rb_progname);
     }
 }
@@ -1765,6 +1763,13 @@ ruby_prog_init(void)
     rb_define_hooked_variable("$0", &rb_progname, 0, set_arg0);
     rb_define_hooked_variable("$PROGRAM_NAME", &rb_progname, 0, set_arg0);
 
+    /*
+     * ARGV contains the command line arguments used to run ruby with the
+     * first value containing the name of the executable.
+     *
+     * A library like OptionParser can be used to process command-line
+     * arguments.
+     */
     rb_define_global_const("ARGV", rb_argv);
 }
 
@@ -1802,7 +1807,7 @@ ruby_process_options(int argc, char **argv)
 
 #ifndef HAVE_SETPROCTITLE
     {
-	extern compat_init_setproctitle(int argc, char *argv[]);
+	extern void compat_init_setproctitle(int argc, char *argv[]);
 	compat_init_setproctitle(argc, argv);
     }
 #endif

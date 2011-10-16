@@ -1,9 +1,3 @@
-######################################################################
-# This file is imported from the rubygems project.
-# DO NOT make modifications in this repo. They _will_ be reverted!
-# File a patch instead and assign it to Ryan Davis or Eric Hodel.
-######################################################################
-
 #--
 # Copyright 2006 by Chad Fowler, Rich Kilmer, Jim Weirich and others.
 # All rights reserved.
@@ -23,12 +17,12 @@ class Gem::Ext::RakeBuilder < Gem::Ext::Builder
     end
 
     # Deal with possible spaces in the path, e.g. C:/Program Files
-    dest_path = '"' + dest_path + '"' if dest_path.include?(' ')
+    dest_path = '"' + dest_path.to_s + '"' if dest_path.to_s.include?(' ')
 
     rake = ENV['rake']
 
     rake ||= begin
-               "\"#{Gem.ruby}\" -rubygems #{Gem.bin_path('rake')}"
+               "\"#{Gem.ruby}\" -rubygems #{Gem.bin_path('rake', 'rake')}"
              rescue Gem::Exception
              end
 

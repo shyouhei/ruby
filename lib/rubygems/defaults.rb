@@ -1,10 +1,6 @@
-######################################################################
-# This file is imported from the rubygems project.
-# DO NOT make modifications in this repo. They _will_ be reverted!
-# File a patch instead and assign it to Ryan Davis or Eric Hodel.
-######################################################################
-
 module Gem
+
+  # TODO: move this whole file back into rubygems.rb
 
   @post_install_hooks   ||= []
   @post_uninstall_hooks ||= []
@@ -23,16 +19,28 @@ module Gem
   # specified in the environment
 
   def self.default_dir
-    if defined? RUBY_FRAMEWORK_VERSION then
-      File.join File.dirname(ConfigMap[:sitedir]), 'Gems',
-                ConfigMap[:ruby_version]
-    elsif ConfigMap[:rubylibprefix] then
-      File.join(ConfigMap[:rubylibprefix], 'gems',
-                ConfigMap[:ruby_version])
-    else
-      File.join(ConfigMap[:libdir], ruby_engine, 'gems',
-                ConfigMap[:ruby_version])
-    end
+    path = if defined? RUBY_FRAMEWORK_VERSION then
+             [
+               File.dirname(ConfigMap[:sitedir]),
+               'Gems',
+               ConfigMap[:ruby_version]
+             ]
+           elsif ConfigMap[:rubylibprefix] then
+             [
+              ConfigMap[:rubylibprefix],
+              'gems',
+              ConfigMap[:ruby_version]
+             ]
+           else
+             [
+               ConfigMap[:libdir],
+               ruby_engine,
+               'gems',
+               ConfigMap[:ruby_version]
+             ]
+           end
+
+    @default_dir ||= File.join(*path)
   end
 
   ##
@@ -82,14 +90,18 @@ module Gem
   # The default system-wide source info cache directory
 
   def self.default_system_source_cache_dir
-    File.join Gem.dir, 'source_cache'
+    File.join(Gem.dir, 'source_cache')
   end
 
   ##
   # The default user-specific source info cache directory
 
   def self.default_user_source_cache_dir
-    File.join Gem.user_home, '.gem', 'source_cache'
+    #
+    # NOTE Probably an argument for moving this to per-ruby supported dirs like
+    # user_dir
+    #
+    File.join(Gem.user_home, '.gem', 'source_cache')
   end
 
   ##
@@ -102,6 +114,4 @@ module Gem
       'ruby'
     end
   end
-
 end
-

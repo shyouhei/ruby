@@ -14,6 +14,7 @@
 #include "ruby/ruby.h"
 #include "ruby/re.h"
 #include "ruby/encoding.h"
+#include "internal.h"
 #include <assert.h>
 
 #define BEG(no) (regs->beg[(no)])
@@ -853,11 +854,11 @@ rb_obj_as_string(VALUE obj)
 {
     VALUE str;
 
-    if (TYPE(obj) == T_STRING) {
+    if (RB_TYPE_P(obj, T_STRING)) {
 	return obj;
     }
     str = rb_funcall(obj, id_to_s, 0);
-    if (TYPE(str) != T_STRING)
+    if (!RB_TYPE_P(str, T_STRING))
 	return rb_any_to_s(obj);
     if (OBJ_TAINTED(obj)) OBJ_TAINT(str);
     return str;
@@ -1403,7 +1404,7 @@ VALUE
 rb_string_value(volatile VALUE *ptr)
 {
     VALUE s = *ptr;
-    if (TYPE(s) != T_STRING) {
+    if (!RB_TYPE_P(s, T_STRING)) {
 	s = rb_str_to_str(s);
 	*ptr = s;
     }
@@ -2053,8 +2054,6 @@ rb_str_append(VALUE str, VALUE str2)
     return rb_str_buf_append(str, str2);
 }
 
-int rb_num_to_uint(VALUE val, unsigned int *ret);
-
 /*
  *  call-seq:
  *     str << integer       -> str
@@ -2076,7 +2075,7 @@ rb_str_concat(VALUE str1, VALUE str2)
 {
     unsigned int lc;
 
-    if (FIXNUM_P(str2) || TYPE(str2) == T_BIGNUM) {
+    if (FIXNUM_P(str2) || RB_TYPE_P(str2, T_BIGNUM)) {
 	if (rb_num_to_uint(str2, &lc) == 0) {
 	}
 	else if (FIXNUM_P(str2)) {
@@ -2251,7 +2250,7 @@ VALUE
 rb_str_equal(VALUE str1, VALUE str2)
 {
     if (str1 == str2) return Qtrue;
-    if (TYPE(str2) != T_STRING) {
+    if (!RB_TYPE_P(str2, T_STRING)) {
 	if (!rb_respond_to(str2, rb_intern("to_str"))) {
 	    return Qfalse;
 	}
@@ -2271,7 +2270,7 @@ static VALUE
 rb_str_eql(VALUE str1, VALUE str2)
 {
     if (str1 == str2) return Qtrue;
-    if (TYPE(str2) != T_STRING) return Qfalse;
+    if (!RB_TYPE_P(str2, T_STRING)) return Qfalse;
     return str_eql(str1, str2);
 }
 
@@ -2303,7 +2302,7 @@ rb_str_cmp_m(VALUE str1, VALUE str2)
 {
     long result;
 
-    if (TYPE(str2) != T_STRING) {
+    if (!RB_TYPE_P(str2, T_STRING)) {
 	if (!rb_respond_to(str2, rb_intern("to_str"))) {
 	    return Qnil;
 	}
@@ -2473,7 +2472,7 @@ rb_str_index_m(int argc, VALUE *argv, VALUE str)
     if (pos < 0) {
 	pos += str_strlen(str, STR_ENC_GET(str));
 	if (pos < 0) {
-	    if (TYPE(sub) == T_REGEXP) {
+	    if (RB_TYPE_P(sub, T_REGEXP)) {
 		rb_backref_set(Qnil);
 	    }
 	    return Qnil;
@@ -2582,7 +2581,7 @@ rb_str_rindex_m(int argc, VALUE *argv, VALUE str)
 	if (pos < 0) {
 	    pos += len;
 	    if (pos < 0) {
-		if (TYPE(sub) == T_REGEXP) {
+		if (RB_TYPE_P(sub, T_REGEXP)) {
 		    rb_backref_set(Qnil);
 		}
 		return Qnil;
@@ -3168,7 +3167,8 @@ rb_str_aref(VALUE str, VALUE indx)
  *  characters at offsets given by the range is returned. In all three cases, if
  *  an offset is negative, it is counted from the end of <i>str</i>. Returns
  *  <code>nil</code> if the initial offset falls outside the string, the length
- *  is negative, or the beginning of the range is greater than the end.
+ *  is negative, or the beginning of the range is greater than the end of the
+ *  string.
  *
  *  If a <code>Regexp</code> is supplied, the matching portion of <i>str</i> is
  *  returned. If a numeric or name parameter follows the regular expression, that
@@ -5117,6 +5117,9 @@ tr_trans(VALUE str, VALUE src, VALUE repl, int sflag)
 	    CHECK_IF_ASCII(c);
 	    t += tlen;
 	}
+	if (!STR_EMBED_P(str)) {
+	    xfree(RSTRING(str)->as.heap.ptr);
+	}
 	*t = '\0';
 	RSTRING(str)->as.heap.ptr = buf;
 	RSTRING(str)->as.heap.len = t - buf;
@@ -5228,19 +5231,22 @@ rb_str_tr_bang(VALUE str, VALUE src, VALUE repl)
 
 /*
  *  call-seq:
- *     str.tr(from_str, to_str)   -> new_str
+ *     str.tr(from_str, to_str)   => new_str
  *
- *  Returns a copy of <i>str</i> with the characters in <i>from_str</i> replaced
- *  by the corresponding characters in <i>to_str</i>. If <i>to_str</i> is
- *  shorter than <i>from_str</i>, it is padded with its last character. Both
- *  strings may use the c1--c2 notation to denote ranges of characters, and
- *  <i>from_str</i> may start with a <code>^</code>, which denotes all
+ *  Returns a copy of <i>str</i> with the characters in <i>from_str</i> 
+ *  replaced by the corresponding characters in <i>to_str</i>. If 
+ *  <i>to_str</i> is shorter than <i>from_str</i>, it is padded with its last
+ *  character in order to maintain the correspondence.
+ *
+ *     "hello".tr('el', 'ip')      #=> "hippo"
+ *     "hello".tr('aeiou', '*')    #=> "h*ll*"
+ * 
+ *  Both strings may use the c1-c2 notation to denote ranges of characters,
+ *  and <i>from_str</i> may start with a <code>^</code>, which denotes all
  *  characters except those listed.
  *
- *     "hello".tr('aeiou', '*')    #=> "h*ll*"
- *     "hello".tr('^aeiou', '*')   #=> "*e**o"
- *     "hello".tr('el', 'ip')      #=> "hippo"
  *     "hello".tr('a-y', 'b-z')    #=> "ifmmp"
+ *     "hello".tr('^aeiou', '*')   #=> "*e**o"
  */
 
 static VALUE
@@ -5745,7 +5751,7 @@ rb_str_split_m(int argc, VALUE *argv, VALUE str)
     }
     else {
       fs_set:
-	if (TYPE(spat) == T_STRING) {
+	if (RB_TYPE_P(spat, T_STRING)) {
 	    rb_encoding *enc2 = STR_ENC_GET(spat);
 
 	    split_type = string;
@@ -7058,7 +7064,7 @@ rb_str_partition(VALUE str, VALUE sep)
     long pos;
     int regex = FALSE;
 
-    if (TYPE(sep) == T_REGEXP) {
+    if (RB_TYPE_P(sep, T_REGEXP)) {
 	pos = rb_reg_search(sep, str, 0, 0);
 	regex = TRUE;
     }
@@ -7108,7 +7114,7 @@ rb_str_rpartition(VALUE str, VALUE sep)
     long pos = RSTRING_LEN(str);
     int regex = FALSE;
 
-    if (TYPE(sep) == T_REGEXP) {
+    if (RB_TYPE_P(sep, T_REGEXP)) {
 	pos = rb_reg_search(sep, str, pos, 1);
 	regex = TRUE;
     }
@@ -7200,7 +7206,7 @@ rb_str_end_with(int argc, VALUE *argv, VALUE str)
 void
 rb_str_setter(VALUE val, ID id, VALUE *var)
 {
-    if (!NIL_P(val) && TYPE(val) != T_STRING) {
+    if (!NIL_P(val) && !RB_TYPE_P(val, T_STRING)) {
 	rb_raise(rb_eTypeError, "value of %s must be String", rb_id2name(id));
     }
     *var = val;
@@ -7454,8 +7460,6 @@ sym_to_sym(VALUE sym)
 {
     return sym;
 }
-
-VALUE rb_funcall_passing_block(VALUE recv, ID mid, int argc, const VALUE *argv);
 
 static VALUE
 sym_call(VALUE args, VALUE sym, int argc, VALUE *argv)

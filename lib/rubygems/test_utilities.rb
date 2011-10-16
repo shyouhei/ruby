@@ -1,9 +1,3 @@
-######################################################################
-# This file is imported from the rubygems project.
-# DO NOT make modifications in this repo. They _will_ be reverted!
-# File a patch instead and assign it to Ryan Davis or Eric Hodel.
-######################################################################
-
 require 'tempfile'
 require 'rubygems'
 require 'rubygems/remote_fetcher'
@@ -103,8 +97,8 @@ class Gem::FakeFetcher
   end
 
   def download spec, source_uri, install_dir = Gem.dir
-    name = spec.file_name
-    path = Gem.cache_gem(name, install_dir)
+    name = File.basename spec.cache_file
+    path = File.join install_dir, "cache", name
 
     Gem.ensure_gem_subdirectories install_dir
 
@@ -120,7 +114,8 @@ class Gem::FakeFetcher
   end
 
   def download_to_cache dependency
-    found = Gem::SpecFetcher.fetcher.fetch dependency
+    found = Gem::SpecFetcher.fetcher.fetch dependency, true, true,
+                                           dependency.prerelease?
 
     return if found.empty?
 
@@ -144,6 +139,8 @@ end
 ##
 # A StringIO duck-typed class that uses Tempfile instead of String as the
 # backing store.
+#
+# This is available when rubygems/test_utilities is required.
 #--
 # This class was added to flush out problems in Rubinius' IO implementation.
 

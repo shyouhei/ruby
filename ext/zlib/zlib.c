@@ -2306,6 +2306,9 @@ gzfile_read_header(struct gzfile *gz)
 	zstream_discard_input(&gz->z, 2 + len);
     }
     if (flags & GZ_FLAG_ORIG_NAME) {
+	if (!gzfile_read_raw_ensure(gz, 1)) {
+	    rb_raise(cGzError, "unexpected end of file");
+	}
 	p = gzfile_read_raw_until_zero(gz, 0);
 	len = p - RSTRING_PTR(gz->z.input);
 	gz->orig_name = rb_str_new(RSTRING_PTR(gz->z.input), len);
@@ -2313,6 +2316,9 @@ gzfile_read_header(struct gzfile *gz)
 	zstream_discard_input(&gz->z, len + 1);
     }
     if (flags & GZ_FLAG_COMMENT) {
+	if (!gzfile_read_raw_ensure(gz, 1)) {
+	    rb_raise(cGzError, "unexpected end of file");
+	}
 	p = gzfile_read_raw_until_zero(gz, 0);
 	len = p - RSTRING_PTR(gz->z.input);
 	gz->comment = rb_str_new(RSTRING_PTR(gz->z.input), len);
@@ -2762,14 +2768,17 @@ gzfile_wrap(int argc, VALUE *argv, VALUE klass, int close_io_on_error)
 /*
  * Document-method: Zlib::GzipFile.wrap
  *
- * call-seq: Zlib::GzipFile.wrap(io) { |gz| ... }
+ * call-seq:
+ *   Zlib::GzipReader.wrap(io, ...) { |gz| ... }
+ *   Zlib::GzipWriter.wrap(io, ...) { |gz| ... }
  *
- * Creates a GzipFile object associated with +io+, and
- * executes the block with the newly created GzipFile object,
- * just like File.open. The GzipFile object will be closed
- * automatically after executing the block. If you want to keep
- * the associated IO object opening, you may call
- * +Zlib::GzipFile#finish+ method in the block.
+ * Creates a GzipReader or GzipWriter associated with +io+, passing in any
+ * necessary extra options, and executes the block with the newly created
+ * object just like File.open.
+ *
+ * The GzipFile object will be closed automatically after executing the block.
+ * If you want to keep the associated IO object open, you may call
+ * Zlib::GzipFile#finish method in the block.
  */
 static VALUE
 rb_gzfile_s_wrap(int argc, VALUE *argv, VALUE klass)
@@ -2960,7 +2969,7 @@ rb_gzfile_set_orig_name(VALUE obj, VALUE str)
 }
 
 /*
- * Document-method: Zlib::GzipFile#set_comment
+ * Document-method: Zlib::GzipFile#comment=
  *
  * Specify the comment (+str+) in the gzip header.
  */
@@ -3057,7 +3066,7 @@ rb_gzfile_sync(VALUE obj)
 }
 
 /*
- * Document-method: Zlib::GzipFile#set_sync
+ * Document-method: Zlib::GzipFile#sync=
  *
  * call-seq: sync = flag
  *
@@ -3187,12 +3196,17 @@ rb_gzwriter_s_open(int argc, VALUE *argv, VALUE klass)
 }
 
 /*
- * call-seq: Zlib::GzipWriter.new(io, level, strategy)
+ * call-seq:
+ *   Zlib::GzipWriter.new(io, level = nil, strategy = nil, options = {})
  *
  * Creates a GzipWriter object associated with +io+. +level+ and +strategy+
  * should be the same as the arguments of Zlib::Deflate.new.  The GzipWriter
- * object writes gzipped data to +io+.  At least, +io+ must respond to the
- * +write+ method that behaves same as write method in IO class.
+ * object writes gzipped data to +io+.  +io+ must respond to the
+ * +write+ method that behaves the same as IO#write.
+ *
+ * The +options+ hash may be used to set the encoding of the data.
+ * +:external_encoding+, +:internal_encoding+ and +:encoding+ may be set as in
+ * IO::new.
  */
 static VALUE
 rb_gzwriter_initialize(int argc, VALUE *argv, VALUE obj)
@@ -3388,11 +3402,16 @@ rb_gzreader_s_open(int argc, VALUE *argv, VALUE klass)
 /*
  * Document-method: Zlib::GzipReader.new
  *
- * call-seq: Zlib::GzipReader.new(io)
+ * call-seq:
+ *   Zlib::GzipReader.new(io, options = {})
  *
  * Creates a GzipReader object associated with +io+. The GzipReader object reads
- * gzipped data from +io+, and parses/decompresses them.  At least, +io+ must have
- * a +read+ method that behaves same as the +read+ method in IO class.
+ * gzipped data from +io+, and parses/decompresses it.  The +io+ must
+ * have a +read+ method that behaves same as the IO#read.
+ *
+ * The +options+ hash may be used to set the encoding of the data.
+ * +:external_encoding+, +:internal_encoding+ and +:encoding+ may be set as in
+ * IO::new.
  *
  * If the gzip file header is incorrect, raises an Zlib::GzipFile::Error
  * exception.

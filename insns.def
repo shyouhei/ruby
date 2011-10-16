@@ -1,4 +1,4 @@
-/** ##skip -*- mode:c; style:ruby -*-
+/** ##skip -*- mode:c; style:ruby; coding: utf-8 -*-
   insns.def - YARV instruction definitions
 
   $Author: $
@@ -47,7 +47,7 @@ nop
 /**
   @c variable
   @e get local variable value (which is pointed by idx).
-  @j idx Ç≈éwíËÇ≥ÇÍÇΩÉçÅ[ÉJÉãïœêîÇÉXÉ^ÉbÉNÇ…íuÇ≠ÅB
+  @j idx „ÅßÊåáÂÆö„Åï„Çå„Åü„É≠„Éº„Ç´„É´Â§âÊï∞„Çí„Çπ„Çø„ÉÉ„ÇØ„Å´ÁΩÆ„Åè„ÄÇ
  */
 DEFINE_INSN
 getlocal
@@ -61,7 +61,7 @@ getlocal
 /**
   @c variable
   @e set local variable value (which is pointed by idx) as val.
-  @j idx Ç≈éwíËÇ≥ÇÍÇΩÉçÅ[ÉJÉãïœêîÇ val Ç…ê›íËÇ∑ÇÈÅB
+  @j idx „ÅßÊåáÂÆö„Åï„Çå„Åü„É≠„Éº„Ç´„É´Â§âÊï∞„Çí val „Å´Ë®≠ÂÆö„Åô„Çã„ÄÇ
  */
 DEFINE_INSN
 setlocal
@@ -75,7 +75,7 @@ setlocal
 /**
   @c variable
   @e get special local variable ($~, $_, ..) value.
-  @j ì¡éÍÇ»ÉçÅ[ÉJÉãïœêîÅi$~, $_, ...ÅjÇÃílÇìæÇÈÅB
+  @j ÁâπÊÆä„Å™„É≠„Éº„Ç´„É´Â§âÊï∞Ôºà$~, $_, ...Ôºâ„ÅÆÂÄ§„ÇíÂæó„Çã„ÄÇ
  */
 DEFINE_INSN
 getspecial
@@ -89,7 +89,7 @@ getspecial
 /**
   @c variable
   @e set special local variable ($~, $_, ...) value as obj.
-  @j ì¡ï Ç»ÉçÅ[ÉJÉãïœêîÅi$~, $_, ...ÅjÇÃílÇê›íËÇ∑ÇÈÅB
+  @j ÁâπÂà•„Å™„É≠„Éº„Ç´„É´Â§âÊï∞Ôºà$~, $_, ...Ôºâ„ÅÆÂÄ§„ÇíË®≠ÂÆö„Åô„Çã„ÄÇ
  */
 DEFINE_INSN
 setspecial
@@ -104,8 +104,8 @@ setspecial
   @c variable
   @e get block local variable(which is pointed by idx and level).
      level means nest level of block, and specify how above this variable.
-  @j level, idx Ç≈éwíËÇ≥ÇÍÇΩÉuÉçÉbÉNÉçÅ[ÉJÉãïœêîÇÃílÇÉXÉ^ÉbÉNÇ…íuÇ≠ÅB
-     level ÇÕÉuÉçÉbÉNÇÃÉlÉXÉgÉåÉxÉãÇ≈ÅAâΩíiè„Ç©Çé¶Ç∑ÅB
+  @j level, idx „ÅßÊåáÂÆö„Åï„Çå„Åü„Éñ„É≠„ÉÉ„ÇØ„É≠„Éº„Ç´„É´Â§âÊï∞„ÅÆÂÄ§„Çí„Çπ„Çø„ÉÉ„ÇØ„Å´ÁΩÆ„Åè„ÄÇ
+     level „ÅØ„Éñ„É≠„ÉÉ„ÇØ„ÅÆ„Éç„Çπ„Éà„É¨„Éô„É´„Åß„ÄÅ‰ΩïÊÆµ‰∏ä„Åã„ÇíÁ§∫„Åô„ÄÇ
  */
 DEFINE_INSN
 getdynamic
@@ -125,8 +125,8 @@ getdynamic
   @c variable
   @e set block local variable(which is pointed by 'idx') as val.
      level means nest level of block, and specify how above this variable.
-  @j level, idx Ç≈éwíËÇ≥ÇÍÇΩÉuÉçÉbÉNÉçÅ[ÉJÉãïœêîÇÃílÇ val Ç…Ç∑ÇÈÅB
-     level ÇÕÉuÉçÉbÉNÇÃÉlÉXÉgÉåÉxÉãÇ≈ÅAâΩíiè„Ç©Çé¶Ç∑ÅB
+  @j level, idx „ÅßÊåáÂÆö„Åï„Çå„Åü„Éñ„É≠„ÉÉ„ÇØ„É≠„Éº„Ç´„É´Â§âÊï∞„ÅÆÂÄ§„Çí val „Å´„Åô„Çã„ÄÇ
+     level „ÅØ„Éñ„É≠„ÉÉ„ÇØ„ÅÆ„Éç„Çπ„Éà„É¨„Éô„É´„Åß„ÄÅ‰ΩïÊÆµ‰∏ä„Åã„ÇíÁ§∫„Åô„ÄÇ
  */
 DEFINE_INSN
 setdynamic
@@ -146,7 +146,7 @@ setdynamic
   @c variable
   @e get instance variable id of obj.
      if is_local is not 0, search as class local variable.
-  @j self ÇÃÉCÉìÉXÉ^ÉìÉXïœêî id ÇÃílÇìæÇÈÅB
+  @j self „ÅÆ„Ç§„É≥„Çπ„Çø„É≥„ÇπÂ§âÊï∞ id „ÅÆÂÄ§„ÇíÂæó„Çã„ÄÇ
  */
 DEFINE_INSN
 getinstancevariable
@@ -161,7 +161,7 @@ getinstancevariable
   @c variable
   @e set instance variable id of obj as val.
      if is_local is not 0, search as class local variable.
-  @j self ÇÃÉCÉìÉXÉ^ÉìÉXïœêî id Ç val Ç…Ç∑ÇÈÅB
+  @j self „ÅÆ„Ç§„É≥„Çπ„Çø„É≥„ÇπÂ§âÊï∞ id „Çí val „Å´„Åô„Çã„ÄÇ
  */
 DEFINE_INSN
 setinstancevariable
@@ -175,7 +175,7 @@ setinstancevariable
 /**
   @c variable
   @e get class variable id of klass as val.
-  @j åªç›ÇÃÉXÉRÅ[ÉvÇÃÉNÉâÉXïœêî id ÇÃílÇìæÇÈÅB
+  @j ÁèæÂú®„ÅÆ„Çπ„Ç≥„Éº„Éó„ÅÆ„ÇØ„É©„ÇπÂ§âÊï∞ id „ÅÆÂÄ§„ÇíÂæó„Çã„ÄÇ
  */
 DEFINE_INSN
 getclassvariable
@@ -190,7 +190,7 @@ getclassvariable
 /**
   @c variable
   @e set class variable id of klass as val.
-  @j klass ÇÃÉNÉâÉXïœêî id Ç val Ç…Ç∑ÇÈÅB
+  @j klass „ÅÆ„ÇØ„É©„ÇπÂ§âÊï∞ id „Çí val „Å´„Åô„Çã„ÄÇ
  */
 DEFINE_INSN
 setclassvariable
@@ -209,10 +209,10 @@ setclassvariable
    are searched in current scope. if klass is Qfalse, constant as
    top level constant. otherwise, get constant under klass
    class or module.
-  @j íËêî id ÇÃílÇìæÇÈÅB
-   klass Ç™ Qnil Ç»ÇÁÅAÇªÇÃÉXÉRÅ[ÉvÇ≈ìæÇÁÇÍÇÈíËêîÇÃílÇìæÇÈÅB
-   Qfalse Ç»ÇÁÅAÉgÉbÉvÉåÉxÉãÉXÉRÅ[ÉvÇìæÇÈÅB
-   ÇªÇÍà»äOÇ»ÇÁÅAklass ÉNÉâÉXÇÃâ∫ÇÃíËêîÇìæÇÈÅB
+  @j ÂÆöÊï∞ id „ÅÆÂÄ§„ÇíÂæó„Çã„ÄÇ
+   klass „Åå Qnil „Å™„Çâ„ÄÅ„Åù„ÅÆ„Çπ„Ç≥„Éº„Éó„ÅßÂæó„Çâ„Çå„ÇãÂÆöÊï∞„ÅÆÂÄ§„ÇíÂæó„Çã„ÄÇ
+   Qfalse „Å™„Çâ„ÄÅ„Éà„ÉÉ„Éó„É¨„Éô„É´„Çπ„Ç≥„Éº„Éó„ÇíÂæó„Çã„ÄÇ
+   „Åù„Çå‰ª•Â§ñ„Å™„Çâ„ÄÅklass „ÇØ„É©„Çπ„ÅÆ‰∏ã„ÅÆÂÆöÊï∞„ÇíÂæó„Çã„ÄÇ
  */
 DEFINE_INSN
 getconstant
@@ -231,10 +231,10 @@ getconstant
    top level constant. otherwise, set constant under klass
    class or module.
 
-  @j íËêî id ÇÃílÇ val Ç…Ç∑ÇÈÅB
-   klass Ç™ Qfalse Ç»ÇÁÅAÇªÇÃÉXÉRÅ[ÉvÇ≈ìæÇÁÇÍÇÈíËêî id ÇÃílÇê›íËÇ∑ÇÈÅB
-   Qnil Ç»ÇÁÅAÉgÉbÉvÉåÉxÉãÉXÉRÅ[ÉvÇÃílÇê›íËÇ∑ÇÈÅB
-   ÇªÇÍà»äOÇ»ÇÁÅAklass ÉNÉâÉXÇÃâ∫ÇÃíËêîÇê›íËÇ∑ÇÈÅB
+  @j ÂÆöÊï∞ id „ÅÆÂÄ§„Çí val „Å´„Åô„Çã„ÄÇ
+   klass „Åå Qfalse „Å™„Çâ„ÄÅ„Åù„ÅÆ„Çπ„Ç≥„Éº„Éó„ÅßÂæó„Çâ„Çå„ÇãÂÆöÊï∞ id „ÅÆÂÄ§„ÇíË®≠ÂÆö„Åô„Çã„ÄÇ
+   Qnil „Å™„Çâ„ÄÅ„Éà„ÉÉ„Éó„É¨„Éô„É´„Çπ„Ç≥„Éº„Éó„ÅÆÂÄ§„ÇíË®≠ÂÆö„Åô„Çã„ÄÇ
+   „Åù„Çå‰ª•Â§ñ„Å™„Çâ„ÄÅklass „ÇØ„É©„Çπ„ÅÆ‰∏ã„ÅÆÂÆöÊï∞„ÇíË®≠ÂÆö„Åô„Çã„ÄÇ
  */
 DEFINE_INSN
 setconstant
@@ -250,7 +250,7 @@ setconstant
 /**
   @c variable
   @e get global variable id.
-  @j ÉOÉçÅ[ÉoÉãïœêî id ÇÃílÇìæÇÈÅB
+  @j „Ç∞„É≠„Éº„Éê„É´Â§âÊï∞ id „ÅÆÂÄ§„ÇíÂæó„Çã„ÄÇ
  */
 DEFINE_INSN
 getglobal
@@ -264,7 +264,7 @@ getglobal
 /**
   @c variable
   @e set global variable id as val.
-  @j ÉOÉçÅ[ÉoÉãïœêî id ÇÃílÇê›íËÇ∑ÇÈÅB
+  @j „Ç∞„É≠„Éº„Éê„É´Â§âÊï∞ id „ÅÆÂÄ§„ÇíË®≠ÂÆö„Åô„Çã„ÄÇ
  */
 DEFINE_INSN
 setglobal
@@ -283,7 +283,7 @@ setglobal
 /**
   @c put
   @e put nil to stack.
-  @j ÉXÉ^ÉbÉNÇ… nil ÇÉvÉbÉVÉÖÇ∑ÇÈÅB
+  @j „Çπ„Çø„ÉÉ„ÇØ„Å´ nil „Çí„Éó„ÉÉ„Ç∑„É•„Åô„Çã„ÄÇ
  */
 DEFINE_INSN
 putnil
@@ -297,7 +297,7 @@ putnil
 /**
   @c put
   @e put self.
-  @j ÉXÉ^ÉbÉNÇ… self ÇÉvÉbÉVÉÖÇ∑ÇÈÅB
+  @j „Çπ„Çø„ÉÉ„ÇØ„Å´ self „Çí„Éó„ÉÉ„Ç∑„É•„Åô„Çã„ÄÇ
  */
 DEFINE_INSN
 putself
@@ -312,7 +312,7 @@ putself
   @c put
   @e put some object.
      i.e. Fixnum, true, false, nil, and so on.
-  @j ÉIÉuÉWÉFÉNÉg val ÇÉXÉ^ÉbÉNÇ…ÉvÉbÉVÉÖÇ∑ÇÈÅB
+  @j „Ç™„Éñ„Ç∏„Çß„ÇØ„Éà val „Çí„Çπ„Çø„ÉÉ„ÇØ„Å´„Éó„ÉÉ„Ç∑„É•„Åô„Çã„ÄÇ
      i.e. Fixnum, true, false, nil, and so on.
  */
 DEFINE_INSN
@@ -327,8 +327,8 @@ putobject
 /**
   @c put
   @e put special object.  "value_type" is for expansion.
-  @j ì¡ï Ç»ÉIÉuÉWÉFÉNÉg val ÇÉXÉ^ÉbÉNÇ…ÉvÉbÉVÉÖÇ∑ÇÈÅB
-     ÉIÉuÉWÉFÉNÉgÇÃéÌóﬁÇÕ value_type Ç…ÇÊÇÈÅD
+  @j ÁâπÂà•„Å™„Ç™„Éñ„Ç∏„Çß„ÇØ„Éà val „Çí„Çπ„Çø„ÉÉ„ÇØ„Å´„Éó„ÉÉ„Ç∑„É•„Åô„Çã„ÄÇ
+     „Ç™„Éñ„Ç∏„Çß„ÇØ„Éà„ÅÆÁ®ÆÈ°û„ÅØ value_type „Å´„Çà„ÇãÔºé
  */
 DEFINE_INSN
 putspecialobject
@@ -370,7 +370,7 @@ putiseq
 /**
   @c put
   @e put string val. string will be copied.
-  @j ï∂éöóÒÇÉRÉsÅ[ÇµÇƒÉXÉ^ÉbÉNÇ…ÉvÉbÉVÉÖÇ∑ÇÈÅB
+  @j ÊñáÂ≠óÂàó„Çí„Ç≥„Éî„Éº„Åó„Å¶„Çπ„Çø„ÉÉ„ÇØ„Å´„Éó„ÉÉ„Ç∑„É•„Åô„Çã„ÄÇ
  */
 DEFINE_INSN
 putstring
@@ -384,7 +384,7 @@ putstring
 /**
   @c put
   @e put concatenate strings
-  @j ÉXÉ^ÉbÉNÉgÉbÉvÇÃï∂éöóÒÇ n å¬òAåãÇµÅCåãâ ÇÉXÉ^ÉbÉNÇ…ÉvÉbÉVÉÖÇ∑ÇÈÅB
+  @j „Çπ„Çø„ÉÉ„ÇØ„Éà„ÉÉ„Éó„ÅÆÊñáÂ≠óÂàó„Çí n ÂÄãÈÄ£Áµê„ÅóÔºåÁµêÊûú„Çí„Çπ„Çø„ÉÉ„ÇØ„Å´„Éó„ÉÉ„Ç∑„É•„Åô„Çã„ÄÇ
  */
 DEFINE_INSN
 concatstrings
@@ -392,9 +392,9 @@ concatstrings
 (...)
 (VALUE val) // inc += 1 - num;
 {
-    rb_num_t i = num;
+    rb_num_t i = num - 1;
 
-    val = rb_str_new(0, 0);
+    val = rb_str_resurrect(TOPN(i));
     while (i-- > 0) {
 	const VALUE v = TOPN(i);
 	rb_str_append(val, v);
@@ -405,7 +405,7 @@ concatstrings
 /**
   @c put
   @e to_str
-  @j to_str ÇÃåãâ ÇÉXÉ^ÉbÉNÇ…ÉvÉbÉVÉÖÇ∑ÇÈÅB
+  @j to_str „ÅÆÁµêÊûú„Çí„Çπ„Çø„ÉÉ„ÇØ„Å´„Éó„ÉÉ„Ç∑„É•„Åô„Çã„ÄÇ
  */
 DEFINE_INSN
 tostring
@@ -419,8 +419,8 @@ tostring
 /**
   @c put
   @e to Regexp
-  @j ï∂éöóÒ str Çê≥ãKï\åªÇ…ÉRÉìÉpÉCÉãÇµÇƒÉXÉ^ÉbÉNÇ…ÉvÉbÉVÉÖÇ∑ÇÈÅB
-     ÉRÉìÉpÉCÉãéûÅCopt Çê≥ãKï\åªÇÃÉIÉvÉVÉáÉìÇ∆Ç∑ÇÈÅB
+  @j ÊñáÂ≠óÂàó str „ÇíÊ≠£Ë¶èË°®Áèæ„Å´„Ç≥„É≥„Éë„Ç§„É´„Åó„Å¶„Çπ„Çø„ÉÉ„ÇØ„Å´„Éó„ÉÉ„Ç∑„É•„Åô„Çã„ÄÇ
+     „Ç≥„É≥„Éë„Ç§„É´ÊôÇÔºåopt „ÇíÊ≠£Ë¶èË°®Áèæ„ÅÆ„Ç™„Éó„Ç∑„Éß„É≥„Å®„Åô„Çã„ÄÇ
  */
 DEFINE_INSN
 toregexp
@@ -442,7 +442,7 @@ toregexp
 /**
   @c put
   @e put new array.
-  @j êVÇµÇ¢îzóÒÇÉXÉ^ÉbÉNè„ÇÃ num å¬ÇÃílÇ≈èâä˙âªÇµÇƒê∂ê¨ÇµÉvÉbÉVÉÖÇ∑ÇÈÅB
+  @j Êñ∞„Åó„ÅÑÈÖçÂàó„Çí„Çπ„Çø„ÉÉ„ÇØ‰∏ä„ÅÆ num ÂÄã„ÅÆÂÄ§„ÅßÂàùÊúüÂåñ„Åó„Å¶ÁîüÊàê„Åó„Éó„ÉÉ„Ç∑„É•„Åô„Çã„ÄÇ
  */
 DEFINE_INSN
 newarray
@@ -457,7 +457,7 @@ newarray
 /**
   @c put
   @e dup array
-  @j îzóÒ ary Ç dup ÇµÇƒÉXÉ^ÉbÉNÇ…ÉvÉbÉVÉÖÇ∑ÇÈÅB
+  @j ÈÖçÂàó ary „Çí dup „Åó„Å¶„Çπ„Çø„ÉÉ„ÇØ„Å´„Éó„ÉÉ„Ç∑„É•„Åô„Çã„ÄÇ
  */
 DEFINE_INSN
 duparray
@@ -471,13 +471,13 @@ duparray
 /**
   @c put
   @e expand array to num objects.
-  @j ÉXÉ^ÉbÉNÉgÉbÉvÇÃÉIÉuÉWÉFÉNÉgÇ™îzóÒÇ≈Ç†ÇÍÇŒÅAÇªÇÍÇìWäJÇ∑ÇÈÅB
-     îzóÒÉIÉuÉWÉFÉNÉgÇÃóvëfêîÇ™ numà»â∫Ç»ÇÁÇŒÅAë„ÇÌÇËÇ… nil ÇêœÇﬁÅBnumà»è„Ç»ÇÁÅA
-     numà»è„ÇÃóvëfÇÕêÿÇËéÃÇƒÇÈÅB
-     îzóÒÉIÉuÉWÉFÉNÉgÇ≈Ç»ÇØÇÍÇŒÅAnum - 1 å¬ÇÃ nil ÇêœÇﬁÅB
-     Ç‡Çµ flag Ç™ê^Ç»ÇÁÅAécÇËóvëfÇÃîzóÒÇêœÇﬁ
-     flag: 0x01 - ç≈å„ÇîzóÒÇ…
-     flag: 0x02 - postarg óp
+  @j „Çπ„Çø„ÉÉ„ÇØ„Éà„ÉÉ„Éó„ÅÆ„Ç™„Éñ„Ç∏„Çß„ÇØ„Éà„ÅåÈÖçÂàó„Åß„ÅÇ„Çå„Å∞„ÄÅ„Åù„Çå„ÇíÂ±ïÈñã„Åô„Çã„ÄÇ
+     ÈÖçÂàó„Ç™„Éñ„Ç∏„Çß„ÇØ„Éà„ÅÆË¶ÅÁ¥†Êï∞„Åå num‰ª•‰∏ã„Å™„Çâ„Å∞„ÄÅ‰ª£„Çè„Çä„Å´ nil „ÇíÁ©ç„ÇÄ„ÄÇnum‰ª•‰∏ä„Å™„Çâ„ÄÅ
+     num‰ª•‰∏ä„ÅÆË¶ÅÁ¥†„ÅØÂàá„ÇäÊç®„Å¶„Çã„ÄÇ
+     ÈÖçÂàó„Ç™„Éñ„Ç∏„Çß„ÇØ„Éà„Åß„Å™„Åë„Çå„Å∞„ÄÅnum - 1 ÂÄã„ÅÆ nil „ÇíÁ©ç„ÇÄ„ÄÇ
+     „ÇÇ„Åó flag „ÅåÁúü„Å™„Çâ„ÄÅÊÆã„ÇäË¶ÅÁ¥†„ÅÆÈÖçÂàó„ÇíÁ©ç„ÇÄ
+     flag: 0x01 - ÊúÄÂæå„ÇíÈÖçÂàó„Å´
+     flag: 0x02 - postarg Áî®
      flag: 0x04 - reverse?
  */
 DEFINE_INSN
@@ -492,7 +492,7 @@ expandarray
 /**
   @c put
   @e concat two arrays
-  @j ìÒÇ¬ÇÃîzóÒ ary1, ary2 ÇòAåãÇµÉXÉ^ÉbÉNÇ÷ÉvÉbÉVÉÖÇ∑ÇÈÅB
+  @j ‰∫å„Å§„ÅÆÈÖçÂàó ary1, ary2 „ÇíÈÄ£Áµê„Åó„Çπ„Çø„ÉÉ„ÇØ„Å∏„Éó„ÉÉ„Ç∑„É•„Åô„Çã„ÄÇ
  */
 DEFINE_INSN
 concatarray
@@ -521,7 +521,7 @@ concatarray
 /**
   @c put
   @e splat array
-  @j îzóÒ ary Ç…ëŒÇµÇƒ to_a ÇåƒÇ—èoÇ∑ÅB
+  @j ÈÖçÂàó ary „Å´ÂØæ„Åó„Å¶ to_a „ÇíÂëº„Å≥Âá∫„Åô„ÄÇ
  */
 DEFINE_INSN
 splatarray
@@ -539,7 +539,7 @@ splatarray
 /**
   @c put
   @e check value is included in ary
-  @j îzóÒ ary Ç…óvëf obj Ç™ì¸Ç¡ÇƒÇ¢ÇÈÇ©Ç«Ç§Ç©É`ÉFÉbÉNÅBcase/when Ç≈óòópÇ∑ÇÈÅB
+  @j ÈÖçÂàó ary „Å´Ë¶ÅÁ¥† obj „ÅåÂÖ•„Å£„Å¶„ÅÑ„Çã„Åã„Å©„ÅÜ„Åã„ÉÅ„Çß„ÉÉ„ÇØ„ÄÇcase/when „ÅßÂà©Áî®„Åô„Çã„ÄÇ
  */
 DEFINE_INSN
 checkincludearray
@@ -579,8 +579,8 @@ checkincludearray
 /**
   @c put
   @e put new Hash.
-  @j êVÇµÇ¢ÉnÉbÉVÉÖÇÉXÉ^ÉbÉNÉgÉbÉvÇÃ n å¬Çèâä˙ílÇ∆ÇµÇƒê∂ê¨Ç∑ÇÈÅB
-     n ÇÕÉLÅ[Ç∆ílÇÃÉyÉAÇ»ÇÃÇ≈ 2 ÇÃî{êîÇ≈Ç»ÇØÇÍÇŒÇ»ÇÁÇ»Ç¢ÅB
+  @j Êñ∞„Åó„ÅÑ„Éè„ÉÉ„Ç∑„É•„Çí„Çπ„Çø„ÉÉ„ÇØ„Éà„ÉÉ„Éó„ÅÆ n ÂÄã„ÇíÂàùÊúüÂÄ§„Å®„Åó„Å¶ÁîüÊàê„Åô„Çã„ÄÇ
+     n „ÅØ„Ç≠„Éº„Å®ÂÄ§„ÅÆ„Éö„Ç¢„Å™„ÅÆ„Åß 2 „ÅÆÂÄçÊï∞„Åß„Å™„Åë„Çå„Å∞„Å™„Çâ„Å™„ÅÑ„ÄÇ
  */
 DEFINE_INSN
 newhash
@@ -602,7 +602,7 @@ newhash
 /**
   @c put
   @e put new Range object.(Range.new(low, high, flag))
-  @j Range.new(low, high, flag) ÇÃÇÊÇ§Ç»ÉIÉuÉWÉFÉNÉgÇê∂ê¨ÇµÉXÉ^ÉbÉNÇ…ÉvÉbÉVÉÖÇ∑ÇÈÅB
+  @j Range.new(low, high, flag) „ÅÆ„Çà„ÅÜ„Å™„Ç™„Éñ„Ç∏„Çß„ÇØ„Éà„ÇíÁîüÊàê„Åó„Çπ„Çø„ÉÉ„ÇØ„Å´„Éó„ÉÉ„Ç∑„É•„Åô„Çã„ÄÇ
  */
 DEFINE_INSN
 newrange
@@ -620,7 +620,7 @@ newrange
 /**
   @c stack
   @e pop from stack.
-  @j ÉXÉ^ÉbÉNÇ©ÇÁàÍÇ¬É|ÉbÉvÇ∑ÇÈÅB
+  @j „Çπ„Çø„ÉÉ„ÇØ„Åã„Çâ‰∏Ä„Å§„Éù„ÉÉ„Éó„Åô„Çã„ÄÇ
  */
 DEFINE_INSN
 pop
@@ -635,7 +635,7 @@ pop
 /**
   @c stack
   @e duplicate stack top.
-  @j ÉXÉ^ÉbÉNÉgÉbÉvÇÉRÉsÅ[ÇµÇƒÉXÉ^ÉbÉNÇ…ÉvÉbÉVÉÖÇ∑ÇÈÅB
+  @j „Çπ„Çø„ÉÉ„ÇØ„Éà„ÉÉ„Éó„Çí„Ç≥„Éî„Éº„Åó„Å¶„Çπ„Çø„ÉÉ„ÇØ„Å´„Éó„ÉÉ„Ç∑„É•„Åô„Çã„ÄÇ
  */
 DEFINE_INSN
 dup
@@ -649,7 +649,7 @@ dup
 /**
   @c stack
   @e duplicate stack top n elements
-  @j ÉXÉ^ÉbÉNÉgÉbÉvÇÃ n å¬ÇÉRÉsÅ[ÇµÇƒÉXÉ^ÉbÉNÇ…ÉvÉbÉVÉÖÇ∑ÇÈÅB
+  @j „Çπ„Çø„ÉÉ„ÇØ„Éà„ÉÉ„Éó„ÅÆ n ÂÄã„Çí„Ç≥„Éî„Éº„Åó„Å¶„Çπ„Çø„ÉÉ„ÇØ„Å´„Éó„ÉÉ„Ç∑„É•„Åô„Çã„ÄÇ
  */
 DEFINE_INSN
 dupn
@@ -669,7 +669,7 @@ dupn
 /**
   @c stack
   @e swap top 2 vals
-  @j ÉXÉ^ÉbÉNÉgÉbÉvÇÃ 2 Ç¬ÇÃílÇåä∑Ç∑ÇÈÅB
+  @j „Çπ„Çø„ÉÉ„ÇØ„Éà„ÉÉ„Éó„ÅÆ 2 „Å§„ÅÆÂÄ§„Çí‰∫§Êèõ„Åô„Çã„ÄÇ
  */
 DEFINE_INSN
 swap
@@ -683,7 +683,7 @@ swap
 /**
   @c stack
   @e for stack caching.
-  @j ÉXÉ^ÉbÉNÉLÉÉÉbÉVÉìÉOÇÃèÛë‘Çí≤êÆÇ∑ÇÈÇΩÇﬂÇ…ïKóvÇ»ñΩóﬂÅB
+  @j „Çπ„Çø„ÉÉ„ÇØ„Ç≠„É£„ÉÉ„Ç∑„É≥„Ç∞„ÅÆÁä∂ÊÖã„ÇíË™øÊï¥„Åô„Çã„Åü„ÇÅ„Å´ÂøÖË¶Å„Å™ÂëΩ‰ª§„ÄÇ
  */
 DEFINE_INSN
 reput
@@ -697,7 +697,7 @@ reput
 /**
   @c stack
   @e get nth stack value from stack top
-  @j ÉXÉ^ÉbÉNÉgÉbÉvÇ©ÇÁ n å¬ñ⁄ÇÉXÉ^ÉbÉNÇ…ÉvÉbÉVÉÖÇ∑ÇÈÅB
+  @j „Çπ„Çø„ÉÉ„ÇØ„Éà„ÉÉ„Éó„Åã„Çâ n ÂÄãÁõÆ„Çí„Çπ„Çø„ÉÉ„ÇØ„Å´„Éó„ÉÉ„Ç∑„É•„Åô„Çã„ÄÇ
  */
 DEFINE_INSN
 topn
@@ -711,7 +711,7 @@ topn
 /**
   @c stack
   @e set Nth stack entry to stack top
-  @j ÉXÉ^ÉbÉNÉgÉbÉvÇÃílÇ n å¬ñ⁄ÇÃÉXÉ^ÉbÉNÇ…ÉRÉsÅ[
+  @j „Çπ„Çø„ÉÉ„ÇØ„Éà„ÉÉ„Éó„ÅÆÂÄ§„Çí n ÂÄãÁõÆ„ÅÆ„Çπ„Çø„ÉÉ„ÇØ„Å´„Ç≥„Éî„Éº
  */
 DEFINE_INSN
 setn
@@ -725,7 +725,7 @@ setn
 /**
   @c stack
   @e empt current stack
-  @j current stack ÇãÛÇ…Ç∑ÇÈÅB
+  @j current stack „ÇíÁ©∫„Å´„Åô„Çã„ÄÇ
  */
 DEFINE_INSN
 adjuststack
@@ -744,7 +744,7 @@ adjuststack
 /**
   @c setting
   @e defined?
-  @j defined? ÇçsÇ§ÅB
+  @j defined? „ÇíË°å„ÅÜ„ÄÇ
  */
 DEFINE_INSN
 defined
@@ -773,11 +773,14 @@ defined
 	}
 	break;
       case DEFINED_CVAR:
-	klass = vm_get_cbase(GET_ISEQ(), GET_LFP(), GET_DFP());
+	{
+	NODE *cref = vm_get_cref(GET_ISEQ(), GET_LFP(), GET_DFP());
+	klass = vm_get_cvar_base(cref);
 	if (rb_cvar_defined(klass, SYM2ID(obj))) {
 	    expr_type = "class variable";
 	}
 	break;
+	}
       case DEFINED_CONST:
 	klass = v;
 	if (vm_get_ev_const(th, GET_ISEQ(), klass, SYM2ID(obj), 1)) {
@@ -859,7 +862,7 @@ defined
 /**
   @c setting
   @e trace
-  @j trace ópÇÃñΩóﬂÅB
+  @j trace Áî®„ÅÆÂëΩ‰ª§„ÄÇ
  */
 DEFINE_INSN
 trace
@@ -881,9 +884,9 @@ trace
   @e
    enter class definition scope. if super is Qfalse, and clsas
    "klass" is defined, it's redefine. otherwise, define "klass" class.
-  @j ÉNÉâÉXíËã`ÉXÉRÅ[ÉvÇ÷à⁄çsÇ∑ÇÈÅB
-   Ç‡Çµ super Ç™ Qfalse Ç≈ klassÉNÉâÉXÇ™íËã`Ç≥ÇÍÇƒÇ¢ÇÍÇŒçƒíËã`Ç≈Ç†ÇÈÅB
-   ÇªÇ§Ç≈Ç»ÇØÇÍÇŒÅAklass ÉNÉâÉXÇíËã`Ç∑ÇÈÅB
+  @j „ÇØ„É©„ÇπÂÆöÁæ©„Çπ„Ç≥„Éº„Éó„Å∏ÁßªË°å„Åô„Çã„ÄÇ
+   „ÇÇ„Åó super „Åå Qfalse „Åß klass„ÇØ„É©„Çπ„ÅåÂÆöÁæ©„Åï„Çå„Å¶„ÅÑ„Çå„Å∞ÂÜçÂÆöÁæ©„Åß„ÅÇ„Çã„ÄÇ
+   „Åù„ÅÜ„Åß„Å™„Åë„Çå„Å∞„ÄÅklass „ÇØ„É©„Çπ„ÇíÂÆöÁæ©„Åô„Çã„ÄÇ
  */
 DEFINE_INSN
 defineclass
@@ -906,9 +909,9 @@ defineclass
 
 	/* find klass */
 	rb_autoload_load(cbase, id);
-	if (rb_const_defined_at(cbase, id)) {
+	if ((klass = vm_search_const_defined_class(cbase, id)) != 0) {
 	    /* already exist */
-	    klass = define_type == 0 ? rb_public_const_get(cbase, id) : rb_const_get_at(cbase, id);
+	    klass = define_type == 0 ? rb_public_const_get_at(klass, id) : rb_const_get_at(klass, id);
 	    if (TYPE(klass) != T_CLASS) {
 		rb_raise(rb_eTypeError, "%s is not a class", rb_id2name(id));
 	    }
@@ -944,8 +947,8 @@ defineclass
 	vm_check_if_namespace(cbase);
 
 	/* find klass */
-	if (rb_const_defined_at(cbase, id)) {
-	    klass = define_type == 2 ? rb_public_const_get(cbase, id) : rb_const_get_at(cbase, id);
+	if ((klass = vm_search_const_defined_class(cbase, id)) != 0) {
+	    klass = define_type == 2 ? rb_public_const_get_at(klass, id) : rb_const_get_at(klass, id);
 	    /* already exist */
 	    if (TYPE(klass) != T_MODULE) {
 		rb_raise(rb_eTypeError, "%s is not a module", rb_id2name(id));
@@ -983,7 +986,7 @@ defineclass
 /**
   @c method/iterator
   @e obj.send(id, args..) # args.size => num
-  @j ÉÅÉ\ÉbÉhåƒÇ—èoÇµÇçsÇ§ÅB
+  @j „É°„ÇΩ„ÉÉ„ÉâÂëº„Å≥Âá∫„Åó„ÇíË°å„ÅÜ„ÄÇ
   obj.send(id, args..) # args.size => num
     flag & VM_CALL_ARGS_SPLAT_BIT    != 0 -> splat last arg
     flag & VM_CALL_ARGS_BLOCKARG_BIT != 0 -> Proc as Block
@@ -1015,9 +1018,9 @@ send
 /**
   @c method/iterator
   @e super(args) # args.size => num
-  @j super Çé¿çsÇ∑ÇÈÅB
+  @j super „ÇíÂÆüË°å„Åô„Çã„ÄÇ
      super(args) # args.size => num
-     flag ìôÉIÉyÉâÉìÉhÇÃà”ñ°ÇÕ send Ç∆ìØÇ∂ÅB
+     flag Á≠â„Ç™„Éö„É©„É≥„Éâ„ÅÆÊÑèÂë≥„ÅØ send „Å®Âêå„Åò„ÄÇ
  */
 DEFINE_INSN
 invokesuper
@@ -1051,7 +1054,7 @@ invokesuper
 /**
   @c method/iterator
   @e yield(args) # args.size => num, flag shows expand argument or not
-  @j yield Çé¿çsÇ∑ÇÈÅB
+  @j yield „ÇíÂÆüË°å„Åô„Çã„ÄÇ
      yield(args) # args.size => num
  */
 DEFINE_INSN
@@ -1070,7 +1073,7 @@ invokeblock
 /**
   @c method/iterator
   @e return from this scope.
-  @j Ç±ÇÃÉXÉRÅ[ÉvÇ©ÇÁî≤ÇØÇÈÅB
+  @j „Åì„ÅÆ„Çπ„Ç≥„Éº„Éó„Åã„ÇâÊäú„Åë„Çã„ÄÇ
  */
 DEFINE_INSN
 leave
@@ -1093,7 +1096,7 @@ leave
 /**
   @c method/iterator
   @e return from this vm loop
-  @j VM loop Ç©ÇÁî≤ÇØÇÈÅB
+  @j VM loop „Åã„ÇâÊäú„Åë„Çã„ÄÇ
  */
 DEFINE_INSN
 finish
@@ -1116,7 +1119,7 @@ finish
 /**
   @c exception
   @e longjump
-  @j ëÂàÊÉWÉÉÉìÉvÇçsÇ§ÅB
+  @j Â§ßÂüü„Ç∏„É£„É≥„Éó„ÇíË°å„ÅÜ„ÄÇ
  */
 DEFINE_INSN
 throw
@@ -1137,7 +1140,7 @@ throw
 /**
   @c jump
   @e set PC to (PC + dst).
-  @j PC Ç (PC + dst) Ç…Ç∑ÇÈÅB
+  @j PC „Çí (PC + dst) „Å´„Åô„Çã„ÄÇ
  */
 DEFINE_INSN
 jump
@@ -1152,7 +1155,7 @@ jump
 /**
   @c jump
   @e if val is not false or nil, set PC to (PC + dst).
-  @j Ç‡Çµ val Ç™ false Ç© nil Ç≈Ç»ÇØÇÍÇŒÅAPC Ç (PC + dst) Ç…Ç∑ÇÈÅB
+  @j „ÇÇ„Åó val „Åå false „Åã nil „Åß„Å™„Åë„Çå„Å∞„ÄÅPC „Çí (PC + dst) „Å´„Åô„Çã„ÄÇ
  */
 DEFINE_INSN
 branchif
@@ -1169,7 +1172,7 @@ branchif
 /**
   @c jump
   @e if val is false or nil, set PC to (PC + dst).
-  @j Ç‡Çµ val Ç™ false Ç© nil Ç»ÇÁÇŒÅAPC Ç (PC + dst) Ç…Ç∑ÇÈÅB
+  @j „ÇÇ„Åó val „Åå false „Åã nil „Å™„Çâ„Å∞„ÄÅPC „Çí (PC + dst) „Å´„Åô„Çã„ÄÇ
  */
 DEFINE_INSN
 branchunless
@@ -1191,7 +1194,7 @@ branchunless
 /**
   @c optimize
   @e inline cache
-  @j ÉCÉìÉâÉCÉìÉLÉÉÉbÉVÉÖÇ™óLå¯Ç»ÇÁÅAílÇÉXÉ^ÉbÉNÇ…ÉvÉbÉVÉÖÇµÇƒ dst Ç÷ÉWÉÉÉìÉvÇ∑ÇÈÅB
+  @j „Ç§„É≥„É©„Ç§„É≥„Ç≠„É£„ÉÉ„Ç∑„É•„ÅåÊúâÂäπ„Å™„Çâ„ÄÅÂÄ§„Çí„Çπ„Çø„ÉÉ„ÇØ„Å´„Éó„ÉÉ„Ç∑„É•„Åó„Å¶ dst „Å∏„Ç∏„É£„É≥„Éó„Åô„Çã„ÄÇ
  */
 DEFINE_INSN
 getinlinecache
@@ -1212,7 +1215,7 @@ getinlinecache
 /**
   @c optimize
   @e inline cache (once)
-  @j once Çé¿åªÇ∑ÇÈÅB
+  @j once „ÇíÂÆüÁèæ„Åô„Çã„ÄÇ
  */
 DEFINE_INSN
 onceinlinecache
@@ -1241,7 +1244,7 @@ onceinlinecache
 /**
   @c optimize
   @e set inline cache
-  @j ÉCÉìÉâÉCÉìÉLÉÉÉbÉVÉÖÇÃílÇê›íËÇ∑ÇÈÅB
+  @j „Ç§„É≥„É©„Ç§„É≥„Ç≠„É£„ÉÉ„Ç∑„É•„ÅÆÂÄ§„ÇíË®≠ÂÆö„Åô„Çã„ÄÇ
  */
 DEFINE_INSN
 setinlinecache
@@ -1260,7 +1263,7 @@ setinlinecache
 /**
   @c optimize
   @e case dispatcher
-  @j case ï∂Ç≈ÅAâ¬î\Ç»ÇÁï\à¯Ç´Ç≈ÉWÉÉÉìÉvÇ∑ÇÈÅB
+  @j case Êñá„Åß„ÄÅÂèØËÉΩ„Å™„ÇâË°®Âºï„Åç„Åß„Ç∏„É£„É≥„Éó„Åô„Çã„ÄÇ
  */
 DEFINE_INSN
 opt_case_dispatch
@@ -1279,7 +1282,11 @@ opt_case_dispatch
       case T_FIXNUM:
       case T_BIGNUM:
       case T_STRING:
-	if (BASIC_OP_UNREDEFINED_P(BOP_EQQ)) {
+	if (BASIC_OP_UNREDEFINED_P(BOP_EQQ,
+				   SYMBOL_REDEFINED_OP_FLAG |
+				   FIXNUM_REDEFINED_OP_FLAG |
+				   BIGNUM_REDEFINED_OP_FLAG |
+				   STRING_REDEFINED_OP_FLAG)) {
 	    st_data_t val;
 	    if (st_lookup(RHASH_TBL(hash), key, &val)) {
 		JUMP(FIX2INT((VALUE)val));
@@ -1297,7 +1304,7 @@ opt_case_dispatch
 /**
   @c optimize
   @e check environment
-  @j è´óàÇÃägí£ópÅB
+  @j Â∞ÜÊù•„ÅÆÊã°ÂºµÁî®„ÄÇ
  */
 DEFINE_INSN
 opt_checkenv
@@ -1319,7 +1326,7 @@ opt_checkenv
 /**
   @c optimize
   @e optimized X+Y.
-  @j ç≈ìKâªÇ≥ÇÍÇΩ X+YÅB
+  @j ÊúÄÈÅ©Âåñ„Åï„Çå„Åü X+Y„ÄÇ
  */
 DEFINE_INSN
 opt_plus
@@ -1332,7 +1339,7 @@ opt_plus
     }
 #if 1
     else if (FIXNUM_2_P(recv, obj) &&
-	     BASIC_OP_UNREDEFINED_P(BOP_PLUS)) {
+	     BASIC_OP_UNREDEFINED_P(BOP_PLUS,FIXNUM_REDEFINED_OP_FLAG)) {
 	/* fixnum + fixnum */
 #ifndef LONG_LONG_VALUE
 	val = (recv + (obj & (~1)));
@@ -1362,7 +1369,7 @@ opt_plus
 #if 1
 	else if (HEAP_CLASS_OF(recv) == rb_cFloat &&
 		 HEAP_CLASS_OF(obj) == rb_cFloat &&
-		 BASIC_OP_UNREDEFINED_P(BOP_PLUS)) {
+		 BASIC_OP_UNREDEFINED_P(BOP_PLUS, FLOAT_REDEFINED_OP_FLAG)) {
 	    val = DBL2NUM(RFLOAT_VALUE(recv) + RFLOAT_VALUE(obj));
 	}
 #endif
@@ -1370,13 +1377,13 @@ opt_plus
 #if 1
 	else if (HEAP_CLASS_OF(recv) == rb_cString &&
 		 HEAP_CLASS_OF(obj) == rb_cString &&
-		 BASIC_OP_UNREDEFINED_P(BOP_PLUS)) {
+		 BASIC_OP_UNREDEFINED_P(BOP_PLUS, STRING_REDEFINED_OP_FLAG)) {
 	    val = rb_str_plus(recv, obj);
 	}
 #endif
 #if 1
 	else if (HEAP_CLASS_OF(recv) == rb_cArray &&
-		 BASIC_OP_UNREDEFINED_P(BOP_PLUS)) {
+		 BASIC_OP_UNREDEFINED_P(BOP_PLUS, ARRAY_REDEFINED_OP_FLAG)) {
 	    val = rb_ary_plus(recv, obj);
 	}
 #endif
@@ -1395,7 +1402,7 @@ opt_plus
 /**
   @c optimize
   @e optimized X-Y.
-  @j ç≈ìKâªÇ≥ÇÍÇΩ X-YÅB
+  @j ÊúÄÈÅ©Âåñ„Åï„Çå„Åü X-Y„ÄÇ
  */
 DEFINE_INSN
 opt_minus
@@ -1404,7 +1411,7 @@ opt_minus
 (VALUE val)
 {
     if (FIXNUM_2_P(recv, obj) &&
-	BASIC_OP_UNREDEFINED_P(BOP_MINUS)) {
+	BASIC_OP_UNREDEFINED_P(BOP_MINUS, FIXNUM_REDEFINED_OP_FLAG)) {
 	long a, b, c;
 
 	a = FIX2LONG(recv);
@@ -1424,7 +1431,7 @@ opt_minus
 #if 1
 	else if (HEAP_CLASS_OF(recv) == rb_cFloat &&
 		 HEAP_CLASS_OF(obj) == rb_cFloat  &&
-		 BASIC_OP_UNREDEFINED_P(BOP_MINUS)) {
+		 BASIC_OP_UNREDEFINED_P(BOP_MINUS, FLOAT_REDEFINED_OP_FLAG)) {
 	    val = DBL2NUM(RFLOAT_VALUE(recv) - RFLOAT_VALUE(obj));
 	}
 #endif
@@ -1444,7 +1451,7 @@ opt_minus
 /**
   @c optimize
   @e optimized X*Y.
-  @j ç≈ìKâªÇ≥ÇÍÇΩ X*YÅB
+  @j ÊúÄÈÅ©Âåñ„Åï„Çå„Åü X*Y„ÄÇ
  */
 DEFINE_INSN
 opt_mult
@@ -1453,7 +1460,7 @@ opt_mult
 (VALUE val)
 {
     if (FIXNUM_2_P(recv, obj) &&
-	BASIC_OP_UNREDEFINED_P(BOP_MULT)) {
+	BASIC_OP_UNREDEFINED_P(BOP_MULT, FIXNUM_REDEFINED_OP_FLAG)) {
 	long a, b;
 
 	a = FIX2LONG(recv);
@@ -1479,7 +1486,7 @@ opt_mult
 #if 1
 	else if (HEAP_CLASS_OF(recv) == rb_cFloat &&
 		 HEAP_CLASS_OF(obj) == rb_cFloat  &&
-		 BASIC_OP_UNREDEFINED_P(BOP_MULT)) {
+		 BASIC_OP_UNREDEFINED_P(BOP_MULT, FLOAT_REDEFINED_OP_FLAG)) {
 	    val = DBL2NUM(RFLOAT_VALUE(recv) * RFLOAT_VALUE(obj));
 	}
 #endif
@@ -1498,7 +1505,7 @@ opt_mult
 /**
   @c optimize
   @e optimized X/Y.
-  @j ç≈ìKâªÇ≥ÇÍÇΩ X/YÅB
+  @j ÊúÄÈÅ©Âåñ„Åï„Çå„Åü X/Y„ÄÇ
  */
 DEFINE_INSN
 opt_div
@@ -1507,7 +1514,7 @@ opt_div
 (VALUE val)
 {
     if (FIXNUM_2_P(recv, obj) &&
-	BASIC_OP_UNREDEFINED_P(BOP_DIV)) {
+	BASIC_OP_UNREDEFINED_P(BOP_DIV, FIXNUM_REDEFINED_OP_FLAG)) {
 	long x, y, div;
 
 	x = FIX2LONG(recv);
@@ -1543,7 +1550,7 @@ opt_div
 #if 1
 	else if (HEAP_CLASS_OF(recv) == rb_cFloat &&
 		 HEAP_CLASS_OF(obj) == rb_cFloat  &&
-		 BASIC_OP_UNREDEFINED_P(BOP_DIV)) {
+		 BASIC_OP_UNREDEFINED_P(BOP_DIV, FLOAT_REDEFINED_OP_FLAG)) {
 	    val = DBL2NUM(RFLOAT_VALUE(recv) / RFLOAT_VALUE(obj));
 	}
 #endif
@@ -1562,7 +1569,7 @@ opt_div
 /**
   @c optimize
   @e optimized X%Y.
-  @j ç≈ìKâªÇ≥ÇÍÇΩ X%YÅB
+  @j ÊúÄÈÅ©Âåñ„Åï„Çå„Åü X%Y„ÄÇ
  */
 DEFINE_INSN
 opt_mod
@@ -1571,7 +1578,7 @@ opt_mod
 (VALUE val)
 {
     if (FIXNUM_2_P(recv, obj) &&
-	BASIC_OP_UNREDEFINED_P(BOP_MOD)) {
+	BASIC_OP_UNREDEFINED_P(BOP_MOD, FIXNUM_REDEFINED_OP_FLAG )) {
 	long x, y, mod;
 
 	x = FIX2LONG(recv);
@@ -1607,7 +1614,7 @@ opt_mod
 	}
 	else if (HEAP_CLASS_OF(recv) == rb_cFloat &&
 		 HEAP_CLASS_OF(obj) == rb_cFloat &&
-		 BASIC_OP_UNREDEFINED_P(BOP_MOD)) {
+		 BASIC_OP_UNREDEFINED_P(BOP_MOD, FLOAT_REDEFINED_OP_FLAG)) {
 	    double x = RFLOAT_VALUE(recv);
 	    double y = RFLOAT_VALUE(obj);
 	    double div, mod;
@@ -1641,7 +1648,7 @@ opt_mod
 /**
   @c optimize
   @e optimized X==Y.
-  @j ç≈ìKâªÇ≥ÇÍÇΩ X==YÅB
+  @j ÊúÄÈÅ©Âåñ„Åï„Çå„Åü X==Y„ÄÇ
  */
 DEFINE_INSN
 opt_eq
@@ -1662,7 +1669,7 @@ opt_eq
 /**
   @c optimize
   @e optimized X!=Y.
-  @j ç≈ìKâªÇ≥ÇÍÇΩ X!=YÅB
+  @j ÊúÄÈÅ©Âåñ„Åï„Çå„Åü X!=Y„ÄÇ
  */
 DEFINE_INSN
 opt_neq
@@ -1693,7 +1700,7 @@ opt_neq
 /**
   @c optimize
   @e optimized X<Y.
-  @j ç≈ìKâªÇ≥ÇÍÇΩ X<YÅB
+  @j ÊúÄÈÅ©Âåñ„Åï„Çå„Åü X<Y„ÄÇ
  */
 DEFINE_INSN
 opt_lt
@@ -1702,7 +1709,7 @@ opt_lt
 (VALUE val)
 {
     if (FIXNUM_2_P(recv, obj) &&
-	BASIC_OP_UNREDEFINED_P(BOP_LT)) {
+	BASIC_OP_UNREDEFINED_P(BOP_LT, FIXNUM_REDEFINED_OP_FLAG)) {
 	SIGNED_VALUE a = recv, b = obj;
 
 	if (a < b) {
@@ -1718,7 +1725,7 @@ opt_lt
 #if 1
 	else if (HEAP_CLASS_OF(recv) == rb_cFloat &&
 		 HEAP_CLASS_OF(obj) == rb_cFloat  &&
-		 BASIC_OP_UNREDEFINED_P(BOP_LT)) {
+		 BASIC_OP_UNREDEFINED_P(BOP_LT, FLOAT_REDEFINED_OP_FLAG)) {
 	    double a = RFLOAT_VALUE(recv);
 	    double b = RFLOAT_VALUE(obj);
 #if defined(_MSC_VER) && _MSC_VER < 1300
@@ -1743,7 +1750,7 @@ opt_lt
 /**
   @c optimize
   @e optimized X<=Y.
-  @j ç≈ìKâªÇ≥ÇÍÇΩ X<=YÅB
+  @j ÊúÄÈÅ©Âåñ„Åï„Çå„Åü X<=Y„ÄÇ
  */
 DEFINE_INSN
 opt_le
@@ -1752,7 +1759,7 @@ opt_le
 (VALUE val)
 {
     if (FIXNUM_2_P(recv, obj) &&
-	BASIC_OP_UNREDEFINED_P(BOP_LE)) {
+	BASIC_OP_UNREDEFINED_P(BOP_LE, FIXNUM_REDEFINED_OP_FLAG)) {
 	SIGNED_VALUE a = recv, b = obj;
 
 	if (a <= b) {
@@ -1773,7 +1780,7 @@ opt_le
 /**
   @c optimize
   @e optimized X>Y.
-  @j ç≈ìKâªÇ≥ÇÍÇΩ X>YÅB
+  @j ÊúÄÈÅ©Âåñ„Åï„Çå„Åü X>Y„ÄÇ
  */
 DEFINE_INSN
 opt_gt
@@ -1782,7 +1789,7 @@ opt_gt
 (VALUE val)
 {
     if (FIXNUM_2_P(recv, obj) &&
-	BASIC_OP_UNREDEFINED_P(BOP_GT)) {
+	BASIC_OP_UNREDEFINED_P(BOP_GT, FIXNUM_REDEFINED_OP_FLAG)) {
 	SIGNED_VALUE a = recv, b = obj;
 
 	if (a > b) {
@@ -1798,7 +1805,7 @@ opt_gt
 #if 1
 	else if (HEAP_CLASS_OF(recv) == rb_cFloat &&
 		 HEAP_CLASS_OF(obj) == rb_cFloat  &&
-		 BASIC_OP_UNREDEFINED_P(BOP_GT)) {
+		 BASIC_OP_UNREDEFINED_P(BOP_GT, FLOAT_REDEFINED_OP_FLAG)) {
 	    double a = RFLOAT_VALUE(recv);
 	    double b = RFLOAT_VALUE(obj);
 #if defined(_MSC_VER) && _MSC_VER < 1300
@@ -1823,7 +1830,7 @@ opt_gt
 /**
   @c optimize
   @e optimized X>=Y.
-  @j ç≈ìKâªÇ≥ÇÍÇΩ X>=YÅB
+  @j ÊúÄÈÅ©Âåñ„Åï„Çå„Åü X>=Y„ÄÇ
  */
 DEFINE_INSN
 opt_ge
@@ -1832,7 +1839,7 @@ opt_ge
 (VALUE val)
 {
     if (FIXNUM_2_P(recv, obj) &&
-	BASIC_OP_UNREDEFINED_P(BOP_GE)) {
+	BASIC_OP_UNREDEFINED_P(BOP_GE, FIXNUM_REDEFINED_OP_FLAG)) {
 	SIGNED_VALUE a = recv, b = obj;
 
 	if (a >= b) {
@@ -1852,7 +1859,7 @@ opt_ge
 /**
   @c optimize
   @e <<
-  @j ç≈ìKâªÇ≥ÇÍÇΩ X<<YÅB
+  @j ÊúÄÈÅ©Âåñ„Åï„Çå„Åü X<<Y„ÄÇ
  */
 DEFINE_INSN
 opt_ltlt
@@ -1864,11 +1871,11 @@ opt_ltlt
 	if (0) {
 	}
 	else if (HEAP_CLASS_OF(recv) == rb_cString &&
-		 BASIC_OP_UNREDEFINED_P(BOP_LTLT)) {
+		 BASIC_OP_UNREDEFINED_P(BOP_LTLT, STRING_REDEFINED_OP_FLAG)) {
 	    val = rb_str_concat(recv, obj);
 	}
 	else if (HEAP_CLASS_OF(recv) == rb_cArray &&
-		 BASIC_OP_UNREDEFINED_P(BOP_LTLT)) {
+		 BASIC_OP_UNREDEFINED_P(BOP_LTLT, ARRAY_REDEFINED_OP_FLAG)) {
 	    val = rb_ary_push(recv, obj);
 	}
 	else {
@@ -1886,7 +1893,7 @@ opt_ltlt
 /**
   @c optimize
   @e []
-  @j ç≈ìKâªÇ≥ÇÍÇΩ recv[obj]ÅB
+  @j ÊúÄÈÅ©Âåñ„Åï„Çå„Åü recv[obj]„ÄÇ
  */
 DEFINE_INSN
 opt_aref
@@ -1894,11 +1901,11 @@ opt_aref
 (VALUE recv, VALUE obj)
 (VALUE val)
 {
-    if (!SPECIAL_CONST_P(recv) && BASIC_OP_UNREDEFINED_P(BOP_AREF)) {
-	if (HEAP_CLASS_OF(recv) == rb_cArray && FIXNUM_P(obj)) {
+    if (!SPECIAL_CONST_P(recv)) {
+	if (HEAP_CLASS_OF(recv) == rb_cArray && BASIC_OP_UNREDEFINED_P(BOP_AREF, ARRAY_REDEFINED_OP_FLAG) && FIXNUM_P(obj)) {
 	    val = rb_ary_entry(recv, FIX2LONG(obj));
 	}
-	else if (HEAP_CLASS_OF(recv) == rb_cHash) {
+	else if (HEAP_CLASS_OF(recv) == rb_cHash && BASIC_OP_UNREDEFINED_P(BOP_AREF, HASH_REDEFINED_OP_FLAG)) {
 	    val = rb_hash_aref(recv, obj);
 	}
 	else {
@@ -1916,7 +1923,7 @@ opt_aref
 /**
   @c optimize
   @e recv[obj] = set
-  @j ç≈ìKâªÇ≥ÇÍÇΩ recv[obj] = setÅB
+  @j ÊúÄÈÅ©Âåñ„Åï„Çå„Åü recv[obj] = set„ÄÇ
  */
 DEFINE_INSN
 opt_aset
@@ -1924,13 +1931,12 @@ opt_aset
 (VALUE recv, VALUE obj, VALUE set)
 (VALUE val)
 {
-    if (!SPECIAL_CONST_P(recv) &&
-	BASIC_OP_UNREDEFINED_P(BOP_ASET)) {
-	if (HEAP_CLASS_OF(recv) == rb_cArray && FIXNUM_P(obj)) {
+    if (!SPECIAL_CONST_P(recv)) {
+	if (HEAP_CLASS_OF(recv) == rb_cArray && BASIC_OP_UNREDEFINED_P(BOP_ASET, ARRAY_REDEFINED_OP_FLAG) && FIXNUM_P(obj)) {
 	    rb_ary_store(recv, FIX2LONG(obj), set);
 	    val = set;
 	}
-	else if (HEAP_CLASS_OF(recv) == rb_cHash) {
+	else if (HEAP_CLASS_OF(recv) == rb_cHash && BASIC_OP_UNREDEFINED_P(BOP_ASET, HASH_REDEFINED_OP_FLAG)) {
 	    rb_hash_aset(recv, obj, set);
 	    val = set;
 	}
@@ -1950,7 +1956,7 @@ opt_aset
 /**
   @c optimize
   @e optimized length
-  @j ç≈ìKâªÇ≥ÇÍÇΩ recv.length()ÅB
+  @j ÊúÄÈÅ©Âåñ„Åï„Çå„Åü recv.length()„ÄÇ
  */
 DEFINE_INSN
 opt_length
@@ -1958,15 +1964,17 @@ opt_length
 (VALUE recv)
 (VALUE val)
 {
-    if (LIKELY(!SPECIAL_CONST_P(recv) &&
-	       BASIC_OP_UNREDEFINED_P(BOP_LENGTH))) {
-	if (HEAP_CLASS_OF(recv) == rb_cString) {
+    if (!SPECIAL_CONST_P(recv)) {
+	if (HEAP_CLASS_OF(recv) == rb_cString &&
+	    BASIC_OP_UNREDEFINED_P(BOP_LENGTH, STRING_REDEFINED_OP_FLAG)) {
 	    val = rb_str_length(recv);
 	}
-	else if (HEAP_CLASS_OF(recv) == rb_cArray) {
+	else if (HEAP_CLASS_OF(recv) == rb_cArray &&
+		 BASIC_OP_UNREDEFINED_P(BOP_LENGTH, ARRAY_REDEFINED_OP_FLAG)) {
 	    val = LONG2NUM(RARRAY_LEN(recv));
 	}
-	else if (HEAP_CLASS_OF(recv) == rb_cHash) {
+	else if (HEAP_CLASS_OF(recv) == rb_cHash &&
+		 BASIC_OP_UNREDEFINED_P(BOP_LENGTH, HASH_REDEFINED_OP_FLAG)) {
 	    val = INT2FIX(RHASH_SIZE(recv));
 	}
 	else {
@@ -1983,7 +1991,7 @@ opt_length
 /**
   @c optimize
   @e optimized size
-  @j ç≈ìKâªÇ≥ÇÍÇΩ recv.size()ÅB
+  @j ÊúÄÈÅ©Âåñ„Åï„Çå„Åü recv.size()„ÄÇ
  */
 DEFINE_INSN
 opt_size
@@ -1991,15 +1999,17 @@ opt_size
 (VALUE recv)
 (VALUE val)
 {
-    if (LIKELY(BASIC_OP_UNREDEFINED_P(BOP_SIZE) &&
-	       !SPECIAL_CONST_P(recv))) {
-	if (HEAP_CLASS_OF(recv) == rb_cString) {
+    if (!SPECIAL_CONST_P(recv)) {
+	if (HEAP_CLASS_OF(recv) == rb_cString &&
+	    BASIC_OP_UNREDEFINED_P(BOP_SIZE, STRING_REDEFINED_OP_FLAG)) {
 	    val = rb_str_length(recv);
 	}
-	else if (HEAP_CLASS_OF(recv) == rb_cArray) {
+	else if (HEAP_CLASS_OF(recv) == rb_cArray &&
+		 BASIC_OP_UNREDEFINED_P(BOP_SIZE, ARRAY_REDEFINED_OP_FLAG)) {
 	    val = LONG2NUM(RARRAY_LEN(recv));
 	}
-	else if (HEAP_CLASS_OF(recv) == rb_cHash) {
+	else if (HEAP_CLASS_OF(recv) == rb_cHash &&
+		 BASIC_OP_UNREDEFINED_P(BOP_SIZE, HASH_REDEFINED_OP_FLAG)) {
 	    val = INT2FIX(RHASH_SIZE(recv));
 	}
 	else {
@@ -2016,7 +2026,7 @@ opt_size
 /**
   @c optimize
   @e optimized succ
-  @j ç≈ìKâªÇ≥ÇÍÇΩ recv.succ()ÅB
+  @j ÊúÄÈÅ©Âåñ„Åï„Çå„Åü recv.succ()„ÄÇ
  */
 DEFINE_INSN
 opt_succ
@@ -2026,7 +2036,7 @@ opt_succ
 {
     if (SPECIAL_CONST_P(recv)) {
 	if (FIXNUM_P(recv) &&
-	    BASIC_OP_UNREDEFINED_P(BOP_SUCC)) {
+	    BASIC_OP_UNREDEFINED_P(BOP_SUCC, FIXNUM_REDEFINED_OP_FLAG)) {
 	    const VALUE obj = INT2FIX(1);
 	    /* fixnum + INT2FIX(1) */
 	    val = (recv + (obj & (~1)));
@@ -2041,11 +2051,11 @@ opt_succ
     }
     else {
 	if (HEAP_CLASS_OF(recv) == rb_cString &&
-	    BASIC_OP_UNREDEFINED_P(BOP_SUCC)) {
+	    BASIC_OP_UNREDEFINED_P(BOP_SUCC, STRING_REDEFINED_OP_FLAG)) {
 	    val = rb_str_succ(recv);
 	}
 	else if (HEAP_CLASS_OF(recv) == rb_cTime &&
-		 BASIC_OP_UNREDEFINED_P(BOP_SUCC)) {
+		 BASIC_OP_UNREDEFINED_P(BOP_SUCC, TIME_REDEFINED_OP_FLAG)) {
 	    val = rb_time_succ(recv);
 	}
 	else
@@ -2063,7 +2073,7 @@ opt_succ
 /**
   @c optimize
   @e optimized not
-  @j ç≈ìKâªÇ≥ÇÍÇΩ recv.!()ÅB
+  @j ÊúÄÈÅ©Âåñ„Åï„Çå„Åü recv.!()„ÄÇ
  */
 DEFINE_INSN
 opt_not
@@ -2087,7 +2097,7 @@ opt_not
 /**
   @c optimize
   @e optimized regexp match
-  @j ç≈ìKâªÇ≥ÇÍÇΩê≥ãKï\åªÉ}ÉbÉ`ÅB
+  @j ÊúÄÈÅ©Âåñ„Åï„Çå„ÅüÊ≠£Ë¶èË°®Áèæ„Éû„ÉÉ„ÉÅ„ÄÇ
  */
 DEFINE_INSN
 opt_regexpmatch1
@@ -2101,7 +2111,7 @@ opt_regexpmatch1
 /**
   @c optimize
   @e optimized regexp match 2
-  @j ç≈ìKâªÇ≥ÇÍÇΩê≥ãKï\åªÉ}ÉbÉ` 2
+  @j ÊúÄÈÅ©Âåñ„Åï„Çå„ÅüÊ≠£Ë¶èË°®Áèæ„Éû„ÉÉ„ÉÅ 2
  */
 DEFINE_INSN
 opt_regexpmatch2
@@ -2120,7 +2130,7 @@ opt_regexpmatch2
 /**
   @c optimize
   @e call native compiled method
-  @j ÉlÉCÉeÉBÉuÉRÉìÉpÉCÉãÇµÇΩÉÅÉ\ÉbÉhÇãNìÆÅB
+  @j „Éç„Ç§„ÉÜ„Ç£„Éñ„Ç≥„É≥„Éë„Ç§„É´„Åó„Åü„É°„ÇΩ„ÉÉ„Éâ„ÇíËµ∑Âãï„ÄÇ
  */
 DEFINE_INSN
 opt_call_c_function
@@ -2157,7 +2167,7 @@ bitblt
 /**
   @c joke
   @e The Answer to Life, the Universe, and Everything
-  @j êlê∂ÅAâFíàÅAÇ∑Ç◊ÇƒÇÃìöÇ¶ÅB
+  @j ‰∫∫Áîü„ÄÅÂÆáÂÆô„ÄÅ„Åô„Åπ„Å¶„ÅÆÁ≠î„Åà„ÄÇ
  */
 DEFINE_INSN
 answer

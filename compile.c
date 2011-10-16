@@ -10,6 +10,7 @@
 **********************************************************************/
 
 #include "ruby/ruby.h"
+#include "internal.h"
 #include <math.h>
 
 #define USE_INSN_STACK_INCREASE 1
@@ -50,7 +51,7 @@ typedef struct iseq_label_data {
 typedef struct iseq_insn_data {
     LINK_ELEMENT link;
     enum ruby_vminsn_type insn_id;
-    int line_no;
+    unsigned int line_no;
     int operand_size;
     int sc_state;
     VALUE *operands;
@@ -96,8 +97,6 @@ struct iseq_compile_data_ensure_node_stack {
 #else
 #define compile_debug iseq->compile_data->option->debug_level
 #endif
-
-NORETURN(PRINTF_ARGS(void rb_compile_bug(const char*, int, const char*, ...), 3, 4));
 
 #if CPDEBUG
 
@@ -155,7 +154,6 @@ r_value(VALUE value)
 #endif
 
 #if CPDEBUG > 1 || CPDEBUG < 0
-PRINTF_ARGS(void ruby_debug_printf(const char*, ...), 1, 2);
 #define debugs if (compile_debug_print_indent(1)) ruby_debug_printf
 #define debug_compile(msg, v) ((void)(compile_debug_print_indent(1) && fputs((msg), stderr)), (v))
 #else
@@ -539,7 +537,6 @@ int
 rb_iseq_translate_threaded_code(rb_iseq_t *iseq)
 {
 #if OPT_DIRECT_THREADED_CODE || OPT_CALL_THREADED_CODE
-    extern const void **rb_vm_get_insns_address_table(void);
     const void * const *table = rb_vm_get_insns_address_table();
     unsigned long i;
 
@@ -1266,7 +1263,7 @@ static st_index_t
 cdhash_hash(VALUE a)
 {
     if (SPECIAL_CONST_P(a)) return (st_index_t)a;
-    if (TYPE(a) == T_STRING) return rb_str_hash(a);
+    if (RB_TYPE_P(a, T_STRING)) return rb_str_hash(a);
     {
 	VALUE hval = rb_hash(a);
 	return (st_index_t)FIX2LONG(hval);
@@ -1286,7 +1283,8 @@ iseq_set_sequence(rb_iseq_t *iseq, LINK_ANCHOR *anchor)
 {
     LABEL *lobj;
     INSN *iobj;
-    struct iseq_insn_info_entry *insn_info_table;
+    struct iseq_line_info_entry *line_info_table;
+    unsigned int last_line = 0;
     LINK_ELEMENT *list;
     VALUE *generated_iseq;
 
@@ -1338,7 +1336,7 @@ iseq_set_sequence(rb_iseq_t *iseq, LINK_ANCHOR *anchor)
 
     /* make instruction sequence */
     generated_iseq = ALLOC_N(VALUE, pos);
-    insn_info_table = ALLOC_N(struct iseq_insn_info_entry, k);
+    line_info_table = ALLOC_N(struct iseq_line_info_entry, k);
     iseq->ic_entries = ALLOC_N(struct iseq_inline_cache_entry, iseq->ic_size);
     MEMZERO(iseq->ic_entries, struct iseq_inline_cache_entry, iseq->ic_size);
 
@@ -1376,7 +1374,7 @@ iseq_set_sequence(rb_iseq_t *iseq, LINK_ANCHOR *anchor)
 				     "operand size miss! (%d for %d)",
 				     iobj->operand_size, len - 1);
 		    xfree(generated_iseq);
-		    xfree(insn_info_table);
+		    xfree(line_info_table);
 		    return 0;
 		}
 
@@ -1479,15 +1477,16 @@ iseq_set_sequence(rb_iseq_t *iseq, LINK_ANCHOR *anchor)
 			rb_compile_error(RSTRING_PTR(iseq->filename), iobj->line_no,
 					 "unknown operand type: %c", type);
 			xfree(generated_iseq);
-			xfree(insn_info_table);
+			xfree(line_info_table);
 			return 0;
 		    }
 		}
-		insn_info_table[k].line_no = iobj->line_no;
-		insn_info_table[k].position = pos;
-		insn_info_table[k].sp = sp;
-		pos += len;
+		if (last_line != iobj->line_no) {
+		    line_info_table[k].line_no = last_line = iobj->line_no;
+		    line_info_table[k].position = pos;
 		k++;
+		}
+		pos += len;
 		break;
 	    }
 	  case ISEQ_ELEMENT_LABEL:
@@ -1515,19 +1514,21 @@ iseq_set_sequence(rb_iseq_t *iseq, LINK_ANCHOR *anchor)
 
 		if (adjust->line_no != -1) {
 		    if (orig_sp - sp > 0) {
-			insn_info_table[k].line_no = adjust->line_no;
-			insn_info_table[k].position = pos;
-			insn_info_table[k].sp = sp;
+			if (last_line != (unsigned int)adjust->line_no) {
+			    line_info_table[k].line_no = last_line = adjust->line_no;
+			    line_info_table[k].position = pos;
 			k++;
+			}
 			generated_iseq[pos++] = BIN(adjuststack);
 			generated_iseq[pos++] = orig_sp - sp;
 		    }
 		    else if (orig_sp - sp == 0) {
 			/* jump to next insn */
-			insn_info_table[k].line_no = adjust->line_no;
-			insn_info_table[k].position = pos;
-			insn_info_table[k].sp = sp;
+			if (last_line != (unsigned int)adjust->line_no) {
+			    line_info_table[k].line_no = last_line = adjust->line_no;
+			    line_info_table[k].position = pos;
 			k++;
+			}
 			generated_iseq[pos++] = BIN(jump);
 			generated_iseq[pos++] = 0;
 		    }
@@ -1553,9 +1554,11 @@ iseq_set_sequence(rb_iseq_t *iseq, LINK_ANCHOR *anchor)
 
     iseq->iseq = (void *)generated_iseq;
     iseq->iseq_size = pos;
-    iseq->insn_info_table = insn_info_table;
-    iseq->insn_info_size = k;
     iseq->stack_max = stack_max;
+
+    line_info_table = ruby_xrealloc(line_info_table, k * sizeof(struct iseq_line_info_entry));
+    iseq->line_info_table = line_info_table;
+    iseq->line_info_size = k;
 
     return COMPILE_OK;
 }
@@ -2332,7 +2335,7 @@ case_when_optimizable_literal(NODE * node)
       case NODE_LIT: {
 	VALUE v = node->nd_lit;
 	double ival;
-	if (TYPE(v) == T_FLOAT &&
+	if (RB_TYPE_P(v, T_FLOAT) &&
 	    modf(RFLOAT_VALUE(v), &ival) == 0.0) {
 	    return FIXABLE(ival) ? LONG2FIX((long)ival) : rb_dbl2big(ival);
 	}
@@ -2365,7 +2368,14 @@ when_vals(rb_iseq_t *iseq, LINK_ANCHOR *cond_seq, NODE *vals, LABEL *l1, VALUE s
 	    special_literals = Qfalse;
 	}
 
-	COMPILE(cond_seq, "when cond", val);
+	if (nd_type(val) == NODE_STR) {
+	    debugp_param("nd_lit", val->nd_lit);
+	    OBJ_FREEZE(val->nd_lit);
+	    ADD_INSN1(cond_seq, nd_line(val), putobject, val->nd_lit);
+	}
+	else {
+	    COMPILE(cond_seq, "when cond", val);
+	}
 	ADD_INSN1(cond_seq, nd_line(val), topn, INT2FIX(1));
 	ADD_SEND(cond_seq, nd_line(val), ID2SYM(idEqq), INT2FIX(1));
 	ADD_INSNL(cond_seq, nd_line(val), branchif, l1);
@@ -4968,7 +4978,18 @@ iseq_compile_each(rb_iseq_t *iseq, LINK_ANCHOR *ret, NODE * node, int poped)
 
 	    if (flag & VM_CALL_ARGS_BLOCKARG_BIT) {
 		ADD_INSN1(ret, nd_line(node), topn, INT2FIX(1));
+		if (flag & VM_CALL_ARGS_SPLAT_BIT) {
+		    ADD_INSN1(ret, nd_line(node), putobject, INT2FIX(-1));
+		    ADD_SEND(ret, nd_line(node), ID2SYM(idAREF), INT2FIX(1));
+		}
 		ADD_INSN1(ret, nd_line(node), setn, FIXNUM_INC(argc, 3));
+		ADD_INSN (ret, nd_line(node), pop);
+	    }
+	    else if (flag & VM_CALL_ARGS_SPLAT_BIT) {
+		ADD_INSN(ret, nd_line(node), dup);
+		ADD_INSN1(ret, nd_line(node), putobject, INT2FIX(-1));
+		ADD_SEND(ret, nd_line(node), ID2SYM(idAREF), INT2FIX(1));
+		ADD_INSN1(ret, nd_line(node), setn, FIXNUM_INC(argc, 2));
 		ADD_INSN (ret, nd_line(node), pop);
 	    }
 	    else {
@@ -5273,6 +5294,7 @@ iseq_build_from_ary_body(rb_iseq_t *iseq, LINK_ANCHOR *anchor,
     long i, len = RARRAY_LEN(body);
     int j;
     int line_no = 0;
+
     /*
      * index -> LABEL *label
      */
@@ -5292,7 +5314,7 @@ iseq_build_from_ary_body(rb_iseq_t *iseq, LINK_ANCHOR *anchor,
 	else if (FIXNUM_P(obj)) {
 	    line_no = NUM2INT(obj);
 	}
-	else if (TYPE(obj) == T_ARRAY) {
+	else if (RB_TYPE_P(obj, T_ARRAY)) {
 	    VALUE *argv = 0;
 	    int argc = RARRAY_LENINT(obj) - 1;
 	    st_data_t insn_id;
@@ -5334,7 +5356,7 @@ iseq_build_from_ary_body(rb_iseq_t *iseq, LINK_ANCHOR *anchor,
 		      case TS_ISEQ:
 			{
 			    if (op != Qnil) {
-				if (TYPE(op) == T_ARRAY) {
+				if (RB_TYPE_P(op, T_ARRAY)) {
 				    argv[j] = rb_iseq_load(op, iseq->self, Qnil);
 				}
 				else if (CLASS_OF(op) == rb_cISeq) {

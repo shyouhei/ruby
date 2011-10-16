@@ -41,6 +41,14 @@ rb_dl_set_win32_last_error(VALUE self, VALUE val)
 }
 #endif
 
+static void
+dlcfunc_mark(void *ptr)
+{
+    struct cfunc_data *data = ptr;
+    if (data->wrap) {
+	rb_gc_mark(data->wrap);
+    }
+}
 
 static void
 dlcfunc_free(void *ptr)
@@ -68,7 +76,7 @@ dlcfunc_memsize(const void *ptr)
 
 const rb_data_type_t dlcfunc_data_type = {
     "dl/cfunc",
-    {0, dlcfunc_free, dlcfunc_memsize,},
+    {dlcfunc_mark, dlcfunc_free, dlcfunc_memsize,},
 };
 
 VALUE
@@ -143,14 +151,15 @@ rb_dlcfunc_kind_p(VALUE func)
 static VALUE
 rb_dlcfunc_initialize(int argc, VALUE argv[], VALUE self)
 {
-    VALUE addr, name, type, calltype;
+    VALUE addr, name, type, calltype, addrnum;
     struct cfunc_data *data;
     void *saddr;
     const char *sname;
 
     rb_scan_args(argc, argv, "13", &addr, &type, &name, &calltype);
 
-    saddr = (void*)(NUM2PTR(rb_Integer(addr)));
+    addrnum = rb_Integer(addr);
+    saddr = (void*)(NUM2PTR(addrnum));
     sname = NIL_P(name) ? NULL : StringValuePtr(name);
 
     TypedData_Get_Struct(self, struct cfunc_data, &dlcfunc_data_type, data);
@@ -159,6 +168,7 @@ rb_dlcfunc_initialize(int argc, VALUE argv[], VALUE self)
     data->name = sname ? strdup(sname) : 0;
     data->type = NIL_P(type) ? DLTYPE_VOID : NUM2INT(type);
     data->calltype = NIL_P(calltype) ? CFUNC_CDECL : SYM2ID(calltype);
+    data->wrap = (addrnum == addr) ? 0 : addr;
 
     return Qnil;
 }
@@ -610,10 +620,38 @@ Init_dlcfunc(void)
 #if defined(_WIN32)
     id_win32_last_error = rb_intern("__DL2_WIN32_LAST_ERROR__");
 #endif
+
+    /*
+     * Document-class: DL::CFunc
+     *
+     * A direct accessor to a function in a C library
+     *
+     * == Example
+     *
+     *   libc_so = "/lib64/libc.so.6"
+     *   => "/lib64/libc.so.6"
+     *   libc = DL::dlopen(libc_so)
+     *   => #<DL::Handle:0x00000000e05b00>
+     *   @cfunc = DL::CFunc.new(libc,['strcpy'], DL::TYPE_VOIDP, 'strcpy')
+     *   => #<DL::CFunc:0x000000012daec0 ptr=0x007f62ca5a8300 type=1 name='strcpy'>
+     *
+     */
     rb_cDLCFunc = rb_define_class_under(rb_mDL, "CFunc", rb_cObject);
     rb_define_alloc_func(rb_cDLCFunc, rb_dlcfunc_s_allocate);
+
+    /*
+     * Document-method: last_error
+     *
+     * Returns the last error for the current executing thread
+     */
     rb_define_module_function(rb_cDLCFunc, "last_error", rb_dl_get_last_error, 0);
 #if defined(_WIN32)
+
+    /*
+     * Document-method: win32_last_error
+     *
+     * Returns the last win32 error for the current executing thread
+     */
     rb_define_module_function(rb_cDLCFunc, "win32_last_error", rb_dl_get_win32_last_error, 0);
 #endif
     rb_define_method(rb_cDLCFunc, "initialize", rb_dlcfunc_initialize, -1);

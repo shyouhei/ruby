@@ -90,12 +90,15 @@ require 'psych/json'
 
 module Psych
   # The version is Psych you're using
-  VERSION         = '1.1.1'
+  VERSION         = '1.2.2'
 
   # The version of libyaml Psych is using
   LIBYAML_VERSION = Psych.libyaml_version.join '.'
 
   class Exception < RuntimeError
+  end
+
+  class BadAlias < Exception
   end
 
   autoload :Stream, 'psych/stream'
@@ -187,7 +190,7 @@ module Psych
 
     visitor = Psych::Visitors::YAMLTree.new options
     visitor << o
-    visitor.tree.to_yaml io, options
+    visitor.tree.yaml io, options
   end
 
   ###
@@ -201,7 +204,7 @@ module Psych
     objects.each do |o|
       visitor << o
     end
-    visitor.tree.to_yaml
+    visitor.tree.yaml
   end
 
   ###
@@ -209,7 +212,7 @@ module Psych
   def self.to_json o
     visitor = Psych::Visitors::JSONTree.new
     visitor << o
-    visitor.tree.to_yaml
+    visitor.tree.yaml
   end
 
   ###

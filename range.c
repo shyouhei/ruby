@@ -11,11 +11,10 @@
 
 #include "ruby/ruby.h"
 #include "ruby/encoding.h"
+#include "internal.h"
 
 VALUE rb_cRange;
 static ID id_cmp, id_succ, id_beg, id_end, id_excl;
-
-extern VALUE rb_struct_init_copy(VALUE copy, VALUE s);
 
 #define RANGE_BEG(r) (RSTRUCT(r)->as.ary[0])
 #define RANGE_END(r) (RSTRUCT(r)->as.ary[1])
@@ -305,8 +304,6 @@ step_i(VALUE i, void *arg)
     }
     return Qnil;
 }
-
-extern int ruby_float_step(VALUE from, VALUE to, VALUE step, int excl);
 
 static int
 discrete_object_p(VALUE obj)
@@ -603,8 +600,6 @@ range_first(int argc, VALUE *argv, VALUE range)
 static VALUE
 range_last(int argc, VALUE *argv, VALUE range)
 {
-    VALUE rb_ary_last(int, VALUE *, VALUE);
-
     if (argc == 0) return RANGE_END(range);
     return rb_ary_last(argc, argv, rb_Array(range));
 }
@@ -670,6 +665,9 @@ range_max(VALUE range)
 		rb_raise(rb_eTypeError, "cannot exclude non Integer end value");
 	    }
 	    if (c == 0) return Qnil;
+	    if (!FIXNUM_P(b) && !rb_obj_is_kind_of(b,rb_cInteger)) {
+		rb_raise(rb_eTypeError, "cannot exclude end value with non Integer begin value");
+	    }
 	    if (FIXNUM_P(e)) {
 		return LONG2NUM(FIX2LONG(e) - 1);
 	    }
@@ -867,10 +865,10 @@ range_include(VALUE range, VALUE val)
 	}
 	return Qfalse;
     }
-    else if (TYPE(beg) == T_STRING && TYPE(end) == T_STRING &&
+    else if (RB_TYPE_P(beg, T_STRING) && RB_TYPE_P(end, T_STRING) &&
 	     RSTRING_LEN(beg) == 1 && RSTRING_LEN(end) == 1) {
 	if (NIL_P(val)) return Qfalse;
-	if (TYPE(val) == T_STRING) {
+	if (RB_TYPE_P(val, T_STRING)) {
 	    if (RSTRING_LEN(val) == 0 || RSTRING_LEN(val) > 1)
 		return Qfalse;
 	    else {
@@ -941,7 +939,7 @@ range_dumper(VALUE range)
 static VALUE
 range_loader(VALUE range, VALUE obj)
 {
-    if (TYPE(obj) != T_OBJECT || RBASIC(obj)->klass != rb_cObject) {
+    if (!RB_TYPE_P(obj, T_OBJECT) || RBASIC(obj)->klass != rb_cObject) {
         rb_raise(rb_eTypeError, "not a dumped range object");
     }
 

@@ -6,6 +6,7 @@
 */
 
 #include "ruby.h"
+#include "internal.h"
 #include <math.h>
 
 #define NDEBUG
@@ -120,7 +121,7 @@ f_mul(VALUE x, VALUE y)
     if (FIXNUM_P(y)) {
 	long iy = FIX2LONG(y);
 	if (iy == 0) {
-	    if (FIXNUM_P(x) || TYPE(x) == T_BIGNUM)
+	    if (FIXNUM_P(x) || RB_TYPE_P(x, T_BIGNUM))
 		return ZERO;
 	}
 	else if (iy == 1)
@@ -129,7 +130,7 @@ f_mul(VALUE x, VALUE y)
     else if (FIXNUM_P(x)) {
 	long ix = FIX2LONG(x);
 	if (ix == 0) {
-	    if (FIXNUM_P(y) || TYPE(y) == T_BIGNUM)
+	    if (FIXNUM_P(y) || RB_TYPE_P(y, T_BIGNUM))
 		return ZERO;
 	}
 	else if (ix == 1)
@@ -165,14 +166,14 @@ fun1(real_p)
 inline static VALUE
 f_to_i(VALUE x)
 {
-    if (TYPE(x) == T_STRING)
+    if (RB_TYPE_P(x, T_STRING))
 	return rb_str_to_inum(x, 10, 0);
     return rb_funcall(x, id_to_i, 0);
 }
 inline static VALUE
 f_to_f(VALUE x)
 {
-    if (TYPE(x) == T_STRING)
+    if (RB_TYPE_P(x, T_STRING))
 	return DBL2NUM(rb_str_to_dbl(x, 0));
     return rb_funcall(x, id_to_f, 0);
 }
@@ -485,7 +486,6 @@ nucomp_f_complex(int argc, VALUE *argv, VALUE klass)
 }
 
 #define imp1(n) \
-extern VALUE rb_math_##n(VALUE x);\
 inline static VALUE \
 m_##n##_bang(VALUE x)\
 {\
@@ -493,7 +493,6 @@ m_##n##_bang(VALUE x)\
 }
 
 #define imp2(n) \
-extern VALUE rb_math_##n(VALUE x, VALUE y);\
 inline static VALUE \
 m_##n##_bang(VALUE x, VALUE y)\
 {\
@@ -507,8 +506,6 @@ imp1(exp)
 imp2(hypot)
 
 #define m_hypot(x,y) m_hypot_bang((x),(y))
-
-extern VALUE rb_math_log(int argc, VALUE *argv);
 
 static VALUE
 m_log_bang(VALUE x)
@@ -947,7 +944,7 @@ nucomp_coerce(VALUE self, VALUE other)
 {
     if (k_numeric_p(other) && f_real_p(other))
 	return rb_assoc_new(f_complex_new_bang1(CLASS_OF(self), other), self);
-    if (TYPE(other) == T_COMPLEX)
+    if (RB_TYPE_P(other, T_COMPLEX))
 	return rb_assoc_new(other, self);
 
     rb_raise(rb_eTypeError, "%s can't be coerced into %s",
@@ -1092,8 +1089,6 @@ nucomp_inexact_p(VALUE self)
 }
 #endif
 
-extern VALUE rb_lcm(VALUE x, VALUE y);
-
 /*
  * call-seq:
  *    cmp.denominator  ->  integer
@@ -1178,6 +1173,10 @@ nucomp_eql_p(VALUE self, VALUE other)
 inline static VALUE
 f_signbit(VALUE x)
 {
+#if defined(HAVE_SIGNBIT) && defined(__GNUC__) && defined(__sun__) && \
+    !defined(signbit)
+    extern int signbit(double);
+#endif
     switch (TYPE(x)) {
       case T_FLOAT: {
 	double f = RFLOAT_VALUE(x);
@@ -1340,7 +1339,8 @@ nucomp_to_f(VALUE self)
  * call-seq:
  *    cmp.to_r  ->  rational
  *
- * Returns the value as a rational if possible.
+ * If the imaginary part is exactly 0, returns the real part as a Rational,
+ * otherwise a RangeError is raised.
  */
 static VALUE
 nucomp_to_r(VALUE self)
@@ -1359,14 +1359,22 @@ nucomp_to_r(VALUE self)
  * call-seq:
  *    cmp.rationalize([eps])  ->  rational
  *
- * Returns the value as a rational if possible.  An optional argument
- * eps is always ignored.
+ * If the imaginary part is exactly 0, returns the real part as a Rational,
+ * otherwise a RangeError is raised.
  */
 static VALUE
 nucomp_rationalize(int argc, VALUE *argv, VALUE self)
 {
+    get_dat1(self);
+
     rb_scan_args(argc, argv, "01", NULL);
-    return nucomp_to_r(self);
+
+    if (k_inexact_p(dat->imag) || f_nonzero_p(dat->imag)) {
+       VALUE s = f_to_s(self);
+       rb_raise(rb_eRangeError, "can't convert %s into Rational",
+                StringValuePtr(s));
+    }
+    return rb_funcall(dat->real, rb_intern("rationalize"), argc, argv);
 }
 
 /*
@@ -1445,12 +1453,6 @@ make_patterns(void)
 #define id_match rb_intern("match")
 #define f_match(x,y) rb_funcall((x), id_match, 1, (y))
 
-#define id_aref rb_intern("[]")
-#define f_aref(x,y) rb_funcall((x), id_aref, 1, (y))
-
-#define id_post_match rb_intern("post_match")
-#define f_post_match(x) rb_funcall((x), id_post_match, 0)
-
 #define id_gsub_bang rb_intern("gsub!")
 #define f_gsub_bang(x,y,z) rb_funcall((x), id_gsub_bang, 2, (y), (z))
 
@@ -1470,27 +1472,27 @@ string_to_c_internal(VALUE self)
 
 	m = f_match(comp_pat0, s);
 	if (!NIL_P(m)) {
-	  sr = f_aref(m, INT2FIX(1));
-	  si = f_aref(m, INT2FIX(2));
-	  re = f_post_match(m);
-	  po = 1;
+	    sr = rb_reg_nth_match(1, m);
+	    si = rb_reg_nth_match(2, m);
+	    re = rb_reg_match_post(m);
+	    po = 1;
 	}
 	if (NIL_P(m)) {
 	    m = f_match(comp_pat1, s);
 	    if (!NIL_P(m)) {
 		sr = Qnil;
-		si = f_aref(m, INT2FIX(1));
+		si = rb_reg_nth_match(1, m);
 		if (NIL_P(si))
 		    si = rb_usascii_str_new2("");
 		{
 		    VALUE t;
 
-		    t = f_aref(m, INT2FIX(2));
+		    t = rb_reg_nth_match(2, m);
 		    if (NIL_P(t))
 			t = rb_usascii_str_new2("1");
 		    rb_str_concat(si, t);
 		}
-		re = f_post_match(m);
+		re = rb_reg_match_post(m);
 		po = 0;
 	    }
 	}
@@ -1498,19 +1500,19 @@ string_to_c_internal(VALUE self)
 	    m = f_match(comp_pat2, s);
 	    if (NIL_P(m))
 		return rb_assoc_new(Qnil, self);
-	    sr = f_aref(m, INT2FIX(1));
-	    if (NIL_P(f_aref(m, INT2FIX(2))))
+	    sr = rb_reg_nth_match(1, m);
+	    if (NIL_P(rb_reg_nth_match(2, m)))
 		si = Qnil;
 	    else {
 		VALUE t;
 
-		si = f_aref(m, INT2FIX(3));
-		t = f_aref(m, INT2FIX(4));
+		si = rb_reg_nth_match(3, m);
+		t = rb_reg_nth_match(4, m);
 		if (NIL_P(t))
 		    t = rb_usascii_str_new2("1");
 		rb_str_concat(si, t);
 	    }
-	    re = f_post_match(m);
+	    re = rb_reg_match_post(m);
 	    po = 0;
 	}
 	r = INT2FIX(0);

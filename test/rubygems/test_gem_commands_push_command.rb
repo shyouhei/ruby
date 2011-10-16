@@ -1,9 +1,3 @@
-######################################################################
-# This file is imported from the rubygems project.
-# DO NOT make modifications in this repo. They _will_ be reverted!
-# File a patch instead and assign it to Ryan Davis or Eric Hodel.
-######################################################################
-
 require 'rubygems/test_case'
 require 'rubygems/commands/push_command'
 
@@ -21,7 +15,7 @@ class TestGemCommandsPushCommand < Gem::TestCase
     super
 
     @gems_dir  = File.join @tempdir, 'gems'
-    @cache_dir = Gem.cache_dir @gemhome
+    @cache_dir = File.join @gemhome, "cache"
 
     FileUtils.mkdir @gems_dir
 

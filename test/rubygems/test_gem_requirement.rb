@@ -1,9 +1,3 @@
-######################################################################
-# This file is imported from the rubygems project.
-# DO NOT make modifications in this repo. They _will_ be reverted!
-# File a patch instead and assign it to Ryan Davis or Eric Hodel.
-######################################################################
-
 require 'rubygems/test_case'
 require "rubygems/requirement"
 
@@ -254,6 +248,19 @@ class TestGemRequirement < Gem::TestCase
     assert_satisfied_by "1.4.5", "~> 1.4.4"
     refute_satisfied_by "1.5",   "~> 1.4.4"
     refute_satisfied_by "2.0",   "~> 1.4.4"
+  end
+
+  def test_specific
+    refute req('> 1') .specific?
+    refute req('>= 1').specific?
+
+    assert req('!= 1').specific?
+    assert req('< 1') .specific?
+    assert req('<= 1').specific?
+    assert req('= 1') .specific?
+    assert req('~> 1').specific?
+
+    assert req('> 1', '> 2').specific? # GIGO
   end
 
   def test_bad

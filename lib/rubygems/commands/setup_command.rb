@@ -1,9 +1,3 @@
-######################################################################
-# This file is imported from the rubygems project.
-# DO NOT make modifications in this repo. They _will_ be reverted!
-# File a patch instead and assign it to Ryan Davis or Eric Hodel.
-######################################################################
-
 require 'rubygems/command'
 
 ##
@@ -130,7 +124,7 @@ By default, this RubyGems will install gem as:
                       open release_notes do |io|
                         text = io.gets '==='
                         text << io.gets('===')
-                        text[0...-3]
+                        text[0...-3].sub(/^# coding:.*?^=/m, '')
                       end
                     else
                       "Oh-no! Unable to find release notes!"
@@ -338,7 +332,7 @@ abort "#{deprecation_message}"
     args << '--main' << 'README.rdoc' << '--quiet'
     args << '.'
     args << 'README.rdoc' << 'UPGRADING.rdoc'
-    args << 'LICENSE.txt' << 'GPL.txt' << 'History.txt'
+    args << 'LICENSE.txt' << 'MIT.txt' << 'History.txt'
 
     r = RDoc::RDoc.new
     r.document args

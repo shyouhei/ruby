@@ -1,9 +1,3 @@
-######################################################################
-# This file is imported from the rubygems project.
-# DO NOT make modifications in this repo. They _will_ be reverted!
-# File a patch instead and assign it to Ryan Davis or Eric Hodel.
-######################################################################
-
 require 'rubygems'
 
 ##
@@ -21,7 +15,7 @@ module Gem::Text
 
     while work.length > wrap do
       if work =~ /^(.{0,#{wrap}})[ \n]/ then
-        result << $1
+        result << $1.rstrip
         work.slice!(0, $&.length)
       else
         result << work.slice!(0, wrap)

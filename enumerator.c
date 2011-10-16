@@ -566,9 +566,9 @@ get_next_values(VALUE obj, struct enumerator *e)
  *   #  yield nil        [nil]            nil
  *   #  yield [1, 2]     [[1, 2]]         [1, 2]
  *
- * Note that enumeration sequenced by +next_values+ does not affect other
- * non-external enumeration methods, unless underlying iteration methods
- * itself has side-effect, e.g. IO#each_line.
+ * Note that +next_values+ does not affect other non-external enumeration
+ * methods unless underlying iteration method itself has side-effect, e.g.
+ * IO#each_line.
  *
  */
 
@@ -590,7 +590,7 @@ enumerator_next_values(VALUE obj)
 static VALUE
 ary2sv(VALUE args, int dup)
 {
-    if (TYPE(args) != T_ARRAY)
+    if (!RB_TYPE_P(args, T_ARRAY))
         return args;
 
     switch (RARRAY_LEN(args)) {
@@ -714,26 +714,30 @@ enumerator_peek(VALUE obj)
  * call-seq:
  *   e.feed obj   -> nil
  *
- * Set the value to be returned by the next call to +yield+ by the enumerator.
- * If the value is not set, the +yield+ returns +nil+ and the value is cleared
- * after it is used the first time.
+ * Sets the value to be returned by the next yield inside +e+.
  *
- * +obj+:: the object to return from the next call to the Enumerator's +yield+
+ * If the value is not set, the yield returns nil.
  *
- * === Example
+ * This value is cleared after being yielded.
  *
- *   three_times = Enumerator.new do |yielder|
- *     3.times do |x|
- *       result = yielder.yield(x)
- *       puts result
- *     end
+ *   o = Object.new
+ *   def o.each
+ *     x = yield         # (2) blocks
+ *     p x               # (5) => "foo"
+ *     x = yield         # (6) blocks
+ *     p x               # (8) => nil
+ *     x = yield         # (9) blocks
+ *     p x               # not reached w/o another e.next
  *   end
  *
- *   three_times.next # => 0
- *   three_times.feed("foo")
- *   three_times.next # => 1, prints "foo"
- *   three_times.next # => 2, prints nothing
+ *   e = o.to_enum
+ *   e.next              # (1)
+ *   e.feed "foo"        # (3)
+ *   e.next              # (4)
+ *   e.next              # (7)
+ *                       # (10)
  */
+
 static VALUE
 enumerator_feed(VALUE obj, VALUE v)
 {
@@ -1013,8 +1017,6 @@ generator_init(VALUE obj, VALUE proc)
 
     return obj;
 }
-
-VALUE rb_obj_is_proc(VALUE proc);
 
 /* :nodoc: */
 static VALUE

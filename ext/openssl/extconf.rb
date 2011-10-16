@@ -66,6 +66,7 @@ end
 
 message "=== Checking for OpenSSL features... ===\n"
 have_func("ERR_peek_last_error")
+have_func("ASN1_put_eoc")
 have_func("BN_mod_add")
 have_func("BN_mod_sqr")
 have_func("BN_mod_sub")
@@ -94,6 +95,7 @@ have_func("X509_CRL_add0_revoked")
 have_func("X509_CRL_set_issuer_name")
 have_func("X509_CRL_set_version")
 have_func("X509_CRL_sort")
+have_func("X509_NAME_hash_old")
 have_func("X509_STORE_get_ex_data")
 have_func("X509_STORE_set_ex_data")
 have_func("OBJ_NAME_do_all_sorted")
@@ -122,6 +124,9 @@ if have_header("openssl/engine.h")
   have_func("ENGINE_load_sureware")
   have_func("ENGINE_load_ubsec")
 end
+have_func("DH_generate_parameters_ex")
+have_func("DSA_generate_parameters_ex")
+have_func("RSA_generate_key_ex")
 if checking_for('OpenSSL version is 0.9.7 or later') {
     try_static_assert('OPENSSL_VERSION_NUMBER >= 0x00907000L', 'openssl/opensslv.h')
   }

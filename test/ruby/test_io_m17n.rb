@@ -2060,5 +2060,41 @@ EOT
            r.close
          end)
   end
-end
 
+  def test_getc_ascii_only
+    bug4557 = '[ruby-core:35630]'
+    c = with_tmpdir {
+      open("a", "wb") {|f| f.puts "a"}
+      open("a", "rt") {|f| f.getc}
+    }
+    assert(c.ascii_only?, "should be ascii_only #{bug4557}")
+  end
+
+  def test_default_mode_on_dosish
+    with_tmpdir {
+      open("a", "w") {|f| f.write "\n"}
+      assert_equal("\r\n", IO.binread("a"))
+    }
+  end if /mswin|mingw/ =~ RUBY_PLATFORM
+
+  def test_default_mode_on_unix
+    with_tmpdir {
+      open("a", "w") {|f| f.write "\n"}
+      assert_equal("\n", IO.binread("a"))
+    }
+  end unless /mswin|mingw/ =~ RUBY_PLATFORM
+
+  def test_text_mode
+    with_tmpdir {
+      open("a", "wb") {|f| f.write "\r\n"}
+      assert_equal("\n", open("a", "rt"){|f| f.read})
+    }
+  end
+
+  def test_binary_mode
+    with_tmpdir {
+      open("a", "wb") {|f| f.write "\r\n"}
+      assert_equal("\r\n", open("a", "rb"){|f| f.read})
+    }
+  end
+end

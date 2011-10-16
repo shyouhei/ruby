@@ -1,9 +1,3 @@
-######################################################################
-# This file is imported from the rubygems project.
-# DO NOT make modifications in this repo. They _will_ be reverted!
-# File a patch instead and assign it to Ryan Davis or Eric Hodel.
-######################################################################
-
 require 'rubygems/package/tar_test_case'
 require 'rubygems/simple_gem'
 require 'rubygems/format'
@@ -20,7 +14,7 @@ class TestGemFormat < Gem::Package::TarTestCase
   def test_class_from_file_by_path
     util_make_gems
 
-    gems = Dir[Gem.cache_gem('*.gem', @gemhome)]
+    gems = Dir[File.join(@gemhome, "cache", "*.gem")]
 
     names = [@a1, @a2, @a3a, @a_evil9, @b2, @c1_2, @pl1].map do |spec|
       spec.original_name

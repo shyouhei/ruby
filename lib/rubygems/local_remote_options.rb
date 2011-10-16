@@ -1,9 +1,3 @@
-######################################################################
-# This file is imported from the rubygems project.
-# DO NOT make modifications in this repo. They _will_ be reverted!
-# File a patch instead and assign it to Ryan Davis or Eric Hodel.
-######################################################################
-
 #--
 # Copyright 2006 by Chad Fowler, Rich Kilmer, Jim Weirich and others.
 # All rights reserved.
@@ -82,7 +76,7 @@ module Gem::LocalRemoteOptions
     add_option(:"Local/Remote", '--clear-sources',
                'Clear the gem sources') do |value, options|
 
-      Gem.sources.clear
+      Gem.sources = nil
       options[:sources_cleared] = true
     end
   end
@@ -123,7 +117,7 @@ module Gem::LocalRemoteOptions
   # Add the --update-sources option
 
   def add_update_sources_option
-    add_option(:"Local/Remote", '-u', '--[no-]update-sources',
+    add_option(:Deprecated, '-u', '--[no-]update-sources',
                'Update local source cache') do |value, options|
       Gem.configuration.update_sources = value
     end

@@ -1,9 +1,3 @@
-######################################################################
-# This file is imported from the rubygems project.
-# DO NOT make modifications in this repo. They _will_ be reverted!
-# File a patch instead and assign it to Ryan Davis or Eric Hodel.
-######################################################################
-
 #--
 # Copyright 2006 by Chad Fowler, Rich Kilmer, Jim Weirich and others.
 # All rights reserved.
@@ -393,7 +387,7 @@ module Gem::Security
     :munge_re   => Regexp.new(/[^a-z0-9_.-]+/),
 
     # output directory for trusted certificate checksums
-    :trust_dir => File::join(Gem.user_home, '.gem', 'trust'),
+    :trust_dir => File.join(Gem.user_home, '.gem', 'trust'),
 
     # default permissions for trust directory and certs
     :perms => {

@@ -220,6 +220,20 @@ class RDoc::TopLevel < RDoc::Context
   end
 
   ##
+  # Creates a new RDoc::TopLevel with +file_name+ only if one with the same
+  # name does not exist in all_files.
+
+  def self.new file_name
+    if top_level = @all_files_hash[file_name] then
+      top_level
+    else
+      top_level = super
+      @all_files_hash[file_name] = top_level
+      top_level
+    end
+  end
+
+  ##
   # Removes from +all_hash+ the contexts that are nodoc or have no content.
   #
   # See RDoc::Context#remove_from_documentation?
@@ -296,9 +310,19 @@ class RDoc::TopLevel < RDoc::Context
   end
 
   ##
+  # An RDoc::TopLevel is equal to another with the same absolute_name
+
+  def == other
+    other.class === self and @absolute_name == other.absolute_name
+  end
+
+  alias eql? ==
+
+  ##
   # Adds +an_alias+ to +Object+ instead of +self+.
 
   def add_alias(an_alias)
+    object_class.record_location self
     return an_alias unless @document_self
     object_class.add_alias an_alias
   end
@@ -307,6 +331,7 @@ class RDoc::TopLevel < RDoc::Context
   # Adds +constant+ to +Object+ instead of +self+.
 
   def add_constant(constant)
+    object_class.record_location self
     return constant unless @document_self
     object_class.add_constant constant
   end
@@ -315,6 +340,7 @@ class RDoc::TopLevel < RDoc::Context
   # Adds +include+ to +Object+ instead of +self+.
 
   def add_include(include)
+    object_class.record_location self
     return include unless @document_self
     object_class.add_include include
   end
@@ -323,6 +349,7 @@ class RDoc::TopLevel < RDoc::Context
   # Adds +method+ to +Object+ instead of +self+.
 
   def add_method(method)
+    object_class.record_location self
     return method unless @document_self
     object_class.add_method method
   end
@@ -373,6 +400,14 @@ class RDoc::TopLevel < RDoc::Context
 
   def full_name
     @relative_name
+  end
+
+  ##
+  # An RDoc::TopLevel has the same hash as another with the same
+  # absolute_name
+
+  def hash
+    @absolute_name.hash
   end
 
   ##

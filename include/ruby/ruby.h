@@ -617,11 +617,7 @@ struct RClass {
     struct st_table *m_tbl;
     struct st_table *iv_index_tbl;
 };
-#define RCLASS_IV_TBL(c) (RCLASS(c)->ptr->iv_tbl)
-#define RCLASS_CONST_TBL(c) (RCLASS(c)->ptr->const_tbl)
-#define RCLASS_M_TBL(c) (RCLASS(c)->m_tbl)
-#define RCLASS_SUPER(c) (RCLASS(c)->ptr->super)
-#define RCLASS_IV_INDEX_TBL(c) (RCLASS(c)->iv_index_tbl)
+#define RCLASS_SUPER(c) rb_class_get_superclass(c)
 #define RMODULE_IV_TBL(m) RCLASS_IV_TBL(m)
 #define RMODULE_CONST_TBL(m) RCLASS_CONST_TBL(m)
 #define RMODULE_M_TBL(m) RCLASS_M_TBL(m)
@@ -1102,6 +1098,7 @@ ID rb_intern(const char*);
 ID rb_intern2(const char*, long);
 ID rb_intern_str(VALUE str);
 const char *rb_id2name(ID);
+ID rb_check_id(volatile VALUE *);
 ID rb_to_id(VALUE);
 VALUE rb_id2str(ID);
 

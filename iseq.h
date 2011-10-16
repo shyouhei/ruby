@@ -24,7 +24,13 @@ VALUE rb_iseq_build_from_ary(rb_iseq_t *iseq, VALUE locals, VALUE args,
 
 /* iseq.c */
 VALUE rb_iseq_load(VALUE data, VALUE parent, VALUE opt);
+VALUE rb_iseq_parameters(const rb_iseq_t *iseq, int is_proc);
 struct st_table *ruby_insn_make_insn_table(void);
+unsigned int rb_iseq_line_no(const rb_iseq_t *iseq, size_t pos);
+
+/* proc.c */
+rb_iseq_t *rb_method_get_iseq(VALUE body);
+rb_iseq_t *rb_proc_get_iseq(VALUE proc, int *is_proc);
 
 struct rb_compile_option_struct {
     int inline_const_cache;
@@ -38,10 +44,9 @@ struct rb_compile_option_struct {
     int debug_level;
 };
 
-struct iseq_insn_info_entry {
-    unsigned short position;
-    unsigned short line_no;
-    unsigned short sp;
+struct iseq_line_info_entry {
+    unsigned int position;
+    unsigned int line_no;
 };
 
 struct iseq_catch_table_entry {

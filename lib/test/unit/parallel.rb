@@ -26,9 +26,11 @@ module Test
 
       def _run_suite(suite, type)
         r = report.dup
-        orig_stdout = MiniTest::Unit.output
+        orig_testout = MiniTest::Unit.output
         i,o = IO.pipe
+
         MiniTest::Unit.output = o
+        orig_stdin, orig_stdout = $stdin, $stdout
 
         th = Thread.new do
           begin
@@ -49,7 +51,9 @@ module Test
           result = [nil,nil]
         end
 
-        MiniTest::Unit.output = orig_stdout
+        MiniTest::Unit.output = orig_testout
+        $stdin = orig_stdin
+        $stdout = orig_stdout
 
         o.close
         begin
@@ -70,6 +74,8 @@ module Test
         return result
       ensure
         MiniTest::Unit.output = orig_stdout
+        $stdin = orig_stdin
+        $stdout = orig_stdout
         o.close if o && !o.closed?
         i.close if i && !i.closed?
       end
@@ -136,4 +142,16 @@ module Test
   end
 end
 
-Test::Unit::Worker.new.run(ARGV)
+if $0 == __FILE__
+  module Test
+    module Unit
+      class TestCase < MiniTest::Unit::TestCase
+        def on_parallel_worker?
+          true
+        end
+      end
+    end
+  end
+
+  Test::Unit::Worker.new.run(ARGV)
+end

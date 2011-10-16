@@ -30,6 +30,10 @@ class TestRDocMarkupToHtml < RDoc::Markup::FormatterTestCase
     assert_empty @to.res.join
   end
 
+  def accept_document
+    assert_equal "\n<p>hello</p>\n", @to.res.join
+  end
+
   def accept_heading
     assert_equal "\n<h5>Hello</h5>\n", @to.res.join
   end
@@ -69,7 +73,7 @@ class TestRDocMarkupToHtml < RDoc::Markup::FormatterTestCase
     assert_equal [], @to.list
     assert_equal [], @to.in_list_entry
 
-    assert_equal "<dl></dl>\n", @to.res.join
+    assert_equal "<dl class=\"rdoc-list\"></dl>\n", @to.res.join
   end
 
   def accept_list_end_lalpha
@@ -129,7 +133,7 @@ class TestRDocMarkupToHtml < RDoc::Markup::FormatterTestCase
   end
 
   def accept_list_item_start_label
-    assert_equal "<dl><dt>cat</dt>\n<dd>", @to.res.join
+    assert_equal "<dl class=\"rdoc-list\"><dt>cat</dt>\n<dd>", @to.res.join
   end
 
   def accept_list_item_start_lalpha
@@ -171,7 +175,7 @@ class TestRDocMarkupToHtml < RDoc::Markup::FormatterTestCase
     assert_equal [:LABEL], @to.list
     assert_equal [false], @to.in_list_entry
 
-    assert_equal "<dl>", @to.res.join
+    assert_equal '<dl class="rdoc-list">', @to.res.join
   end
 
   def accept_list_start_lalpha
@@ -300,6 +304,22 @@ class TestRDocMarkupToHtml < RDoc::Markup::FormatterTestCase
   def test_gen_url
     assert_equal '<a href="example">example</a>',
                  @to.gen_url('link:example', 'example')
+  end
+
+  def test_gem_url_image_url
+    assert_equal '<img src="http://example.com/image.png" />', @to.gen_url('http://example.com/image.png', 'ignored')
+  end
+
+  def test_gem_url_ssl_image_url
+    assert_equal '<img src="https://example.com/image.png" />', @to.gen_url('https://example.com/image.png', 'ignored')
+  end
+
+  def test_handle_special_HYPERLINK_link
+    special = RDoc::Markup::Special.new 0, 'link:README.txt'
+
+    link = @to.handle_special_HYPERLINK special
+
+    assert_equal '<a href="README.txt">README.txt</a>', link
   end
 
   def test_list_verbatim_2

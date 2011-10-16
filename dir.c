@@ -13,6 +13,7 @@
 
 #include "ruby/ruby.h"
 #include "ruby/encoding.h"
+#include "internal.h"
 
 #include <sys/types.h>
 #include <sys/stat.h>
@@ -29,12 +30,7 @@
 # define NAMLEN(dirent) strlen((dirent)->d_name)
 #else
 # define dirent direct
-# if !defined __NeXT__
-#  define NAMLEN(dirent) (dirent)->d_namlen
-# else
-#  /* On some versions of NextStep, d_namlen is always zero, so avoid it. */
-#  define NAMLEN(dirent) strlen((dirent)->d_name)
-# endif
+# define NAMLEN(dirent) (dirent)->d_namlen
 # if HAVE_SYS_NDIR_H
 #  include <sys/ndir.h>
 # endif
@@ -1749,7 +1745,8 @@ dir_s_aref(int argc, VALUE *argv, VALUE obj)
  *  is not a regexp (it's closer to a shell glob). See
  *  <code>File::fnmatch</code> for the meaning of the <i>flags</i>
  *  parameter. Note that case sensitivity depends on your system (so
- *  <code>File::FNM_CASEFOLD</code> is ignored)
+ *  <code>File::FNM_CASEFOLD</code> is ignored), as does the order
+ *  in which the results are returned.
  *
  *  <code>*</code>::        Matches any file. Can be restricted by
  *                          other values in the glob. <code>*</code>
@@ -1777,7 +1774,7 @@ dir_s_aref(int argc, VALUE *argv, VALUE obj)
  *                          More than two literals may be specified.
  *                          Equivalent to pattern alternation in
  *                          regexp.
- *  <code>\</code>::        Escapes the next metacharacter.
+ *  <code> \ </code>::      Escapes the next metacharacter.
  *                          Note that this means you cannot use backslash in windows
  *                          as part of a glob, i.e. Dir["c:\\foo*"] will not work
  *                          use Dir["c:/foo*"] instead
@@ -1921,7 +1918,7 @@ dir_entries(int argc, VALUE *argv, VALUE io)
  *                          Behaves exactly like character sets in
  *                          Regexp, including set negation
  *                          (<code>[^a-z]</code>).
- *  <code>\</code>::        Escapes the next metacharacter.
+ *  <code> \ </code>::      Escapes the next metacharacter.
  *
  *  <i>flags</i> is a bitwise OR of the <code>FNM_xxx</code>
  *  parameters. The same glob pattern and flags are used by
@@ -1995,8 +1992,6 @@ file_s_fnmatch(int argc, VALUE *argv, VALUE obj)
 
     return Qfalse;
 }
-
-VALUE rb_home_dir(const char *user, VALUE result);
 
 /*
  *  call-seq:

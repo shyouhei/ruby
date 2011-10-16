@@ -3,6 +3,7 @@ require 'rational'
 require 'delegate'
 require 'timeout'
 require 'delegate'
+require_relative 'envutil'
 
 class TestTime < Test::Unit::TestCase
   def setup
@@ -416,13 +417,19 @@ class TestTime < Test::Unit::TestCase
 
   def test_asctime
     assert_equal("Sat Jan  1 00:00:00 2000", T2000.asctime)
+    assert_equal(Encoding::US_ASCII, T2000.asctime.encoding)
     assert_kind_of(String, Time.at(0).asctime)
   end
 
   def test_to_s
     assert_equal("2000-01-01 00:00:00 UTC", T2000.to_s)
+    assert_equal(Encoding::US_ASCII, T2000.to_s.encoding)
     assert_kind_of(String, Time.at(946684800).getlocal.to_s)
     assert_equal(Time.at(946684800).getlocal.to_s, Time.at(946684800).to_s)
+  end
+
+  def test_zone
+    assert_equal(Encoding.find('locale'), Time.now.zone.encoding)
   end
 
   def test_plus_minus_succ
@@ -548,6 +555,8 @@ class TestTime < Test::Unit::TestCase
 
     t = Time.mktime(2001, 10, 1)
     assert_equal("2001-10-01", t.strftime("%F"))
+    assert_equal(Encoding::UTF_8, t.strftime("\u3042%Z").encoding)
+    assert_equal(true, t.strftime("\u3042%Z").valid_encoding?)
 
     t = Time.mktime(2001, 10, 1, 2, 0, 0)
     assert_equal("01", t.strftime("%d"))
@@ -649,6 +658,9 @@ class TestTime < Test::Unit::TestCase
 
     # [ruby-core:33985]
     assert_equal("3000000000", Time.at(3000000000).strftime('%s'))
+
+    bug4457 = '[ruby-dev:43285]'
+    assert_raise(Errno::ERANGE, bug4457) {Time.now.strftime('%8192z')}
   end
 
   def test_delegate
@@ -696,5 +708,33 @@ class TestTime < Test::Unit::TestCase
       assert_equal(Rational(i % 10, 10), t2.subsec)
       off += 0.1
     }
+  end
+
+  def test_getlocal_dont_share_eigenclass
+    bug5012 = "[ruby-dev:44071]"
+
+    t0 = Time.now
+    class << t0; end
+    t1 = t0.getlocal
+
+    def t0.m
+      0
+    end
+
+    assert_raise(NoMethodError, bug5012) { t1.m }
+  end
+
+  def test_time_subclass
+    bug5036 = '[ruby-dev:44122]'
+    tc = Class.new(Time)
+    tc.inspect
+    t = tc.now
+    error = assert_raise(SecurityError) do
+      proc do
+        $SAFE = 4
+        t.gmtime
+      end.call
+    end
+    assert_equal("Insecure: can't modify #{tc}", error.message, bug5036)
   end
 end

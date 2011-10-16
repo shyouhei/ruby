@@ -8,174 +8,38 @@ Note that each entry is kept so brief that no reason behind or
 reference information is supplied with.  For a full list of changes
 with all sufficient information, see the ChangeLog file.
 
-== Changes since the 1.9.2 release
-=== License
-
-* Ruby's License is changed from a dual license with GPLv2
-  to a dual license with 2-clause BSDL.
+== Changes since the 1.9.3 release
 
 === C API updates
-
-* rb_scan_args() is enhanced with support for option hash argument
-  extraction.
-
-* ruby_vm_at_exit() added.  This enables extension libs to hook a VM
-  termination.
-
 === Library updates (outstanding ones only)
 
 * builtin classes
 
-  * ARGF
-    * new methods:
-      * ARGF.print
-      * ARGF.printf
-      * ARGF.putc
-      * ARGF.puts
-      * ARGF.read_nonblock
-      * ARGF.to_write_io
-      * ARGF.write
-
-  * Array
-    * extended method:
-      * Array#pack supports endian modifiers
-
-  * Encoding
-    * new encodings:
-      * CP950
-      * CP951
-      * UTF-16
-      * UTF-32
-    * change alias:
-      * SJIS is Windows-31J
-
-  * File
-    * new constant:
-      * File::NULL
-        name of NULL device.
-
-  * IO
-    * extended method:
-      * IO#putc supports multibyte characters
-    * new method:
-      * IO#advise
-
   * Kernel
-    * Kernel#respond_to? now returns false for protected methods.
-    * move #__id__ to BasicObject.
-
-  * Module
-    * new methods:
-      * Module#private_constant
-      * Module#public_constant
-
-  * String
     * extended method:
-      * String#unpack supports endian modifiers
-    * new method:
-      * String#prepend
-      * String#byteslice
+      * Kernel#warn accepts multiple args in like puts.
+
+  * Signal
+    * incompatible changes:
+      * Signal.trap raises ArgumentError when :SEGV, :BUS, :ILL, :FPE, :VTALRM
+        are specified.
 
   * Time
-    * extended method:
-      * Time#strftime supports %:z and %::z.
+    * change return value:
+      * Time#to_s returned encoding defaults to US-ASCII but automatically
+        transcodes to Encoding.default_internal if it is set.
 
-  * Process
-    * Process#maxgroups and Process#maxgroups= now raise NotImplementedError if
-      the platform don't support supplementary groups concept.
-  
-* io/console
+* net/imap
   * new methods:
-    * IO#noecho {|io| }
-    * IO#echo=
-    * IO#echo?
-    * IO#raw {|io| }
-    * IO#raw!
-    * IO#getch
-    * IO#winsize
-    * IO.console
-
-* net/http
-  * SNI (Server Name Indication) supported for HTTPS. 
-
-* openssl
-  * PKey::RSA and PKey::DSA now use the generic X.509 encoding scheme 
-    (e.g. used in a X.509 certificate's Subject Public Key Info) when
-    exporting public keys to DER or PEM. Backward compatibility is 
-    ensured by (already existing) fallbacks during creation.
-  * OpenSSL::ASN1::Constructive#new and OpenSSL::ASN1::Primitive#new
-    (and the constructors of their sub-classes) will no longer force
-    tagging to be set to :EXPLICIT when tag and/or tag_class are passed
-    as parameters. tagging must be set explicitly.
-  * Support for infinite length encodings via infinite_length attribute.
-
-* optparse
-  * support for bash/zsh completion.
-
-* RDoc
-  * RDoc has been upgraded to RDoc 3.6.1.  For full release notes see
-    http://docs.seattlerb.org/rdoc/History_txt.html
-
-* rexml
-  * [incompatible] support Ruby native encoding mechanism
-    and iconv dependency is dropped. This means encoding
-    methods (Document#encoding, XMLDecl#encoding,
-    Output#encoding and Source#encoding) return an Encoding
-    object instead of an encoding name.
-
-* Rubygems
-  * Rubygems has been upgraded to rubygems 1.5.0. For full release notes see 
-    http://rubygems.rubyforge.org/rubygems-update/History_txt.html
-
-* stringio
-  * extended method:
-    * StringIO#set_encoding can get 2nd argument and optional hash.
-
-* test/unit
-  * New arguments:
-    * -j N, --jobs=N: Allow run N testcases at once.
-    * --jobs-status: Show status of jobs when parallel running.
-    * --no-retry: Don't retry testcases which failed when parallel running.
-    * --ruby=RUBY: path to ruby for job(worker) process. optional.
-
-* uri
-  * new methods:
-    * URI::Generic#hostname
-    * URI::Generic#hostname=
-
-* webrick
-  * new method:
-    * WEBrick::HTTPRequest#continue for generating '100 continue' response.
-  * new logging directive:
-    * %{remote}p for remote (client) port number.
-
-* yaml
-  * The default YAML engine is now Psych. You may downgrade to syck by setting
-    YAML::ENGINE.yamler = 'syck'.
-
-* zlib
-  * new methods:
-    * Zlib.deflate
-    * Zlib.inflate
-
-* FileUtils
-  * extended method:
-    * FileUtils#chmod supports symbolic mode argument.
+    * Net::IMAP.default_port
+    * Net::IMAP.default_imap_port
+    * Net::IMAP.default_tls_port
+    * Net::IMAP.default_ssl_port
+    * Net::IMAP.default_imaps_port
 
 === Language changes
-
-* Regexps now support Unicode 6.0. (new characters and scripts)
-
-* [experimental] Regexps now support Age property.
-  Unlike Perl, current implementation takes interpretation of the
-  interpretation of UTS #18.
-  http://www.unicode.org/reports/tr18/
-
-* Turning on/off indentation warnings with directives.
-  ("# -*- warn-indent: true -*-" / "# -*- warn-indent: false -*-")
-
 === Compatibility issues (excluding feature bug fixes)
 
-* Kernel#respond_to?
+  * Signal.trap
 
-  See above.
+    See above.

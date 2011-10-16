@@ -1,9 +1,3 @@
-######################################################################
-# This file is imported from the rubygems project.
-# DO NOT make modifications in this repo. They _will_ be reverted!
-# File a patch instead and assign it to Ryan Davis or Eric Hodel.
-######################################################################
-
 require 'rubygems/command'
 require 'rubygems/local_remote_options'
 require 'rubygems/version_option'
@@ -41,18 +35,21 @@ class Gem::Commands::FetchCommand < Gem::Command
     version = options[:version] || Gem::Requirement.default
     all = Gem::Requirement.default != version
 
+    platform  = Gem.platforms.last
     gem_names = get_all_gem_names
 
     gem_names.each do |gem_name|
       dep = Gem::Dependency.new gem_name, version
       dep.prerelease = options[:prerelease]
 
-      specs_and_sources = Gem::SpecFetcher.fetcher.fetch(dep, all, true,
-                                                         dep.prerelease?)
-
       specs_and_sources, errors =
         Gem::SpecFetcher.fetcher.fetch_with_errors(dep, all, true,
                                                    dep.prerelease?)
+
+      if platform then
+        filtered = specs_and_sources.select { |s,| s.platform == platform }
+        specs_and_sources = filtered unless filtered.empty?
+      end
 
       spec, source_uri = specs_and_sources.sort_by { |s,| s.version }.last
 
@@ -62,7 +59,7 @@ class Gem::Commands::FetchCommand < Gem::Command
       end
 
       path = Gem::RemoteFetcher.fetcher.download spec, source_uri
-      FileUtils.mv path, spec.file_name
+      FileUtils.mv path, File.basename(spec.cache_file)
 
       say "Downloaded #{spec.full_name}"
     end

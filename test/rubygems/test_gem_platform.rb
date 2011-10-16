@@ -1,9 +1,3 @@
-######################################################################
-# This file is imported from the rubygems project.
-# DO NOT make modifications in this repo. They _will_ be reverted!
-# File a patch instead and assign it to Ryan Davis or Eric Hodel.
-######################################################################
-
 require 'rubygems/test_case'
 require 'rubygems/platform'
 require 'rbconfig'
@@ -144,7 +138,7 @@ class TestGemPlatform < Gem::TestCase
   def test_empty
     platform = Gem::Platform.new 'cpu-other_platform1'
     assert_respond_to platform, :empty?
-    assert_equal false, platform.empty?
+    assert_equal false, Gem::Deprecate.skip_during { platform.empty? }
   end
 
   def test_to_s

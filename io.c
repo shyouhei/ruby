@@ -14,6 +14,7 @@
 #include "ruby/ruby.h"
 #include "ruby/io.h"
 #include "dln.h"
+#include "internal.h"
 #include <ctype.h>
 #include <errno.h>
 
@@ -32,10 +33,6 @@
 
 #if defined(__BOW__) || defined(__CYGWIN__) || defined(_WIN32) || defined(__EMX__) || defined(__BEOS__) || defined(__HAIKU__)
 # define NO_SAFE_RENAME
-#endif
-
-#if defined(__CYGWIN__) || defined(_WIN32)
-# define NO_LONG_FNAME
 #endif
 
 #if defined(__FreeBSD__) || defined(__NetBSD__) || defined(__OpenBSD__) || defined(__DragonFly__) || defined(sun) || defined(_nec_ews)
@@ -80,8 +77,6 @@
 #elif defined HAVE_SYS_SYSCALL_H
 #include <sys/syscall.h>
 #endif
-
-extern void Init_File(void);
 
 #if defined(__BEOS__) || defined(__HAIKU__)
 # ifndef NOFILE
@@ -141,8 +136,6 @@ static ID id_write, id_read, id_getc, id_flush, id_readpartial, id_set_encoding;
 static VALUE sym_mode, sym_perm, sym_extenc, sym_intenc, sym_encoding, sym_open_args;
 static VALUE sym_textmode, sym_binmode, sym_autoclose;
 
-struct timeval rb_time_interval(VALUE);
-
 struct argf {
     VALUE filename, current_file;
     long last_lineno;		/* $. */
@@ -154,10 +147,15 @@ struct argf {
 };
 
 static int max_file_descriptor = NOFILE;
-#define UPDATE_MAXFD(fd) \
-    do { \
-        if (max_file_descriptor < (fd)) max_file_descriptor = (fd); \
-    } while (0)
+void
+rb_update_max_fd(int fd)
+{
+    struct stat buf;
+    if (fstat(fd, &buf) != 0) {
+        rb_bug("rb_update_max_fd: invalid fd (%d) given.", fd);
+    }
+    if (max_file_descriptor < fd) max_file_descriptor = fd;
+}
 
 #define argf_of(obj) (*(struct argf *)DATA_PTR(obj))
 #define ARGF argf_of(argf)
@@ -191,7 +189,7 @@ static int max_file_descriptor = NOFILE;
 
 #if defined(_WIN32)
 #define WAIT_FD_IN_WIN32(fptr) \
-    (rb_w32_has_cancel_io() ? 0 : rb_thread_wait_fd((fptr)->fd))
+    (rb_w32_io_cancelable_p((fptr)->fd) ? 0 : rb_thread_wait_fd((fptr)->fd))
 #else
 #define WAIT_FD_IN_WIN32(fptr)
 #endif
@@ -529,7 +527,7 @@ ruby_dup(int orig)
 	    rb_sys_fail(0);
 	}
     }
-    UPDATE_MAXFD(fd);
+    rb_update_max_fd(fd);
     return fd;
 }
 
@@ -682,6 +680,11 @@ io_fflush(rb_io_t *fptr)
 	    return -1;
         rb_io_check_closed(fptr);
     }
+#ifdef _WIN32
+    if (GetFileType((HANDLE)rb_w32_get_osfhandle(fptr->fd)) == FILE_TYPE_DISK) {
+	fsync(fptr->fd);
+    }
+#endif
     return 0;
 }
 
@@ -803,6 +806,12 @@ struct binwrite_arg {
     VALUE str;
     const char *ptr;
     long length;
+};
+
+struct write_arg {
+    VALUE io;
+    VALUE str;
+    int nosync;
 };
 
 static VALUE
@@ -979,7 +988,7 @@ io_write(VALUE io, VALUE str, int nosync)
  *  to a string using <code>to_s</code>. Returns the number of bytes
  *  written.
  *
- *     count = $stdout.write( "This is a test\n" )
+ *     count = $stdout.write("This is a test\n")
  *     puts "That was #{count} bytes of data"
  *
  *  <em>produces:</em>
@@ -1044,7 +1053,7 @@ rb_io_flush(VALUE io)
 {
     rb_io_t *fptr;
 
-    if (TYPE(io) != T_FILE) {
+    if (!RB_TYPE_P(io, T_FILE)) {
         return rb_funcall(io, id_flush, 0);
     }
 
@@ -1054,9 +1063,6 @@ rb_io_flush(VALUE io)
     if (fptr->mode & FMODE_WRITABLE) {
         if (io_fflush(fptr) < 0)
             rb_sys_fail(0);
-#ifdef _WIN32
-	fsync(fptr->fd);
-#endif
     }
     if (fptr->mode & FMODE_READABLE) {
         io_unread(fptr);
@@ -1362,8 +1368,10 @@ rb_io_fsync(VALUE io)
 
     if (io_fflush(fptr) < 0)
         rb_sys_fail(0);
+#ifndef _WIN32	/* already called in io_fflush() */
     if (fsync(fptr->fd) < 0)
 	rb_sys_fail_path(fptr->pathv);
+#endif
     return INT2FIX(0);
 }
 #else
@@ -1710,6 +1718,9 @@ fill_cbuf(rb_io_t *fptr, int ec_flags)
             if (fptr->rbuf.len == 0) {
 		READ_CHECK(fptr);
                 if (io_fillbuf(fptr) == -1) {
+		    if (!fptr->readconv) {
+			return MORE_CHAR_FINISHED;
+		    }
                     ds = dp = (unsigned char *)fptr->cbuf.ptr + fptr->cbuf.off + fptr->cbuf.len;
                     de = (unsigned char *)fptr->cbuf.ptr + fptr->cbuf.capa;
                     res = rb_econv_convert(fptr->readconv, NULL, NULL, &dp, de, 0);
@@ -2106,7 +2117,7 @@ rb_io_write_nonblock(VALUE io, VALUE str)
     long n;
 
     rb_secure(4);
-    if (TYPE(str) != T_STRING)
+    if (!RB_TYPE_P(str, T_STRING))
 	str = rb_obj_as_string(str);
 
     io = GetWriteIO(io);
@@ -2623,12 +2634,15 @@ rb_io_gets_m(int argc, VALUE *argv, VALUE io)
  *  call-seq:
  *     ios.lineno    -> integer
  *
- *  Returns the current line number in <em>ios</em>. The stream must be
+ *  Returns the current line number in <em>ios</em>.  The stream must be
  *  opened for reading. <code>lineno</code> counts the number of times
- *  <code>gets</code> is called, rather than the number of newlines
- *  encountered. The two values will differ if <code>gets</code> is
- *  called with a separator other than newline. See also the
- *  <code>$.</code> variable.
+ *  #gets is called rather than the number of newlines encountered.  The two
+ *  values will differ if #gets is called with a separator other than newline.
+ *
+ *  Methods that use <code>$/</code> like #each, #lines and #readline will
+ *  also increment <code>lineno</code>.
+ *
+ *  See also the <code>$.</code> variable.
  *
  *     f = File.new("testfile")
  *     f.lineno   #=> 0
@@ -2805,19 +2819,15 @@ static VALUE
 rb_io_each_byte(VALUE io)
 {
     rb_io_t *fptr;
-    char *p, *e;
 
     RETURN_ENUMERATOR(io, 0, 0);
     GetOpenFile(io, fptr);
 
     for (;;) {
-	p = fptr->rbuf.ptr+fptr->rbuf.off;
-	e = p + fptr->rbuf.len;
-	while (p < e) {
-	    fptr->rbuf.off++;
+	while (fptr->rbuf.len > 0) {
+	    char *p = fptr->rbuf.ptr + fptr->rbuf.off++;
 	    fptr->rbuf.len--;
 	    rb_yield(INT2FIX(*p & 0xff));
-	    p++;
 	    errno = 0;
 	}
 	rb_io_check_byte_readable(fptr);
@@ -2876,7 +2886,7 @@ io_getc(rb_io_t *fptr, rb_encoding *enc)
 	}
 	else {
 	    io_shift_cbuf(fptr, MBCLEN_CHARFOUND_LEN(r), &str);
-	    cr = ENC_CODERANGE_VALID;
+	    cr = ISASCII(r) ? ENC_CODERANGE_7BIT : ENC_CODERANGE_VALID;
 	}
 	str = io_enc_str(str, fptr);
 	ENC_CODERANGE_SET(str, cr);
@@ -3134,7 +3144,7 @@ rb_io_getbyte(VALUE io)
     GetOpenFile(io, fptr);
     rb_io_check_byte_readable(fptr);
     READ_CHECK(fptr);
-    if (fptr->fd == 0 && (fptr->mode & FMODE_TTY) && TYPE(rb_stdout) == T_FILE) {
+    if (fptr->fd == 0 && (fptr->mode & FMODE_TTY) && RB_TYPE_P(rb_stdout, T_FILE)) {
         rb_io_t *ofp;
         GetOpenFile(rb_stdout, ofp);
         if (ofp->mode & FMODE_TTY) {
@@ -3233,7 +3243,7 @@ rb_io_ungetc(VALUE io, VALUE c)
     if (FIXNUM_P(c)) {
 	c = rb_enc_uint_chr(FIX2UINT(c), io_read_encoding(fptr));
     }
-    else if (TYPE(c) == T_BIGNUM) {
+    else if (RB_TYPE_P(c, T_BIGNUM)) {
 	c = rb_enc_uint_chr(NUM2UINT(c), io_read_encoding(fptr));
     }
     else {
@@ -3611,6 +3621,12 @@ rb_io_close(VALUE io)
     if (fptr->fd < 0) return Qnil;
 
     fd = fptr->fd;
+#if defined __APPLE__ && defined(__MACH__) && \
+    (!defined(MAC_OS_X_VERSION_MIN_ALLOWED) || MAC_OS_X_VERSION_MIN_ALLOWED <= 1050)
+    /* close(2) on a fd which is being read by another thread causes
+     * deadlock on Mac OS X 10.5 */
+    rb_thread_fd_close(fd);
+#endif
     rb_io_fptr_cleanup(fptr, FALSE);
     rb_thread_fd_close(fd);
 
@@ -3870,7 +3886,7 @@ rb_io_syswrite(VALUE io, VALUE str)
     long n;
 
     rb_secure(4);
-    if (TYPE(str) != T_STRING)
+    if (!RB_TYPE_P(str, T_STRING))
 	str = rb_obj_as_string(str);
 
     io = GetWriteIO(io);
@@ -4419,7 +4435,7 @@ validate_enc_binmode(int *fmode_p, int ecflags, rb_encoding *enc, rb_encoding *e
         rb_raise(rb_eArgError, "ASCII incompatible encoding needs binmode");
 
     if (!(fmode & FMODE_BINMODE) &&
-	(ecflags & ECONV_NEWLINE_DECORATOR_MASK)) {
+	(DEFAULT_TEXTMODE || (ecflags & ECONV_NEWLINE_DECORATOR_MASK))) {
 	fmode |= DEFAULT_TEXTMODE;
 	*fmode_p = fmode;
     }
@@ -4572,7 +4588,11 @@ sysopen_func(void *ptr)
 static inline int
 rb_sysopen_internal(struct sysopen_struct *data)
 {
-    return (int)rb_thread_blocking_region(sysopen_func, data, RUBY_UBF_IO, 0);
+    int fd;
+    fd = (int)rb_thread_blocking_region(sysopen_func, data, RUBY_UBF_IO, 0);
+    if (0 <= fd)
+        rb_update_max_fd(fd);
+    return fd;
 }
 
 static int
@@ -4598,7 +4618,7 @@ rb_sysopen(VALUE fname, int oflags, mode_t perm)
 	    rb_sys_fail(RSTRING_PTR(fname));
 	}
     }
-    UPDATE_MAXFD(fd);
+    rb_update_max_fd(fd);
     return fd;
 }
 
@@ -4890,9 +4910,17 @@ rb_pipe(int *pipes)
             ret = pipe(pipes);
         }
     }
+#ifdef __CYGWIN__
+    if (ret == 0 && pipes[1] == -1) {
+	close(pipes[0]);
+	pipes[0] = -1;
+	errno = ENFILE;
+	return -1;
+    }
+#endif
     if (ret == 0) {
-        UPDATE_MAXFD(pipes[0]);
-        UPDATE_MAXFD(pipes[1]);
+        rb_update_max_fd(pipes[0]);
+        rb_update_max_fd(pipes[1]);
     }
     return ret;
 }
@@ -5446,25 +5474,28 @@ rb_open_file(int argc, VALUE *argv, VALUE io)
  *     File.open(filename, mode="r" [, opt]) {|file| block } -> obj
  *     File.open(filename [, mode [, perm]] [, opt]) {|file| block } -> obj
  *
- *  With no associated block, <code>open</code> is a synonym for
- *  <code>File.new</code>. If the optional code block is given, it will
- *  be passed <i>file</i> as an argument, and the File object will
- *  automatically be closed when the block terminates. In this instance,
+ *  With no associated block, <code>File.open</code> is a synonym for
+ *  File.new. If the optional code block is given, it will
+ *  be passed the opened +file+ as an argument, and the File object will
+ *  automatically be closed when the block terminates.  In this instance,
  *  <code>File.open</code> returns the value of the block.
+ *  
+ *  See IO.new for a list of values for the +opt+ parameter.
  */
 
 /*
  *  Document-method: IO::open
  *
  *  call-seq:
- *     IO.open(fd, mode_string="r" [, opt] )               -> io
- *     IO.open(fd, mode_string="r" [, opt] ) {|io| block } -> obj
+ *     IO.open(fd, mode_string="r" [, opt])               -> io
+ *     IO.open(fd, mode_string="r" [, opt]) {|io| block } -> obj
  *
- *  With no associated block, <code>open</code> is a synonym for
- *  <code>IO.new</code>. If the optional code block is given, it will
- *  be passed <i>io</i> as an argument, and the IO object will
- *  automatically be closed when the block terminates. In this instance,
- *  <code>IO.open</code> returns the value of the block.
+ *  With no associated block, <code>IO.open</code> is a synonym for IO.new. If
+ *  the optional code block is given, it will be passed +io+ as an
+ *  argument, and the IO object will automatically be closed when the block
+ *  terminates. In this instance, IO.open returns the value of the block.
+ *
+ *  See IO.new for a description of values for the +opt+ parameter.
  *
  */
 
@@ -5536,8 +5567,8 @@ check_pipe_command(VALUE filename_or_command)
 
 /*
  *  call-seq:
- *     open(path [, mode_enc [, perm]] [, opt] )                -> io or nil
- *     open(path [, mode_enc [, perm]] [, opt] ) {|io| block }  -> obj
+ *     open(path [, mode_enc [, perm]] [, opt])                -> io or nil
+ *     open(path [, mode_enc [, perm]] [, opt]) {|io| block }  -> obj
  *
  *  Creates an <code>IO</code> object connected to the given stream,
  *  file, or subprocess.
@@ -5771,6 +5802,7 @@ io_reopen(VALUE io, VALUE nfile)
 	    /* need to keep FILE objects of stdin, stdout and stderr */
 	    if (dup2(fd2, fd) < 0)
 		rb_sys_fail_path(orig->pathv);
+            rb_update_max_fd(fd);
 	}
 	else {
             fclose(fptr->stdio_file);
@@ -5778,6 +5810,7 @@ io_reopen(VALUE io, VALUE nfile)
             fptr->fd = -1;
             if (dup2(fd2, fd) < 0)
                 rb_sys_fail_path(orig->pathv);
+            rb_update_max_fd(fd);
             fptr->fd = fd;
 	}
 	rb_thread_fd_close(fd);
@@ -5937,7 +5970,7 @@ rb_io_init_copy(VALUE dest, VALUE io)
 
 /*
  *  call-seq:
- *     ios.printf(format_string [, obj, ...] )   -> nil
+ *     ios.printf(format_string [, obj, ...])   -> nil
  *
  *  Formats and writes to <em>ios</em>, converting parameters under
  *  control of the format string. See <code>Kernel#sprintf</code>
@@ -5953,8 +5986,8 @@ rb_io_printf(int argc, VALUE *argv, VALUE out)
 
 /*
  *  call-seq:
- *     printf(io, string [, obj ... ] )    -> nil
- *     printf(string [, obj ... ] )        -> nil
+ *     printf(io, string [, obj ... ])    -> nil
+ *     printf(string [, obj ... ])        -> nil
  *
  *  Equivalent to:
  *     io.write(sprintf(string, obj, ...)
@@ -6080,7 +6113,7 @@ static VALUE
 rb_io_putc(VALUE io, VALUE ch)
 {
     VALUE str;
-    if (TYPE(ch) == T_STRING) {
+    if (RB_TYPE_P(ch, T_STRING)) {
 	str = rb_str_substr(ch, 0, 1);
     }
     else {
@@ -6221,7 +6254,7 @@ void
 rb_p(VALUE obj) /* for debug print within C code */
 {
     VALUE str = rb_obj_as_string(rb_inspect(obj));
-    if (TYPE(rb_stdout) == T_FILE &&
+    if (RB_TYPE_P(rb_stdout, T_FILE) &&
         rb_method_basic_definition_p(CLASS_OF(rb_stdout), id_write)) {
         io_write(rb_stdout, str, 1);
         io_write(rb_stdout, rb_default_rs, 0);
@@ -6238,9 +6271,8 @@ rb_p(VALUE obj) /* for debug print within C code */
  *     p(obj1, obj2, ...)  -> [obj, ...]
  *     p()                 -> nil
  *
- *  For each object, directly writes
- *  _obj_.+inspect+ followed by the current output
- *  record separator to the program's standard output.
+ *  For each object, directly writes _obj_.+inspect+ followed by a
+ *  newline to the program's standard output.
  *
  *     S = Struct.new(:name, :state)
  *     s = S['dave', 'TX']
@@ -6266,7 +6298,7 @@ rb_f_p(int argc, VALUE *argv, VALUE self)
     else if (argc > 1) {
 	ret = rb_ary_new4(argc, argv);
     }
-    if (TYPE(rb_stdout) == T_FILE) {
+    if (RB_TYPE_P(rb_stdout, T_FILE)) {
 	rb_io_flush(rb_stdout);
     }
     return ret;
@@ -6362,6 +6394,7 @@ prep_io(int fd, int fmode, VALUE klass, const char *path)
     fp->mode = fmode;
     io_check_tty(fp);
     if (path) fp->pathv = rb_obj_freeze(rb_str_new_cstr(path));
+    rb_update_max_fd(fd);
 
     return io;
 }
@@ -6379,9 +6412,10 @@ static VALUE
 prep_stdio(FILE *f, int fmode, VALUE klass, const char *path)
 {
     rb_io_t *fptr;
-    VALUE io = prep_io(fileno(f), fmode|FMODE_PREP, klass, path);
+    VALUE io = prep_io(fileno(f), fmode|FMODE_PREP|DEFAULT_TEXTMODE, klass, path);
 
     GetOpenFile(io, fptr);
+    fptr->encs.ecflags |= ECONV_DEFAULT_NEWLINE_DECORATOR;
     fptr->stdio_file = f;
 
     return io;
@@ -6401,86 +6435,88 @@ rb_io_stdio_file(rb_io_t *fptr)
  *  call-seq:
  *     IO.new(fd [, mode] [, opt])   -> io
  *
- *  Returns a new <code>IO</code> object (a stream) for the given
- *  <code>IO</code> object or integer file descriptor and mode
- *  string. See also <code>IO.sysopen</code> and
- *  <code>IO.for_fd</code>.
+ *  Returns a new IO object (a stream) for the given IO object or integer file
+ *  descriptor and mode string.  See also IO.sysopen and IO.for_fd.
  *
  *  === Parameters
- *  fd:: numeric file descriptor
+ *
+ *  fd:: numeric file descriptor or IO object
  *  mode:: file mode. a string or an integer
- *  opt:: hash for specifying mode by name.
+ *  opt:: hash for specifying +mode+ by name.
  *
  *  ==== Mode
- *  When <code>mode</code> is an integer it must be combination of
- *  the modes defined in <code>File::Constants</code>.
  *
- *  When <code>mode</code> is a string it must be in one of the
- *  following forms:
+ *  When mode is an integer it must be combination of the modes defined in
+ *  File::Constants.
+ *
+ *  When mode is a string it must be in one of the following forms:
  *  - "fmode",
  *  - "fmode:extern",
  *  - "fmode:extern:intern".
  *  <code>extern</code> is the external encoding name for the IO.
  *  <code>intern</code> is the internal encoding.
- *  <code>fmode</code> must be combination of the directives. See
- *  the description of class +IO+ for a description of the directives.
+ *  <code>fmode</code> must be a file open mode string. See the description of
+ *  class IO for mode string directives.
  *
  *  When the mode of original IO is read only, the mode cannot be changed to
  *  be writable.  Similarly, the mode cannot be changed from write only to
  *  readable.
- *  If such a wrong change is directed, timing where the error actually occurs
- *  is different according to the platform.
+ *
+ *  When such a change is attempted the error is raised in different locations
+ *  according to the platform.
  *
  *  ==== Options
- *  <code>opt</code> can have the following keys
+ *  +opt+ can have the following keys
  *  :mode ::
- *    same as <code>mode</code> parameter
+ *    Same as +mode+ parameter
  *  :external_encoding ::
- *    external encoding for the IO. "-" is a
- *    synonym for the default external encoding.
+ *    External encoding for the IO.  "-" is a synonym for the default external
+ *    encoding.
  *  :internal_encoding ::
- *    internal encoding for the IO.
- *    "-" is a synonym for the default internal encoding.
+ *    Internal encoding for the IO.  "-" is a synonym for the default internal
+ *    encoding.
+ *
  *    If the value is nil no conversion occurs.
  *  :encoding ::
- *    specifies external and internal encodings as "extern:intern".
+ *    Specifies external and internal encodings as "extern:intern".
  *  :textmode ::
- *    If the value is truth value, same as "t" in argument <code>mode</code>.
+ *    If the value is truth value, same as "t" in argument +mode+.
  *  :binmode ::
- *    If the value is truth value, same as "b" in argument <code>mode</code>.
+ *    If the value is truth value, same as "b" in argument +mode+.
  *  :autoclose ::
- *    If the value is +false+, the _fd_ will be kept open after this
- *    +IO+ instance gets finalized.
+ *    If the value is +false+, the +fd+ will be kept open after this IO
+ *    instance gets finalized.
  *
- *  Also <code>opt</code> can have same keys in <code>String#encode</code> for
- *  controlling conversion between the external encoding and the internal encoding.
+ *  Also +opt+ can have same keys in String#encode for controlling conversion
+ *  between the external encoding and the internal encoding.
  *
- *  === Example1
+ *  === Example 1
  *
- *     fd = IO.sysopen("/dev/tty", "w")
- *     a = IO.new(fd,"w")
- *     $stderr.puts "Hello"
- *     a.puts "World"
+ *    fd = IO.sysopen("/dev/tty", "w")
+ *    a = IO.new(fd,"w")
+ *    $stderr.puts "Hello"
+ *    a.puts "World"
  *
  *  <em>produces:</em>
  *
- *     Hello
- *     World
+ *    Hello
+ *    World
  *
- *  === Example2
+ *  === Example 2
  *
- *     require 'fcntl'
+ *    require 'fcntl'
  *
- *     fd = STDERR.fcntl(Fcntl::F_DUPFD)
- *     io = IO.new(fd, mode: 'w:UTF-16LE', cr_newline: true)
- *     io.puts "Hello, World!"
+ *    fd = STDERR.fcntl(Fcntl::F_DUPFD)
+ *    io = IO.new(fd, mode: 'w:UTF-16LE', cr_newline: true)
+ *    io.puts "Hello, World!"
  *
- *     fd = STDERR.fcntl(Fcntl::F_DUPFD)
- *     io = IO.new(fd, mode: 'w', cr_newline: true, external_encoding: Encoding::UTF_16LE)
- *     io.puts "Hello, World!"
+ *    fd = STDERR.fcntl(Fcntl::F_DUPFD)
+ *    io = IO.new(fd, mode: 'w', cr_newline: true,
+ *                external_encoding: Encoding::UTF_16LE)
+ *    io.puts "Hello, World!"
  *
- *  both of above print "Hello, World!" in UTF-16LE to standard error output with
- *  converting EOL generated by <code>puts</code> to CR.
+ *  Both of above print "Hello, World!" in UTF-16LE to standard error output
+ *  with converting EOL generated by <code>puts</code> to CR.
  */
 
 static VALUE
@@ -6503,13 +6539,16 @@ rb_io_initialize(int argc, VALUE *argv, VALUE io)
     rb_io_extract_modeenc(&vmode, 0, opt, &oflags, &fmode, &convconfig);
 
     fd = NUM2INT(fnum);
+    if (rb_reserved_fd_p(fd)) {
+	rb_raise(rb_eArgError, "The given fd is not accessible because RubyVM reserves it");
+    }
 #if defined(HAVE_FCNTL) && defined(F_GETFL)
     oflags = fcntl(fd, F_GETFL);
     if (oflags == -1) rb_sys_fail(0);
 #else
     if (fstat(fd, &st) == -1) rb_sys_fail(0);
 #endif
-    UPDATE_MAXFD(fd);
+    rb_update_max_fd(fd);
 #if defined(HAVE_FCNTL) && defined(F_GETFL)
     ofmode = rb_io_oflags_fmode(oflags);
     if (NIL_P(vmode)) {
@@ -6545,27 +6584,26 @@ rb_io_initialize(int argc, VALUE *argv, VALUE io)
  *     File.new(filename, mode="r" [, opt])            -> file
  *     File.new(filename [, mode [, perm]] [, opt])    -> file
  *
- *  Opens the file named by _filename_ according to
- *  _mode_ (default is ``r'') and returns a new
- *  <code>File</code> object.
+ *  Opens the file named by +filename+ according to +mode+ (default is "r")
+ *  and returns a new <code>File</code> object.
  *
  *  === Parameters
- *  See the description of class +IO+ for a description of _mode_.
- *  The file mode may optionally be specified as a +Fixnum+
- *  by _or_-ing together the flags (O_RDONLY etc,
- *  again described under +IO+).
  *
- *  Optional permission bits may be given in _perm_.
- *  These mode and permission bits are platform dependent;
- *  on Unix systems, see <code>open(2)</code> for details.
+ *  See the description of class IO for a description of +mode+.  The file
+ *  mode may optionally be specified as a Fixnum by +or+-ing together the
+ *  flags (O_RDONLY etc, again described under +IO+).
  *
- *  Optional _opt_ parameter is same as in <code.IO.open</code>.
+ *  Optional permission bits may be given in +perm+.  These mode and
+ *  permission bits are platform dependent; on Unix systems, see
+ *  <code>open(2)</code> for details.
+ *
+ *  Optional +opt+ parameter is same as in IO.open.
  *
  *  === Examples
  *
- *     f = File.new("testfile", "r")
- *     f = File.new("newfile",  "w+")
- *     f = File.new("newfile", File::CREAT|File::TRUNC|File::RDWR, 0644)
+ *    f = File.new("testfile", "r")
+ *    f = File.new("newfile",  "w+")
+ *    f = File.new("newfile", File::CREAT|File::TRUNC|File::RDWR, 0644)
  */
 
 static VALUE
@@ -6729,7 +6767,7 @@ argf_initialize_copy(VALUE argf, VALUE orig)
 
 /*
  *  call-seq:
- *     ARGF.lineno = number  -> nil
+ *     ARGF.lineno = integer  -> integer
  *
  *  Sets the line number of +ARGF+ as a whole to the given +Integer+.
  *
@@ -6742,7 +6780,7 @@ argf_initialize_copy(VALUE argf, VALUE orig)
  *      ARGF.lineno      #=> 0
  *      ARGF.readline    #=> "This is line 1\n"
  *      ARGF.lineno      #=> 1
- *      ARGF.lineno = 0  #=> nil
+ *      ARGF.lineno = 0  #=> 0
  *      ARGF.lineno      #=> 0
  */
 static VALUE
@@ -6805,8 +6843,9 @@ argf_next_argv(VALUE argf)
     char *fn;
     rb_io_t *fptr;
     int stdout_binmode = 0;
+    int fmode;
 
-    if (TYPE(rb_stdout) == T_FILE) {
+    if (RB_TYPE_P(rb_stdout, T_FILE)) {
         GetOpenFile(rb_stdout, fptr);
         if (fptr->mode & FMODE_BINMODE)
             stdout_binmode = 1;
@@ -6846,21 +6885,21 @@ argf_next_argv(VALUE argf)
 		    VALUE str;
 		    int fw;
 
-		    if (TYPE(rb_stdout) == T_FILE && rb_stdout != orig_stdout) {
+		    if (RB_TYPE_P(rb_stdout, T_FILE) && rb_stdout != orig_stdout) {
 			rb_io_close(rb_stdout);
 		    }
 		    fstat(fr, &st);
 		    if (*ARGF.inplace) {
 			str = rb_str_new2(fn);
-#ifdef NO_LONG_FNAME
-                        ruby_add_suffix(str, ARGF.inplace);
-#else
 			rb_str_cat2(str, ARGF.inplace);
-#endif
 #ifdef NO_SAFE_RENAME
 			(void)close(fr);
 			(void)unlink(RSTRING_PTR(str));
-			(void)rename(fn, RSTRING_PTR(str));
+			if (rename(fn, RSTRING_PTR(str)) < 0) {
+			    rb_warn("Can't rename %s to %s: %s, skipping file",
+				    fn, RSTRING_PTR(str), strerror(errno));
+			    goto retry;
+			}
 			fr = rb_sysopen(str, O_RDONLY, 0);
 #else
 			if (rename(fn, RSTRING_PTR(str)) < 0) {
@@ -6913,18 +6952,24 @@ argf_next_argv(VALUE argf)
 		    rb_stdout = write_io;
 		    if (stdout_binmode) rb_io_binmode(rb_stdout);
 		}
-		ARGF.current_file = prep_io(fr, FMODE_READABLE, rb_cFile, fn);
+		fmode = FMODE_READABLE;
+		if (!ARGF.binmode) fmode |= DEFAULT_TEXTMODE;
+		ARGF.current_file = prep_io(fr, fmode, rb_cFile, fn);
 		if (!NIL_P(write_io)) {
 		    rb_io_set_write_io(ARGF.current_file, write_io);
 		}
 	    }
 	    if (ARGF.binmode) rb_io_ascii8bit_binmode(ARGF.current_file);
+	    GetOpenFile(ARGF.current_file, fptr);
 	    if (ARGF.encs.enc) {
-		rb_io_t *fptr;
-
-		GetOpenFile(ARGF.current_file, fptr);
 		fptr->encs = ARGF.encs;
                 clear_codeconv(fptr);
+	    }
+	    else {
+		fptr->encs.ecflags &= ~ECONV_NEWLINE_DECORATOR_MASK;
+		if (!ARGF.binmode) {
+		    fptr->encs.ecflags |= ECONV_DEFAULT_NEWLINE_DECORATOR;
+		}
 	    }
 	    ARGF.next_p = 0;
 	}
@@ -7460,7 +7505,8 @@ do_io_advise(rb_io_t *fptr, VALUE advice, off_t offset, off_t len)
     ias.offset = offset;
     ias.len    = len;
 
-    if (rv = (int)rb_thread_io_blocking_region(io_advise_internal, &ias, fptr->fd))
+    rv = (int)rb_thread_io_blocking_region(io_advise_internal, &ias, fptr->fd);
+    if (rv)
 	/* posix_fadvise(2) doesn't set errno. On success it returns 0; otherwise
 	   it returns the error code. */
 	rb_syserr_fail(rv, RSTRING_PTR(fptr->pathv));
@@ -7664,7 +7710,7 @@ io_cntl(int fd, int cmd, long narg, int io_p)
     retval = (int)rb_thread_io_blocking_region(nogvl_io_cntl, &arg, fd);
 #if defined(F_DUPFD)
     if (!io_p && retval != -1 && cmd == F_DUPFD) {
-	UPDATE_MAXFD(retval);
+	rb_update_max_fd(retval);
     }
 #endif
 
@@ -7724,7 +7770,7 @@ rb_io_ctl(VALUE io, VALUE req, VALUE arg, int io_p)
     GetOpenFile(io, fptr);
     retval = io_cntl(fptr->fd, cmd, narg, io_p);
     if (retval < 0) rb_sys_fail_path(fptr->pathv);
-    if (TYPE(arg) == T_STRING && RSTRING_PTR(arg)[len] != 17) {
+    if (RB_TYPE_P(arg, T_STRING) && RSTRING_PTR(arg)[len] != 17) {
 	rb_raise(rb_eArgError, "return value overflowed string");
     }
 
@@ -7959,7 +8005,7 @@ static void
 io_encoding_set(rb_io_t *fptr, VALUE v1, VALUE v2, VALUE opt)
 {
     rb_encoding *enc, *enc2;
-    int ecflags;
+    int ecflags = fptr->encs.ecflags;
     VALUE ecopts, tmp;
 
     if (!NIL_P(v2)) {
@@ -7980,24 +8026,22 @@ io_encoding_set(rb_io_t *fptr, VALUE v1, VALUE v2, VALUE opt)
 	}
 	else
 	    enc = rb_to_encoding(v2);
-        ecflags = rb_econv_prepare_opts(opt, &ecopts);
+	ecflags = rb_econv_prepare_options(opt, &ecopts, ecflags);
     }
     else {
 	if (NIL_P(v1)) {
 	    /* Set to default encodings */
 	    rb_io_ext_int_to_encs(NULL, NULL, &enc, &enc2);
-            ecflags = 0;
             ecopts = Qnil;
 	}
 	else {
 	    tmp = rb_check_string_type(v1);
 	    if (!NIL_P(tmp) && rb_enc_asciicompat(rb_enc_get(tmp))) {
                 parse_mode_enc(RSTRING_PTR(tmp), &enc, &enc2, NULL);
-                ecflags = rb_econv_prepare_opts(opt, &ecopts);
+                ecflags = rb_econv_prepare_options(opt, &ecopts, ecflags);
 	    }
 	    else {
 		rb_io_ext_int_to_encs(rb_to_encoding(v1), NULL, &enc, &enc2);
-                ecflags = 0;
                 ecopts = Qnil;
 	    }
 	}
@@ -8115,7 +8159,15 @@ rb_io_s_pipe(int argc, VALUE *argv, VALUE klass)
     rb_io_synchronized(fptr2);
 
     extract_binmode(opt, &fmode);
+#if DEFAULT_TEXTMODE
+    if ((fptr->mode & FMODE_TEXTMODE) && (fmode & FMODE_BINMODE))
+	fptr->mode &= ~FMODE_TEXTMODE;
+#endif
     fptr->mode |= fmode;
+#if DEFAULT_TEXTMODE
+    if ((fptr2->mode & FMODE_TEXTMODE) && (fmode & FMODE_BINMODE))
+	fptr2->mode &= ~FMODE_TEXTMODE;
+#endif
     fptr2->mode |= fmode;
 
     ret = rb_assoc_new(r, w);
@@ -8366,6 +8418,124 @@ rb_io_s_binread(int argc, VALUE *argv, VALUE io)
     return rb_ensure(io_s_read, (VALUE)&arg, rb_io_close, arg.io);
 }
 
+static VALUE
+io_s_write0(struct write_arg *arg)
+{
+    return io_write(arg->io,arg->str,arg->nosync);
+}
+
+static VALUE
+io_s_write(int argc, VALUE *argv, int binary)
+{
+    VALUE string, offset, opt;
+    struct foreach_arg arg;
+    struct write_arg warg;
+
+    rb_scan_args(argc, argv, "21:", NULL, &string, &offset, &opt);
+
+    if (NIL_P(opt)) opt = rb_hash_new();
+    else opt = rb_hash_dup(opt);
+
+
+    if (NIL_P(rb_hash_aref(opt,sym_mode))) {
+       int mode = O_WRONLY|O_CREAT;
+#ifdef O_BINARY
+       if (binary) mode |= O_BINARY;
+#endif
+       if (NIL_P(offset)) mode |= O_TRUNC;
+       rb_hash_aset(opt,sym_mode,INT2NUM(mode));
+    }
+    open_key_args(argc,argv,opt,&arg);
+
+#ifndef O_BINARY
+    if (binary) rb_io_binmode_m(arg.io);
+#endif
+
+    if (NIL_P(arg.io)) return Qnil;
+    if (!NIL_P(offset)) {
+       struct seek_arg sarg;
+       int state = 0;
+       sarg.io = arg.io;
+       sarg.offset = offset;
+       sarg.mode = SEEK_SET;
+       rb_protect(seek_before_access, (VALUE)&sarg, &state);
+       if (state) {
+           rb_io_close(arg.io);
+           rb_jump_tag(state);
+       }
+    }
+
+    warg.io = arg.io;
+    warg.str = string;
+    warg.nosync = 0;
+
+    return rb_ensure(io_s_write0, (VALUE)&warg, rb_io_close, arg.io);
+}
+
+/*
+ *  call-seq:
+ *     IO.write(name, string, [offset] )   => fixnum
+ *     IO.write(name, string, [offset], open_args )   => fixnum
+ *
+ *  Opens the file, optionally seeks to the given <i>offset</i>, writes
+ *  <i>string</i>, then returns the length written.
+ *  <code>write</code> ensures the file is closed before returning.
+ *  If <i>offset</i> is not given, the file is truncated.  Otherwise,
+ *  it is not truncated.
+ *
+ *  If the last argument is a hash, it specifies option for internal
+ *  open().  The key would be the following.  open_args: is exclusive
+ *  to others.
+ *
+ *   encoding: string or encoding
+ *
+ *    specifies encoding of the read string.  encoding will be ignored
+ *    if length is specified.
+ *
+ *   mode: string
+ *
+ *    specifies mode argument for open().  it should start with "w" or "a" or "r+"
+ *    otherwise it would cause error.
+ *
+ *   perm: fixnum
+ *
+ *    specifies perm argument for open().
+ *
+ *   open_args: array of strings
+ *
+ *    specifies arguments for open() as an array.
+ *
+ *     IO.write("testfile", "0123456789")      #=> "0123456789"
+ *     IO.write("testfile", "0123456789", 20)  #=> "This is line one\nThi0123456789two\nThis is line three\nAnd so on...\n"
+ */
+
+static VALUE
+rb_io_s_write(int argc, VALUE *argv, VALUE io)
+{
+    return io_s_write(argc, argv, 0);
+}
+
+/*
+ *  call-seq:
+ *     IO.binwrite(name, string, [offset] )   => fixnum
+ *
+ *  Opens the file, optionally seeks to the given <i>offset</i>, write
+ *  <i>string</i> then returns the length written.
+ *  <code>binwrite</code> ensures the file is closed before returning.
+ *  The open mode would be "wb:ASCII-8BIT".
+ *  If <i>offset</i> is not given, the file is truncated.  Otherwise,
+ *  it is not truncated.
+ *
+ *     IO.binwrite("testfile", "0123456789")      #=> "0123456789"
+ *     IO.binwrite("testfile", "0123456789", 20)  #=> "This is line one\nThi0123456789two\nThis is line three\nAnd so on...\n"
+ */
+
+static VALUE
+rb_io_s_binwrite(int argc, VALUE *argv, VALUE io)
+{
+    return io_s_write(argc, argv, 1);
+}
+
 struct copy_stream_struct {
     VALUE src;
     VALUE dst;
@@ -8384,13 +8554,58 @@ struct copy_stream_struct {
     VALUE th;
 };
 
+static void *
+exec_interrupts(void *arg)
+{
+    VALUE th = (VALUE)arg;
+    rb_thread_execute_interrupts(th);
+    return NULL;
+}
+
+/*
+ * returns TRUE if the preceding system call was interrupted
+ * so we can continue.  If the thread was interrupted, we
+ * reacquire the GVL to execute interrupts before continuing.
+ */
 static int
-maygvl_copy_stream_wait_read(struct copy_stream_struct *stp)
+maygvl_copy_stream_continue_p(int has_gvl, struct copy_stream_struct *stp)
+{
+    switch (errno) {
+      case EINTR:
+#if defined(ERESTART)
+      case ERESTART:
+#endif
+	if (rb_thread_interrupted(stp->th)) {
+            if (has_gvl)
+                rb_thread_execute_interrupts(stp->th);
+            else
+                rb_thread_call_with_gvl(exec_interrupts, (void *)stp->th);
+        }
+	return TRUE;
+    }
+    return FALSE;
+}
+
+static int
+maygvl_select(int has_gvl, int n, rb_fdset_t *rfds, rb_fdset_t *wfds, rb_fdset_t *efds, struct timeval *timeout)
+{
+    if (has_gvl)
+        return rb_thread_fd_select(n, rfds, wfds, efds, timeout);
+    else
+        return rb_fd_select(n, rfds, wfds, efds, timeout);
+}
+
+static int
+maygvl_copy_stream_wait_read(int has_gvl, struct copy_stream_struct *stp)
 {
     int ret;
-    rb_fd_zero(&stp->fds);
-    rb_fd_set(stp->src_fd, &stp->fds);
-    ret = rb_fd_select(rb_fd_max(&stp->fds), &stp->fds, NULL, NULL, NULL);
+
+    do {
+	rb_fd_zero(&stp->fds);
+	rb_fd_set(stp->src_fd, &stp->fds);
+        ret = maygvl_select(has_gvl, rb_fd_max(&stp->fds), &stp->fds, NULL, NULL, NULL);
+    } while (ret == -1 && maygvl_copy_stream_continue_p(has_gvl, stp));
+
     if (ret == -1) {
         stp->syserr = "select";
         stp->error_no = errno;
@@ -8403,9 +8618,13 @@ static int
 nogvl_copy_stream_wait_write(struct copy_stream_struct *stp)
 {
     int ret;
-    rb_fd_zero(&stp->fds);
-    rb_fd_set(stp->dst_fd, &stp->fds);
-    ret = rb_fd_select(rb_fd_max(&stp->fds), NULL, &stp->fds, NULL, NULL);
+
+    do {
+	rb_fd_zero(&stp->fds);
+	rb_fd_set(stp->dst_fd, &stp->fds);
+        ret = rb_fd_select(rb_fd_max(&stp->fds), NULL, &stp->fds, NULL, NULL);
+    } while (ret == -1 && maygvl_copy_stream_continue_p(0, stp));
+
     if (ret == -1) {
         stp->syserr = "select";
         stp->error_no = errno;
@@ -8466,22 +8685,6 @@ simple_sendfile(int out_fd, int in_fd, off_t *offset, off_t count)
 #endif
 
 #ifdef USE_SENDFILE
-static int
-maygvl_copy_stream_wait_readwrite(struct copy_stream_struct *stp)
-{
-    int ret;
-    rb_fd_zero(&stp->fds);
-    rb_fd_set(stp->src_fd, &stp->fds);
-    rb_fd_set(stp->dst_fd, &stp->fds);
-    ret = rb_fd_select(rb_fd_max(&stp->fds), &stp->fds, NULL, NULL, NULL);
-    if (ret == -1) {
-        stp->syserr = "select";
-        stp->error_no = errno;
-        return -1;
-    }
-    return 0;
-}
-
 static int
 nogvl_copy_stream_sendfile(struct copy_stream_struct *stp)
 {
@@ -8552,6 +8755,8 @@ nogvl_copy_stream_sendfile(struct copy_stream_struct *stp)
         }
     }
     if (ss == -1) {
+	if (maygvl_copy_stream_continue_p(0, stp))
+	    goto retry_sendfile;
         switch (errno) {
 	  case EINVAL:
 #ifdef ENOSYS
@@ -8562,9 +8767,18 @@ nogvl_copy_stream_sendfile(struct copy_stream_struct *stp)
 #if defined(EWOULDBLOCK) && EWOULDBLOCK != EAGAIN
 	  case EWOULDBLOCK:
 #endif
-            if (maygvl_copy_stream_wait_readwrite(stp) == -1)
+#ifndef linux
+           /*
+            * Linux requires stp->src_fd to be a mmap-able (regular) file,
+            * select() reports regular files to always be "ready", so
+            * there is no need to select() on it.
+            * Other OSes may have the same limitation for sendfile() which
+            * allow us to bypass maygvl_copy_stream_wait_read()...
+            */
+            if (maygvl_copy_stream_wait_read(0, stp) == -1)
                 return -1;
-            if (rb_thread_interrupted(stp->th))
+#endif
+            if (nogvl_copy_stream_wait_write(stp) == -1)
                 return -1;
             goto retry_sendfile;
         }
@@ -8577,12 +8791,22 @@ nogvl_copy_stream_sendfile(struct copy_stream_struct *stp)
 #endif
 
 static ssize_t
-maygvl_copy_stream_read(struct copy_stream_struct *stp, char *buf, size_t len, off_t offset)
+maygvl_read(int has_gvl, int fd, void *buf, size_t count)
+{
+    if (has_gvl)
+        return rb_read_internal(fd, buf, count);
+    else
+        return read(fd, buf, count);
+}
+
+static ssize_t
+maygvl_copy_stream_read(int has_gvl, struct copy_stream_struct *stp, char *buf, size_t len, off_t offset)
 {
     ssize_t ss;
   retry_read:
-    if (offset == (off_t)-1)
-        ss = read(stp->src_fd, buf, len);
+    if (offset == (off_t)-1) {
+        ss = maygvl_read(has_gvl, stp->src_fd, buf, len);
+    }
     else {
 #ifdef HAVE_PREAD
         ss = pread(stp->src_fd, buf, len, offset);
@@ -8595,12 +8819,14 @@ maygvl_copy_stream_read(struct copy_stream_struct *stp, char *buf, size_t len, o
         return 0;
     }
     if (ss == -1) {
+	if (maygvl_copy_stream_continue_p(has_gvl, stp))
+	    goto retry_read;
         switch (errno) {
 	  case EAGAIN:
 #if defined(EWOULDBLOCK) && EWOULDBLOCK != EAGAIN
 	  case EWOULDBLOCK:
 #endif
-            if (maygvl_copy_stream_wait_read(stp) == -1)
+            if (maygvl_copy_stream_wait_read(has_gvl, stp) == -1)
                 return -1;
             goto retry_read;
 #ifdef ENOSYS
@@ -8624,6 +8850,8 @@ nogvl_copy_stream_write(struct copy_stream_struct *stp, char *buf, size_t len)
     while (len) {
         ss = write(stp->dst_fd, buf+off, len);
         if (ss == -1) {
+	    if (maygvl_copy_stream_continue_p(0, stp))
+		continue;
             if (errno == EAGAIN || errno == EWOULDBLOCK) {
                 if (nogvl_copy_stream_wait_write(stp) == -1)
                     return -1;
@@ -8678,12 +8906,12 @@ nogvl_copy_stream_read_write(struct copy_stream_struct *stp)
             len = sizeof(buf);
         }
         if (use_pread) {
-            ss = maygvl_copy_stream_read(stp, buf, len, src_offset);
+            ss = maygvl_copy_stream_read(0, stp, buf, len, src_offset);
             if (0 < ss)
                 src_offset += ss;
         }
         else {
-            ss = maygvl_copy_stream_read(stp, buf, len, (off_t)-1);
+            ss = maygvl_copy_stream_read(0, stp, buf, len, (off_t)-1);
         }
         if (ss <= 0) /* EOF or error */
             return;
@@ -8694,9 +8922,6 @@ nogvl_copy_stream_read_write(struct copy_stream_struct *stp)
 
         if (!use_eof)
             copy_length -= ss;
-
-        if (rb_thread_interrupted(stp->th))
-            return;
     }
 }
 
@@ -8757,7 +8982,7 @@ copy_stream_fallback_body(VALUE arg)
             ssize_t ss;
             rb_thread_wait_fd(stp->src_fd);
             rb_str_resize(buf, buflen);
-            ss = maygvl_copy_stream_read(stp, RSTRING_PTR(buf), l, off);
+            ss = maygvl_copy_stream_read(1, stp, RSTRING_PTR(buf), l, off);
             if (ss == -1)
                 return Qnil;
             if (ss == 0)
@@ -9044,7 +9269,7 @@ rb_io_set_encoding(int argc, VALUE *argv, VALUE io)
     rb_io_t *fptr;
     VALUE v1, v2, opt;
 
-    if (TYPE(io) != T_FILE) {
+    if (!RB_TYPE_P(io, T_FILE)) {
         return rb_funcall2(io, id_set_encoding, argc, argv);
     }
 
@@ -10127,7 +10352,7 @@ argf_write(VALUE argf, VALUE str)
  * Document-class:  ARGF
  *
  * +ARGF+ is a stream designed for use in scripts that process files given as
- * command-line arguments, or passed in via STDIN.
+ * command-line arguments or passed in via STDIN.
  *
  * The arguments passed to your script are stored in the +ARGV+ Array, one
  * argument per element. +ARGF+ assumes that any arguments that aren't
@@ -10143,7 +10368,7 @@ argf_write(VALUE argf, VALUE str)
  * files. For instance, +ARGF.read+ will return the contents of _file1_
  * followed by the contents of _file2_.
  *
- * After a file in +ARGV+ has been read, +ARGF+ removes it from the Array.
+ * After a file in +ARGV+ has been read +ARGF+ removes it from the Array.
  * Thus, after all files have been read +ARGV+ will be empty.
  *
  * You can manipulate +ARGV+ yourself to control what +ARGF+ operates on. If
@@ -10315,6 +10540,8 @@ Init_IO(void)
     rb_define_singleton_method(rb_cIO, "readlines", rb_io_s_readlines, -1);
     rb_define_singleton_method(rb_cIO, "read", rb_io_s_read, -1);
     rb_define_singleton_method(rb_cIO, "binread", rb_io_s_binread, -1);
+    rb_define_singleton_method(rb_cIO, "write", rb_io_s_write, -1);
+    rb_define_singleton_method(rb_cIO, "binwrite", rb_io_s_binwrite, -1);
     rb_define_singleton_method(rb_cIO, "select", rb_f_select, -1);
     rb_define_singleton_method(rb_cIO, "pipe", rb_io_s_pipe, -1);
     rb_define_singleton_method(rb_cIO, "try_convert", rb_io_s_try_convert, 1);
@@ -10433,9 +10660,11 @@ Init_IO(void)
     orig_stdout = rb_stdout;
     rb_deferr = orig_stderr = rb_stderr;
 
-    /* constants to hold original stdin/stdout/stderr */
+    /* Holds the original stdin */
     rb_define_global_const("STDIN", rb_stdin);
+    /* Holds the original stdout */
     rb_define_global_const("STDOUT", rb_stdout);
+    /* Holds the original stderr */
     rb_define_global_const("STDERR", rb_stderr);
 
     /*
@@ -10512,6 +10741,12 @@ Init_IO(void)
     argf = rb_class_new_instance(0, 0, rb_cARGF);
 
     rb_define_readonly_variable("$<", &argf);
+    /*
+     * ARGF is a stream designed for use in scripts that process files given
+     * as command-line arguments or passed in via STDIN.
+     *
+     * See ARGF (the class) for more details.
+     */
     rb_define_global_const("ARGF", argf);
 
     rb_define_hooked_variable("$.", &argf, argf_lineno_getter, argf_lineno_setter);
@@ -10557,7 +10792,7 @@ Init_IO(void)
 #ifndef O_BINARY
 # define  O_BINARY 0
 #endif
-    /* disable line code conversion and make ASCII-8BIT */
+    /* disable line code conversion */
     rb_file_const("BINARY", INT2FIX(O_BINARY));
 #ifdef O_SYNC
     rb_file_const("SYNC", INT2FIX(O_SYNC));

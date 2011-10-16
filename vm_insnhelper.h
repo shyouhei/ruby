@@ -184,8 +184,17 @@ extern VALUE ruby_vm_const_missing_count;
 /**********************************************************/
 
 /* optimize insn */
+#define FIXNUM_REDEFINED_OP_FLAG (1 << 0)
+#define FLOAT_REDEFINED_OP_FLAG  (1 << 1)
+#define STRING_REDEFINED_OP_FLAG (1 << 2)
+#define ARRAY_REDEFINED_OP_FLAG  (1 << 3)
+#define HASH_REDEFINED_OP_FLAG   (1 << 4)
+#define BIGNUM_REDEFINED_OP_FLAG (1 << 5)
+#define SYMBOL_REDEFINED_OP_FLAG (1 << 6)
+#define TIME_REDEFINED_OP_FLAG   (1 << 7)
+
 #define FIXNUM_2_P(a, b) ((a) & (b) & 1)
-#define BASIC_OP_UNREDEFINED_P(op) (LIKELY(ruby_vm_redefined_flag[(op)] == 0))
+#define BASIC_OP_UNREDEFINED_P(op, klass) (LIKELY((ruby_vm_redefined_flag[(op)]&(klass)) == 0))
 #define HEAP_CLASS_OF(obj) RBASIC(obj)->klass
 
 #ifndef USE_IC_FOR_SPECIALIZED_METHOD
@@ -207,5 +216,18 @@ extern VALUE ruby_vm_const_missing_count;
 } while (0)
 
 #endif
+
+static VALUE ruby_vm_global_state_version = 1;
+
+#define GET_VM_STATE_VERSION() (ruby_vm_global_state_version)
+#define INC_VM_STATE_VERSION() do { \
+    ruby_vm_global_state_version = (ruby_vm_global_state_version + 1); \
+    if (ruby_vm_global_state_version == 0) vm_clear_all_cache(); \
+} while (0)
+static void vm_clear_all_cache(void);
+
+static VALUE make_no_method_exception(VALUE exc, const char *format,
+				      VALUE obj, int argc, const VALUE *argv);
+
 
 #endif /* RUBY_INSNHELPER_H */

@@ -1,9 +1,3 @@
-######################################################################
-# This file is imported from the rubygems project.
-# DO NOT make modifications in this repo. They _will_ be reverted!
-# File a patch instead and assign it to Ryan Davis or Eric Hodel.
-######################################################################
-
 require 'rubygems/test_case'
 require 'rubygems/commands/specification_command'
 
@@ -17,7 +11,8 @@ class TestGemCommandsSpecificationCommand < Gem::TestCase
 
   def test_execute
     foo = quick_spec 'foo'
-    Gem.source_index.add_spec foo
+
+    install_specs foo
 
     @cmd.options[:args] = %w[foo]
 
@@ -77,8 +72,9 @@ class TestGemCommandsSpecificationCommand < Gem::TestCase
   end
 
   def test_execute_field
-    foo = quick_spec 'foo'
-    Gem.source_index.add_spec foo
+    foo = new_spec 'foo', '2'
+
+    install_specs foo
 
     @cmd.options[:args] = %w[foo name]
 
@@ -90,8 +86,9 @@ class TestGemCommandsSpecificationCommand < Gem::TestCase
   end
 
   def test_execute_marshal
-    foo = quick_spec 'foo'
-    Gem.source_index.add_spec foo
+    foo = new_spec 'foo', '2'
+
+    install_specs foo
 
     @cmd.options[:args] = %w[foo]
     @cmd.options[:format] = :marshal
@@ -127,7 +124,8 @@ class TestGemCommandsSpecificationCommand < Gem::TestCase
 
   def test_execute_ruby
     foo = quick_spec 'foo'
-    Gem.source_index.add_spec foo
+
+    install_specs foo
 
     @cmd.options[:args] = %w[foo]
     @cmd.options[:format] = :ruby
@@ -137,7 +135,7 @@ class TestGemCommandsSpecificationCommand < Gem::TestCase
     end
 
     assert_match %r|Gem::Specification.new|, @ui.output
-    assert_match %r|s.name = %q\{foo\}|, @ui.output
+    assert_match %r|s.name = "foo"|, @ui.output
     assert_equal '', @ui.error
   end
 

@@ -129,11 +129,11 @@ count_all_i(VALUE i, VALUE memop, int argc, VALUE *argv)
  *     enum.count(item)             -> int
  *     enum.count {| obj | block }  -> int
  *
- *  Returns the number of items in <i>enum</i>, where #size is called
- *  if it responds to it, otherwise the items are counted through
- *  enumeration.  If an argument is given, counts the number of items
- *  in <i>enum</i>, for which equals to <i>item</i>.  If a block is
- *  given, counts the number of elements yielding a true value.
+ *  Returns the number of items in <i>enum</i> if it responds to a #size call,
+ *  otherwise the items are counted through enumeration.  If an argument is
+ *  given the number of items in <i>enum</i> that are equal to <i>item</i> are
+ *  counted.  If a block is given, it counts the number of elements yielding a
+ *  true value.
  *
  *     ary = [1, 2, 4, 2]
  *     ary.count             #=> 4
@@ -521,7 +521,6 @@ inject_op_i(VALUE i, VALUE p, int argc, VALUE *argv)
  *     enum.inject(sym)          -> obj
  *     enum.inject(initial) {| memo, obj | block }  -> obj
  *     enum.inject          {| memo, obj | block }  -> obj
- *
  *     enum.reduce(initial, sym) -> obj
  *     enum.reduce(sym)          -> obj
  *     enum.reduce(initial) {| memo, obj | block }  -> obj
@@ -540,10 +539,9 @@ inject_op_i(VALUE i, VALUE p, int argc, VALUE *argv)
  *  return value for the method.
  *
  *  If you do not explicitly specify an <i>initial</i> value for <i>memo</i>,
- *  then uses the first element of collection is used as the initial value
+ *  then the first element of collection is used as the initial value
  *  of <i>memo</i>.
  *
- *  Examples:
  *
  *     # Sum some numbers
  *     (5..10).reduce(:+)                            #=> 45
@@ -659,13 +657,13 @@ group_by_i(VALUE i, VALUE hash, int argc, VALUE *argv)
  *     enum.group_by {| obj | block }  -> a_hash
  *     enum.group_by                   -> an_enumerator
  *
- *  Returns a hash, which keys are evaluated result from the
- *  block, and values are arrays of elements in <i>enum</i>
- *  corresponding to the key.
+ *  Groups the collection by result of the block.  Returns a hash where the
+ *  keys are the evaluated result from the block and the values are
+ *  arrays of elements in the collection that correspond to the key.
  *
- *  If no block is given, an enumerator is returned instead.
+ *  If no block is given an enumerator is returned.
  *
- *     (1..6).group_by {|i| i%3}   #=> {0=>[3, 6], 1=>[1, 4], 2=>[2, 5]}
+ *     (1..6).group_by { |i| i%3 }   #=> {0=>[3, 6], 1=>[1, 4], 2=>[2, 5]}
  *
  */
 
@@ -838,7 +836,7 @@ sort_by_cmp(const void *ap, const void *bp, void *data)
  *  The current implementation of <code>sort_by</code> generates an
  *  array of tuples containing the original collection element and the
  *  mapped value. This makes <code>sort_by</code> fairly expensive when
- *  the keysets are simple
+ *  the keysets are simple.
  *
  *     require 'benchmark'
  *
@@ -902,7 +900,7 @@ enum_sort_by(VALUE obj)
 
     RETURN_ENUMERATOR(obj, 0, 0);
 
-    if (TYPE(obj) == T_ARRAY && RARRAY_LEN(obj) <= LONG_MAX/2) {
+    if (RB_TYPE_P(obj, T_ARRAY) && RARRAY_LEN(obj) <= LONG_MAX/2) {
 	ary = rb_ary_new2(RARRAY_LEN(obj)*2);
     }
     else {
@@ -971,9 +969,9 @@ DEFINE_ENUMFUNCS(all)
  *  Passes each element of the collection to the given block. The method
  *  returns <code>true</code> if the block never returns
  *  <code>false</code> or <code>nil</code>. If the block is not given,
- *  Ruby adds an implicit block of <code>{|obj| obj}</code> (that is
- *  <code>all?</code> will return <code>true</code> only if none of the
- *  collection members are <code>false</code> or <code>nil</code>.)
+ *  Ruby adds an implicit block of <code>{ |obj| obj }</code> which will
+ *  cause #all? to return +true+ when none of the collection members are
+ *  +false+ or +nil+.
  *
  *     %w{ant bear cat}.all? {|word| word.length >= 3}   #=> true
  *     %w{ant bear cat}.all? {|word| word.length >= 4}   #=> false
@@ -1006,10 +1004,9 @@ DEFINE_ENUMFUNCS(any)
  *  Passes each element of the collection to the given block. The method
  *  returns <code>true</code> if the block ever returns a value other
  *  than <code>false</code> or <code>nil</code>. If the block is not
- *  given, Ruby adds an implicit block of <code>{|obj| obj}</code> (that
- *  is <code>any?</code> will return <code>true</code> if at least one
- *  of the collection members is not <code>false</code> or
- *  <code>nil</code>.
+ *  given, Ruby adds an implicit block of <code>{ |obj| obj }</code> that
+ *  will cause #any? to return +true+ if at least one of the collection
+ *  members is not +false+ or +nil+.
  *
  *     %w{ant bear cat}.any? {|word| word.length >= 3}   #=> true
  *     %w{ant bear cat}.any? {|word| word.length >= 4}   #=> true
@@ -1553,8 +1550,8 @@ minmax_by_i(VALUE i, VALUE _memo, int argc, VALUE *argv)
  *     enum.minmax_by {|obj| block }   -> [min, max]
  *     enum.minmax_by                  -> an_enumerator
  *
- *  Returns two elements array array containing the objects in
- *  <i>enum</i> that gives the minimum and maximum values respectively
+ *  Returns a two element array containing the objects in
+ *  <i>enum</i> that correspond to the minimum and maximum values respectively
  *  from the given block.
  *
  *  If no block is given, an enumerator is returned instead.
@@ -1763,7 +1760,6 @@ each_slice_i(VALUE i, VALUE *memo, int argc, VALUE *argv)
  *  Iterates the given block for each slice of <n> elements.  If no
  *  block is given, returns an enumerator.
  *
- *  e.g.:
  *      (1..10).each_slice(3) {|a| p a}
  *      # outputs below
  *      [1, 2, 3]
@@ -1863,7 +1859,6 @@ each_with_object_i(VALUE i, VALUE memo, int argc, VALUE *argv)
  *
  *  If no block is given, returns an enumerator.
  *
- *  e.g.:
  *      evens = (1..10).each_with_object([]) {|i, a| a << i*2 }
  *      #=> [2, 4, 6, 8, 10, 12, 14, 16, 18, 20]
  *
@@ -2470,7 +2465,7 @@ slicebefore_i(VALUE yielder, VALUE enumerator, int argc, VALUE *argv)
     enumerable = rb_ivar_get(enumerator, rb_intern("slicebefore_enumerable"));
     arg.sep_pred = rb_attr_get(enumerator, rb_intern("slicebefore_sep_pred"));
     arg.sep_pat = NIL_P(arg.sep_pred) ? rb_ivar_get(enumerator, rb_intern("slicebefore_sep_pat")) : Qnil;
-    arg.state = rb_ivar_get(enumerator, rb_intern("slicebefore_initial_state"));
+    arg.state = rb_attr_get(enumerator, rb_intern("slicebefore_initial_state"));
     arg.prev_elts = Qnil;
     arg.yielder = yielder;
 

@@ -1,9 +1,3 @@
-######################################################################
-# This file is imported from the rubygems project.
-# DO NOT make modifications in this repo. They _will_ be reverted!
-# File a patch instead and assign it to Ryan Davis or Eric Hodel.
-######################################################################
-
 require 'rubygems/test_case'
 require 'rubygems/command_manager'
 
@@ -29,6 +23,7 @@ class TestGemCommandManager < Gem::TestCase
     end
   ensure
     $:.replace old_load_path
+    Gem::CommandManager.reset
   end
 
   def test_run_crash_command
@@ -46,6 +41,7 @@ class TestGemCommandManager < Gem::TestCase
     end
   ensure
     $:.replace old_load_path
+    @command_manager.unregister_command :crash
   end
 
   def test_process_args_bad_arg

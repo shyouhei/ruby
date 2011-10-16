@@ -154,7 +154,7 @@ s3e(VALUE hash, VALUE y, VALUE m, VALUE d, int bc)
 	{
 	    char *buf;
 
-	    buf = ALLOC_N(char, ep - bp + 1);
+	    buf = ALLOCA_N(char, ep - bp + 1);
 	    memcpy(buf, bp, ep - bp);
 	    buf[ep - bp] = '\0';
 	    iy = cstr2num(buf);
@@ -178,7 +178,7 @@ s3e(VALUE hash, VALUE y, VALUE m, VALUE d, int bc)
 	{
 	    char *buf;
 
-	    buf = ALLOC_N(char, ep - bp + 1);
+	    buf = ALLOCA_N(char, ep - bp + 1);
 	    memcpy(buf, bp, ep - bp);
 	    buf[ep - bp] = '\0';
 	    im = cstr2num(buf);
@@ -200,7 +200,7 @@ s3e(VALUE hash, VALUE y, VALUE m, VALUE d, int bc)
 	{
 	    char *buf;
 
-	    buf = ALLOC_N(char, ep - bp + 1);
+	    buf = ALLOCA_N(char, ep - bp + 1);
 	    memcpy(buf, bp, ep - bp);
 	    buf[ep - bp] = '\0';
 	    id = cstr2num(buf);
@@ -358,7 +358,7 @@ date_zone_to_diff(VALUE str)
     l = RSTRING_LEN(str);
     s = RSTRING_PTR(str);
 
-    dest = d = ALLOC_N(char, l + 1);
+    dest = d = ALLOCA_N(char, l + 1);
 
     for (i = 0; i < l; i++) {
 	if (isspace(s[i]) || s[i] == '\0') {
@@ -392,10 +392,10 @@ date_zone_to_diff(VALUE str)
 	dl = RSTRING_LEN(str) - (sizeof DST - 1);
 	ds = RSTRING_PTR(str) + dl;
 
-	if (strcmp(ss, STD) == 0) {
+	if (sl >= 0 && strcmp(ss, STD) == 0) {
 	    str = rb_str_new(RSTRING_PTR(str), sl);
 	}
-	else if (strcmp(ds, DST) == 0) {
+	else if (dl >= 0 && strcmp(ds, DST) == 0) {
 	    str = rb_str_new(RSTRING_PTR(str), dl);
 	    dst = 1;
 	}
@@ -409,7 +409,7 @@ date_zone_to_diff(VALUE str)
 	    dl = RSTRING_LEN(str) - (sizeof DST - 1);
 	    ds = RSTRING_PTR(str) + dl;
 
-	    if (strcmp(ds, DST) == 0) {
+	    if (dl >= 0 && strcmp(ds, DST) == 0) {
 		str = rb_str_new(RSTRING_PTR(str), dl);
 		dst = 1;
 	    }
@@ -441,8 +441,10 @@ date_zone_to_diff(VALUE str)
 	    char *s, *p;
 	    VALUE sign;
 	    VALUE hour = Qnil, min = Qnil, sec = Qnil;
+	    VALUE str_orig;
 
 	    s = RSTRING_PTR(str);
+	    str_orig = str;
 
 	    if (strncmp(s, "gmt", 3) == 0 ||
 		strncmp(s, "utc", 3) == 0)
@@ -467,12 +469,13 @@ date_zone_to_diff(VALUE str)
 		    }
 		    else
 			min = rb_str_new2(s);
+		    RB_GC_GUARD(str_orig);
 		    goto num;
 		}
 		if (strpbrk(RSTRING_PTR(str), ",.")) {
 		    char *a, *b;
 
-		    a = ALLOC_N(char, RSTRING_LEN(str) + 1);
+		    a = ALLOCA_N(char, RSTRING_LEN(str) + 1);
 		    strcpy(a, RSTRING_PTR(str));
 		    b = strpbrk(a, ",.");
 		    *b = '\0';
@@ -530,6 +533,7 @@ date_zone_to_diff(VALUE str)
 	    }
 	}
     }
+    RB_GC_GUARD(str);
   ok:
     return offset;
 }
@@ -623,7 +627,7 @@ static int
 parse_time_cb(VALUE m, VALUE hash)
 {
     static const char pat_source[] =
-            "\\A(\\d+)h?"
+	    "\\A(\\d+)h?"
 	      "(?:\\s*:?\\s*(\\d+)m?"
 		"(?:"
 		  "\\s*:?\\s*(\\d+)(?:[,.](\\d+))?s?"
@@ -1323,6 +1327,7 @@ parse_ddd_cb(VALUE m, VALUE hash)
 	}
 	break;
     }
+    RB_GC_GUARD(s2);
     if (!NIL_P(s3)) {
 	cs3 = RSTRING_PTR(s3);
 	l3 = RSTRING_LEN(s3);
@@ -1353,6 +1358,7 @@ parse_ddd_cb(VALUE m, VALUE hash)
 		break;
 	    }
 	}
+	RB_GC_GUARD(s3);
     }
     if (!NIL_P(s4)) {
 	l4 = RSTRING_LEN(s4);
@@ -1368,7 +1374,7 @@ parse_ddd_cb(VALUE m, VALUE hash)
 	set_hash("zone", s5);
 
 	if (*cs5 == '[') {
-	    char *buf = ALLOC_N(char, l5 + 1);
+	    char *buf = ALLOCA_N(char, l5 + 1);
 	    char *s1, *s2, *s3;
 	    VALUE zone;
 
@@ -1391,6 +1397,7 @@ parse_ddd_cb(VALUE m, VALUE hash)
 		*--s1 = '+';
 	    set_hash("offset", date_zone_to_diff(rb_str_new2(s1)));
 	}
+	RB_GC_GUARD(s5);
     }
 
     return 1;
@@ -1521,8 +1528,8 @@ date__parse(VALUE str, VALUE comp)
 	static const char pat_source[] = "[^-+',./:@[:alnum:]\\[\\]]+";
 	static VALUE pat = Qnil;
 
-	str = rb_str_dup(str);
 	REGCOMP_0(pat);
+	str = rb_str_dup(str);
 	f_gsub_bang(str, pat, asp_string());
     }
 

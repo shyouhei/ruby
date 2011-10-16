@@ -48,6 +48,7 @@
  */
 
 #include "ruby/ruby.h"
+#include "ruby/encoding.h"
 #include "timev.h"
 
 #ifndef GAWK
@@ -167,13 +168,19 @@ max(int a, int b)
 
 /* strftime --- produce formatted time */
 
+/*
+ * enc is the encoding of the format. It is used as the encoding of resulted
+ * string, but the name of the month and weekday are always US-ASCII. So it
+ * is only used for the timezone name on Windows.
+ */
 static size_t
-rb_strftime_with_timespec(char *s, size_t maxsize, const char *format, const struct vtm *vtm, VALUE timev, struct timespec *ts, int gmt)
+rb_strftime_with_timespec(char *s, size_t maxsize, const char *format, rb_encoding *enc, const struct vtm *vtm, VALUE timev, struct timespec *ts, int gmt)
 {
-	char *endp = s + maxsize;
-	char *start = s;
+	const char *const endp = s + maxsize;
+	const char *const start = s;
 	const char *sp, *tp;
-	auto char tbuf[100];
+#define TBUFSIZE 100
+	auto char tbuf[TBUFSIZE];
 	long off;
 	ptrdiff_t i;
 	int w;
@@ -205,12 +212,17 @@ rb_strftime_with_timespec(char *s, size_t maxsize, const char *format, const str
 		return 0;
 	}
 
+	if (enc && (enc == rb_usascii_encoding() ||
+	    enc == rb_ascii8bit_encoding() || enc == rb_locale_encoding())) {
+	    enc = NULL;
+	}
+
 	for (; *format && s < endp - 1; format++) {
 #define FLAG_FOUND() do { \
 			if (precision > 0 || flags & (BIT_OF(LOCALE_E)|BIT_OF(LOCALE_O))) \
 				goto unknown; \
 		} while (0)
-#define NEEDS(n) do if (s + (n) >= endp - 1) goto err; while (0)
+#define NEEDS(n) do if (s >= endp || (n) >= endp - s - 1) goto err; while (0)
 #define FILL_PADDING(i) do { \
 	if (!(flags & BIT_OF(LEFT)) && precision > (i)) { \
 		NEEDS(precision); \
@@ -234,13 +246,10 @@ rb_strftime_with_timespec(char *s, size_t maxsize, const char *format, const str
 		} while (0)
 #define STRFTIME(fmt) \
 		do { \
-			i = rb_strftime_with_timespec(s, endp - s, (fmt), vtm, timev, ts, gmt); \
+			i = rb_strftime_with_timespec(s, endp - s, (fmt), enc, vtm, timev, ts, gmt); \
 			if (!i) return 0; \
 			if (precision > i) {\
-				if (start + maxsize < s + precision) { \
-					errno = ERANGE; \
-					return 0; \
-				} \
+				NEEDS(precision); \
 				memmove(s + precision - i, s, i);\
 				memset(s, padding ? padding : ' ', precision - i); \
 				s += precision;	\
@@ -509,11 +518,24 @@ rb_strftime_with_timespec(char *s, size_t maxsize, const char *format, const str
 				tp = "UTC";
 				break;
 			}
-                        if (vtm->zone == NULL)
-                            tp = "";
-                        else
+			if (vtm->zone == NULL) {
+			    i = 0;
+			}
+			else {
                             tp = vtm->zone;
-			i = strlen(tp);
+			    if (enc) {
+				for (i = 0; i < TBUFSIZE && tp[i]; i++) {
+				    if ((unsigned char)tp[i] > 0x7F) {
+					VALUE str = rb_str_conv_enc_opts(rb_str_new_cstr(tp), rb_locale_encoding(), enc, ECONV_UNDEF_REPLACE|ECONV_INVALID_REPLACE, Qnil);
+					i = strlcpy(tbuf, RSTRING_PTR(str), TBUFSIZE);
+					tp = tbuf;
+					break;
+				    }
+				}
+			    }
+			    else
+				i = strlen(tp);
+			}
 			break;
 
 #ifdef SYSV_EXT
@@ -618,7 +640,7 @@ rb_strftime_with_timespec(char *s, size_t maxsize, const char *format, const str
 
                                 if (*format == 'G') {
                                         if (FIXNUM_P(yv)) {
-                                                long y = FIX2LONG(yv);
+                                                const long y = FIX2LONG(yv);
                                                 FMT('0', 0 <= y ? 4 : 5, "ld", y);
                                         }
                                         else {
@@ -785,15 +807,15 @@ rb_strftime_with_timespec(char *s, size_t maxsize, const char *format, const str
 }
 
 size_t
-rb_strftime(char *s, size_t maxsize, const char *format, const struct vtm *vtm, VALUE timev, int gmt)
+rb_strftime(char *s, size_t maxsize, const char *format, rb_encoding *enc, const struct vtm *vtm, VALUE timev, int gmt)
 {
-    return rb_strftime_with_timespec(s, maxsize, format, vtm, timev, NULL, gmt);
+    return rb_strftime_with_timespec(s, maxsize, format, enc, vtm, timev, NULL, gmt);
 }
 
 size_t
-rb_strftime_timespec(char *s, size_t maxsize, const char *format, const struct vtm *vtm, struct timespec *ts, int gmt)
+rb_strftime_timespec(char *s, size_t maxsize, const char *format, rb_encoding *enc, const struct vtm *vtm, struct timespec *ts, int gmt)
 {
-    return rb_strftime_with_timespec(s, maxsize, format, vtm, Qnil, ts, gmt);
+    return rb_strftime_with_timespec(s, maxsize, format, enc, vtm, Qnil, ts, gmt);
 }
 
 /* isleap --- is a year a leap year? */

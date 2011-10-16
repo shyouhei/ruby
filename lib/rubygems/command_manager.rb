@@ -1,9 +1,3 @@
-######################################################################
-# This file is imported from the rubygems project.
-# DO NOT make modifications in this repo. They _will_ be reverted!
-# File a patch instead and assign it to Ryan Davis or Eric Hodel.
-######################################################################
-
 #--
 # Copyright 2006 by Chad Fowler, Rich Kilmer, Jim Weirich and others.
 # All rights reserved.
@@ -41,6 +35,13 @@ class Gem::CommandManager
 
   def self.instance
     @command_manager ||= new
+  end
+
+  ##
+  # Reset the authoritative instance of the command manager.
+
+  def self.reset
+    @command_manager = nil
   end
 
   ##
@@ -84,6 +85,13 @@ class Gem::CommandManager
 
   def register_command(command)
     @commands[command] = false
+  end
+
+  ##
+  # Unregister the Symbol +command+ as a gem command.
+
+  def unregister_command(command)
+    @commands.delete command
   end
 
   ##
@@ -166,7 +174,7 @@ class Gem::CommandManager
     retried = false
 
     begin
-      commands.const_get const_name
+      commands.const_get(const_name).new
     rescue NameError
       raise if retried
 
@@ -179,7 +187,7 @@ class Gem::CommandManager
           Gem.configuration.backtrace
       end
       retry
-    end.new
+    end
   end
 
 end

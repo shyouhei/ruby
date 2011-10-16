@@ -2,11 +2,7 @@
 # -*- coding: utf-8 -*-
 
 require 'test/unit'
-case ENV['JSON']
-when 'pure' then require 'json/pure'
-when 'ext'  then require 'json/ext'
-else             require 'json'
-end
+require File.join(File.dirname(__FILE__), 'setup_variant')
 require 'stringio'
 
 unless Array.method_defined?(:permutation)
@@ -108,6 +104,42 @@ class TC_JSON < Test::Unit::TestCase
     assert_equal({ "a" => 0.23 }, parse('  {  "a"  :  0.23  }  '))
   end
 
+  def test_parse_json_primitive_values
+    assert_raise(JSON::ParserError) { JSON.parse('') }
+    assert_raise(JSON::ParserError) { JSON.parse('', :quirks_mode => true) }
+    assert_raise(JSON::ParserError) { JSON.parse('  /* foo */ ') }
+    assert_raise(JSON::ParserError) { JSON.parse('  /* foo */ ', :quirks_mode => true) }
+    parser = JSON::Parser.new('null')
+    assert_equal false, parser.quirks_mode?
+    assert_raise(JSON::ParserError) { parser.parse }
+    assert_raise(JSON::ParserError) { JSON.parse('null') }
+    assert_equal nil, JSON.parse('null', :quirks_mode => true)
+    parser = JSON::Parser.new('null', :quirks_mode => true)
+    assert_equal true, parser.quirks_mode?
+    assert_equal nil, parser.parse
+    assert_raise(JSON::ParserError) { JSON.parse('false') }
+    assert_equal false, JSON.parse('false', :quirks_mode => true)
+    assert_raise(JSON::ParserError) { JSON.parse('true') }
+    assert_equal true, JSON.parse('true', :quirks_mode => true)
+    assert_raise(JSON::ParserError) { JSON.parse('23') }
+    assert_equal 23, JSON.parse('23', :quirks_mode => true)
+    assert_raise(JSON::ParserError) { JSON.parse('1') }
+    assert_equal 1, JSON.parse('1', :quirks_mode => true)
+    assert_raise(JSON::ParserError) { JSON.parse('3.141') }
+    assert_in_delta 3.141, JSON.parse('3.141', :quirks_mode => true), 1E-3
+    assert_raise(JSON::ParserError) { JSON.parse('18446744073709551616') }
+    assert_equal 2 ** 64, JSON.parse('18446744073709551616', :quirks_mode => true)
+    assert_raise(JSON::ParserError) { JSON.parse('"foo"') }
+    assert_equal 'foo', JSON.parse('"foo"', :quirks_mode => true)
+    assert_raise(JSON::ParserError) { JSON.parse('NaN', :allow_nan => true) }
+    assert JSON.parse('NaN', :quirks_mode => true, :allow_nan => true).nan?
+    assert_raise(JSON::ParserError) { JSON.parse('Infinity', :allow_nan => true) }
+    assert JSON.parse('Infinity', :quirks_mode => true, :allow_nan => true).infinite?
+    assert_raise(JSON::ParserError) { JSON.parse('-Infinity', :allow_nan => true) }
+    assert JSON.parse('-Infinity', :quirks_mode => true, :allow_nan => true).infinite?
+    assert_raise(JSON::ParserError) { JSON.parse('[ 1, ]', :quirks_mode => true) }
+  end
+
   if Array.method_defined?(:permutation)
     def test_parse_more_complex_arrays
       a = [ nil, false, true, "foßbar", [ "n€st€d", true ], { "nested" => true, "n€ßt€ð2" => {} }]
@@ -154,11 +186,20 @@ class TC_JSON < Test::Unit::TestCase
     assert_equal(@ary,
       parse('[[1],["foo"],[3.14],[47.11e+2],[2718.0E-3],[null],[[1,-2,3]]'\
       ',[false],[true]]'))
-    assert_equal(@ary, parse(%Q{   [   [1] , ["foo"]  ,  [3.14] \t ,  [47.11e+2]
+    assert_equal(@ary, parse(%Q{   [   [1] , ["foo"]  ,  [3.14] \t ,  [47.11e+2]\s
       , [2718.0E-3 ],\r[ null] , [[1, -2, 3 ]], [false ],[ true]\n ]  }))
   end
 
-  class SubArray < Array; end
+  class SubArray < Array
+    def <<(v)
+      @shifted = true
+      super
+    end
+
+    def shifted?
+      @shifted
+    end
+  end
 
   class SubArray2 < Array
     def to_json(*a)
@@ -175,9 +216,10 @@ class TC_JSON < Test::Unit::TestCase
   end
 
   def test_parse_array_custom_class
-    res = parse('[]', :array_class => SubArray)
-    assert_equal([], res)
+    res = parse('[1,2]', :array_class => SubArray)
+    assert_equal([1,2], res)
     assert_equal(SubArray, res.class)
+    assert res.shifted?
   end
 
   def test_parse_object
@@ -188,6 +230,14 @@ class TC_JSON < Test::Unit::TestCase
   end
 
   class SubHash < Hash
+    def []=(k, v)
+      @item_set = true
+      super
+    end
+
+    def item_set?
+      @item_set
+    end
   end
 
   class SubHash2 < Hash
@@ -204,9 +254,10 @@ class TC_JSON < Test::Unit::TestCase
   end
 
   def test_parse_object_custom_class
-    res = parse('{}', :object_class => SubHash2)
-    assert_equal({}, res)
-    assert_equal(SubHash2, res.class)
+    res = parse('{"foo":"bar"}', :object_class => SubHash)
+    assert_equal({"foo" => "bar"}, res)
+    assert_equal(SubHash, res.class)
+    assert res.item_set?
   end
 
   def test_generation_of_core_subclasses_with_new_to_json
@@ -392,10 +443,18 @@ EOT
     assert_equal orig, JSON[json5][0]
   end
 
-  def test_allocate
-    json = JSON::Parser.new("{}")
-    assert_raises(TypeError, '[ruby-core:35079]') {json.__send__(:initialize, "{}")}
-    json = JSON::Parser.allocate
-    assert_raises(TypeError, '[ruby-core:35079]') {json.source}
+  if defined?(JSON::Ext::Parser)
+    def test_allocate
+      parser = JSON::Ext::Parser.new("{}")
+      assert_raise(TypeError, '[ruby-core:35079]') {parser.__send__(:initialize, "{}")}
+      parser = JSON::Ext::Parser.allocate
+      assert_raise(TypeError, '[ruby-core:35079]') {parser.source}
+    end
   end
+
+  def test_argument_encoding
+    source = "{}".force_encoding("ascii-8bit")
+    JSON::Parser.new(source)
+    assert_equal Encoding::ASCII_8BIT, source.encoding
+  end if defined?(Encoding::ASCII_8BIT)
 end

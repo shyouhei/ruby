@@ -207,7 +207,7 @@ require "stringio"
 #
 class CSV
   # The version of the installed library.
-  VERSION = "2.4.7".freeze
+  VERSION = "2.4.8".freeze
 
   #
   # A CSV::Row is part Array and part Hash.  It retains an order for the fields
@@ -1234,7 +1234,7 @@ class CSV
       io.seek(0, IO::SEEK_END)
       args.unshift(io)
     else
-      encoding = args.last.is_a?(Hash) ? args.last.delete(:encoding) : nil
+      encoding = (args[-1] = args[-1].dup).delete(:encoding) if args.last.is_a?(Hash)
       str      = ""
       str.encode!(encoding) if encoding
       args.unshift(str)
@@ -2038,25 +2038,29 @@ class CSV
         @row_sep = $INPUT_RECORD_SEPARATOR
       else
         begin
-          saved_pos = @io.pos  # remember where we were
+          #
+          # remember where we were (pos() will raise an axception if @io is pipe
+          # or not opened for reading)
+          #
+          saved_pos = @io.pos
           while @row_sep == :auto
             #
             # if we run out of data, it's probably a single line
-            # (use a sensible default)
+            # (ensure will set default value)
             #
-            unless sample = @io.gets(nil, 1024)
-              @row_sep = $INPUT_RECORD_SEPARATOR
-              break
+            break unless sample = @io.gets(nil, 1024)
+            # extend sample if we're unsure of the line ending
+            if sample.end_with? encode_str("\r")
+              sample << (@io.gets(nil, 1) || "")
             end
 
-            # read ahead a bit
-            sample << (@io.gets(nil, 1) || "") if sample.end_with?(encode_str("\r"))
             # try to find a standard separator
             if sample =~ encode_re("\r\n?|\n")
               @row_sep = $&
               break
             end
           end
+
           # tricky seek() clone to work around GzipReader's lack of seek()
           @io.rewind
           # reset back to the remembered position
@@ -2065,8 +2069,18 @@ class CSV
             saved_pos -= 1024
           end
           @io.read(saved_pos) if saved_pos.nonzero?
-        rescue IOError  # stream not opened for reading
-          @row_sep = $INPUT_RECORD_SEPARATOR
+        rescue IOError         # not opened for reading
+          # do nothing:  ensure will set default
+        rescue NoMethodError   # Zlib::GzipWriter doesn't have some IO methods
+          # do nothing:  ensure will set default
+        rescue SystemCallError # pipe
+          # do nothing:  ensure will set default
+        ensure
+          #
+          # set default if we failed to detect
+          # (stream not opened for reading, a pipe, or a single line of data)
+          #
+          @row_sep = $INPUT_RECORD_SEPARATOR if @row_sep == :auto
         end
       end
     end
@@ -2305,6 +2319,10 @@ class CSV
 
   private
 
+  # 
+  # Returns the encoding of the internal IO object or the +default+ if the 
+  # encoding cannot be determined.
+  #
   def raw_encoding(default = Encoding::ASCII_8BIT)
     if @io.respond_to? :internal_encoding
       @io.internal_encoding || @io.external_encoding

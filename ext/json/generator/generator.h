@@ -45,7 +45,10 @@
 #define RSTRING_LEN(string) RSTRING(string)->len
 #endif
 
-#define RSTRING_PAIR(string) RSTRING_PTR(string), RSTRING_LEN(string)
+/* We don't need to guard objects for rbx, so let's do nothing at all. */
+#ifndef RB_GC_GUARD
+#define RB_GC_GUARD(object)
+#endif
 
 /* fbuffer implementation */
 
@@ -78,9 +81,9 @@ static VALUE fbuffer_to_s(FBuffer *fb);
 
 #define UNI_STRICT_CONVERSION 1
 
-typedef unsigned long	UTF32;	/* at least 32 bits */
-typedef unsigned short	UTF16;	/* at least 16 bits */
-typedef unsigned char	UTF8;	/* typically 8 bits */
+typedef unsigned long  UTF32; /* at least 32 bits */
+typedef unsigned short UTF16; /* at least 16 bits */
+typedef unsigned char  UTF8;  /* typically 8 bits */
 
 #define UNI_REPLACEMENT_CHAR (UTF32)0x0000FFFD
 #define UNI_MAX_BMP (UTF32)0x0000FFFF
@@ -123,6 +126,7 @@ typedef struct JSON_Generator_StateStruct {
     long max_nesting;
     char allow_nan;
     char ascii_only;
+    char quirks_mode;
     long depth;
 } JSON_Generator_State;
 

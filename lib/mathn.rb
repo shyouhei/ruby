@@ -1,42 +1,44 @@
-##
-# = mathn
-#
-# mathn is a library for changing the way Ruby does math. If you need
-# more precise rounding with multiple division or exponentiation
-# operations, then mathn is the right tool. It makes sense to use this
-# library if you can use it's late rounding. Mathn does not convert
-# Fixnums into Floats as long as you do not convert it yourself.
-# Instead of using Float as intermediate value it use Rational as
-# value representation.
-#
-# Example Fixnum with intermediate Float:
-#
-#   20 / 9 * 3 * 14 / 7 * 3 / 2  # => 18
-#
-# Example: using mathn Fixnum/Rational:
-#
-#   require 'mathn'
-#   20 / 9 * 3 * 14 / 7 * 3 / 2  # => 20
-#
-# == Usage
-#
-# To start using this library, simply:
-#
-#   require "mathn"
-#
-# This will change the way division works for Fixnums, specifically
-#
-#   3 / 2
-#
-# will return +Rational+ (3/2) instead of the usual +Fixnum+ 1.
-#
-# == Copyright
-#
-# Author: Keiju ISHITSUKA(SHL Japan Inc.)
-#
 #--
 # $Release Version: 0.5 $
 # $Revision: 1.1.1.1.4.1 $
+
+##
+# = mathn
+#
+# mathn is a library for changing the way Ruby does math.  If you need
+# more precise rounding with multiple division or exponentiation
+# operations, then mathn is the right tool.
+#
+# Without mathn:
+#
+#   3 / 2 => 1 # Integer
+#
+# With mathn:
+#
+#   3 / 2 => 3/2 # Rational
+#
+# mathn features late rounding and lacks truncation of intermediate results:
+#
+# Without mathn:
+#
+#   20 / 9 * 3 * 14 / 7 * 3 / 2 # => 18
+#
+# With mathn:
+#
+#   20 / 9 * 3 * 14 / 7 * 3 / 2 # => 20
+#
+#
+# When you require 'mathn', the libraries for Prime, CMath, Matrix and Vector
+# are also loaded.
+#
+# == Copyright
+#
+# Author: Keiju ISHITSUKA (SHL Japan Inc.)
+#--
+# class Numeric follows to make this documentation findable in a reasonable
+# location
+
+class Numeric; end
 
 require "cmath.rb"
 require "matrix.rb"
@@ -47,12 +49,12 @@ require "mathn/complex"
 
 unless defined?(Math.exp!)
   Object.instance_eval{remove_const :Math}
-  Math = CMath
+  Math = CMath # :nodoc:
 end
 
 ##
-# When mathn is required Fixnum's division and exponentiation are enhanced to
-# return more precise values in mathematical formulas.
+# When mathn is required, Fixnum's division and exponentiation are enhanced to
+# return more precise values from mathematical expressions.
 #
 #   2/3*3  # => 0
 #   require 'mathn'
@@ -85,7 +87,7 @@ end
 
 ##
 # When mathn is required Bignum's division and exponentiation are enhanced to
-# return more precise values in mathematical formulas.
+# return more precise values from mathematical expressions.
 
 class Bignum
   remove_method :/
@@ -113,7 +115,7 @@ class Bignum
 end
 
 ##
-# When mathn is required Rational changes to simplfy the usage of Rational
+# When mathn is required Rational is changed to simplify the use of Rational
 # operations.
 #
 # Normal behaviour:
@@ -196,14 +198,14 @@ class Rational
 end
 
 ##
-# When mathn is requried the Math module changes as follows:
+# When mathn is required, the Math module changes as follows:
 #
 # Standard Math module behaviour:
 #   Math.sqrt(4/9)     # => 0.0
 #   Math.sqrt(4.0/9.0) # => 0.666666666666667
 #   Math.sqrt(- 4/9)   # => Errno::EDOM: Numerical argument out of domain - sqrt
 #
-# After require 'mathn' this is changed to:
+# After require 'mathn', this is changed to:
 #
 #   require 'mathn'
 #   Math.sqrt(4/9)      # => 2/3
@@ -303,7 +305,7 @@ module Math
 end
 
 ##
-# When mathn is required Float is changed to handle Complex numbers.
+# When mathn is required, Float is changed to handle Complex numbers.
 
 class Float
   alias power! **

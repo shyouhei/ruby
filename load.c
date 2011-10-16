@@ -4,6 +4,7 @@
 
 #include "ruby/ruby.h"
 #include "ruby/util.h"
+#include "internal.h"
 #include "dln.h"
 #include "eval_intern.h"
 
@@ -73,16 +74,27 @@ loaded_feature_path(const char *name, long vlen, const char *feature, long len,
 		    int type, VALUE load_path)
 {
     long i;
+    long plen;
+    const char *e;
 
+    if(vlen < len) return 0;
+    if (!strncmp(name+(vlen-len),feature,len)){
+	plen = vlen - len - 1;
+    } else {
+	for (e = name + vlen; name != e && *e != '.' && *e != '/'; --e);
+	if (*e!='.' ||
+	    e-name < len ||
+	    strncmp(e-len,feature,len) )
+	    return 0;
+	plen = e - name - len - 1;
+    }
     for (i = 0; i < RARRAY_LEN(load_path); ++i) {
 	VALUE p = RARRAY_PTR(load_path)[i];
 	const char *s = StringValuePtr(p);
 	long n = RSTRING_LEN(p);
 
-	if (vlen < n + len + 1) continue;
+	if (n != plen ) continue;
 	if (n && (strncmp(name, s, n) || name[n] != '/')) continue;
-	if (strncmp(name + n + 1, feature, len)) continue;
-	if (name[n+len+1] && name[n+len+1] != '.') continue;
 	switch (type) {
 	  case 's':
 	    if (IS_DLEXT(&name[n+len+1])) return p;
@@ -256,7 +268,6 @@ rb_provide(const char *feature)
 }
 
 NORETURN(static void load_failed(VALUE));
-VALUE rb_realpath_internal(VALUE basedir, VALUE path, int strict);
 
 static void
 rb_load_internal(VALUE fname, int wrap)
@@ -419,24 +430,33 @@ load_unlock(const char *ftptr, int done)
 
 /*
  *  call-seq:
- *     require(string)    -> true or false
+ *     require(name)    -> true or false
  *
- *  Ruby tries to load the library named _string_, returning
- *  +true+ if successful. If the filename does not resolve to
- *  an absolute path, it will be searched for in the directories listed
- *  in <code>$:</code>. If the file has the extension ``.rb'', it is
- *  loaded as a source file; if the extension is ``.so'', ``.o'', or
- *  ``.dll'', or whatever the default shared library extension is on
- *  the current platform, Ruby loads the shared library as a Ruby
- *  extension. Otherwise, Ruby tries adding ``.rb'', ``.so'', and so on
- *  to the name. The name of the loaded feature is added to the array in
- *  <code>$"</code>. A feature will not be loaded if its name already
- *  appears in <code>$"</code>. The file name is converted to an absolute
- *  path, so ``<code>require 'a'; require './a'</code>'' will not load
- *  <code>a.rb</code> twice.
+ *  Loads the given +name+, returning +true+ if successful and +false+ if the
+ *  feature is already loaded.
  *
- *     require "my-library.rb"
- *     require "db-driver"
+ *  If the filename does not resolve to an absolute path, it will be searched
+ *  for in the directories listed in <code>$LOAD_PATH</code> (<code>$:</code>).
+ *
+ *  If the filename has the extension ".rb", it is loaded as a source file; if
+ *  the extension is ".so", ".o", or ".dll", or the default shared library
+ *  extension on the current platform, Ruby loads the shared library as a
+ *  Ruby extension.  Otherwise, Ruby tries adding ".rb", ".so", and so on
+ *  to the name until found.  If the file named cannot be found, a LoadError
+ *  will be raised.
+ *
+ *  For Ruby extensions the filename given may use any shared library
+ *  extension.  For example, on Linux the socket extension is "socket.so" and
+ *  <code>require 'socket.dll'</code> will load the socket extension.
+ *
+ *  The absolute path of the loaded file is added to
+ *  <code>$LOADED_FEATURES</code> (<code>$"</code>).  A file will not be
+ *  loaded again if its path already appears in <code>$"</code>.  For example,
+ *  <code>require 'a'; require './a'</code> will not load <code>a.rb</code>
+ *  again.
+ *
+ *    require "my-library.rb"
+ *    require "db-driver"
  */
 
 VALUE
@@ -456,7 +476,6 @@ rb_f_require(VALUE obj, VALUE fname)
 VALUE
 rb_f_require_relative(VALUE obj, VALUE fname)
 {
-    VALUE rb_current_realfilepath(void);
     VALUE base = rb_current_realfilepath();
     if (NIL_P(base)) {
 	rb_raise(rb_eLoadError, "cannot infer basepath");
@@ -695,7 +714,11 @@ rb_mod_autoload(VALUE mod, VALUE sym, VALUE file)
 static VALUE
 rb_mod_autoload_p(VALUE mod, VALUE sym)
 {
-    return rb_autoload_p(mod, rb_to_id(sym));
+    ID id = rb_check_id(&sym);
+    if (!id) {
+	return Qnil;
+    }
+    return rb_autoload_p(mod, id);
 }
 
 /*
@@ -712,7 +735,7 @@ rb_mod_autoload_p(VALUE mod, VALUE sym)
 static VALUE
 rb_f_autoload(VALUE obj, VALUE sym, VALUE file)
 {
-    VALUE klass = rb_vm_cbase();
+    VALUE klass = rb_class_real(rb_vm_cbase());
     if (NIL_P(klass)) {
 	rb_raise(rb_eTypeError, "Can not set autoload on singleton class");
     }

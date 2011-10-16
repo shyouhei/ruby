@@ -1,9 +1,3 @@
-######################################################################
-# This file is imported from the rubygems project.
-# DO NOT make modifications in this repo. They _will_ be reverted!
-# File a patch instead and assign it to Ryan Davis or Eric Hodel.
-######################################################################
-
 # -*- coding: utf-8 -*-
 #--
 # Copyright (C) 2004 Mauricio Julio Fernández Pradier
@@ -11,32 +5,6 @@
 #++
 
 require 'rubygems/specification'
-
-##
-# Wrapper for FileUtils meant to provide logging and additional operations if
-# needed.
-
-class Gem::FileOperations
-
-  def initialize(logger = nil)
-    require 'fileutils'
-    @logger = logger
-  end
-
-  def method_missing(meth, *args, &block)
-    case
-    when FileUtils.respond_to?(meth)
-      @logger.log "#{meth}: #{args}" if @logger
-      FileUtils.send meth, *args, &block
-    when Gem::FileOperations.respond_to?(meth)
-      @logger.log "#{meth}: #{args}" if @logger
-      Gem::FileOperations.send meth, *args, &block
-    else
-      super
-    end
-  end
-
-end
 
 module Gem::Package
 
@@ -63,6 +31,8 @@ module Gem::Package
 
   class TarInvalidError < Error; end
 
+  # FIX: zenspider said: does it really take an IO?
+  # passed to a method called open?!? that seems stupid.
   def self.open(io, mode = "r", signer = nil, &block)
     tar_type = case mode
                when 'r' then TarInput

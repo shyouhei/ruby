@@ -1,9 +1,3 @@
-######################################################################
-# This file is imported from the rubygems project.
-# DO NOT make modifications in this repo. They _will_ be reverted!
-# File a patch instead and assign it to Ryan Davis or Eric Hodel.
-######################################################################
-
 require 'rubygems/command'
 
 class Gem::Commands::StaleCommand < Gem::Command
@@ -17,7 +11,8 @@ class Gem::Commands::StaleCommand < Gem::Command
 
   def execute
     gem_to_atime = {}
-    Gem.source_index.each do |name, spec|
+    Gem::Specification.each do |spec|
+      name = spec.full_name
       Dir["#{spec.full_gem_path}/**/*.*"].each do |file|
         next if File.directory?(file)
         stat = File.stat(file)

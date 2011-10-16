@@ -1,9 +1,3 @@
-######################################################################
-# This file is imported from the rubygems project.
-# DO NOT make modifications in this repo. They _will_ be reverted!
-# File a patch instead and assign it to Ryan Davis or Eric Hodel.
-######################################################################
-
 require 'rubygems/test_case'
 require "rubygems/text"
 
@@ -24,6 +18,21 @@ class TestGemText < Gem::TestCase
 
   def test_format_text_none_indent
     assert_equal "  text to wrap",    format_text("text to wrap", 40, 2)
+  end
+
+  def test_format_text_trailing # for two spaces after .
+    text = <<-TEXT
+This line is really, really long.  So long, in fact, that it is more than eighty characters long!  The purpose of this line is for testing wrapping behavior because sometimes people don't wrap their text to eighty characters.  Without the wrapping, the text might not look good in the RSS feed.
+    TEXT
+
+    expected = <<-EXPECTED
+This line is really, really long.  So long, in fact, that it is more than
+eighty characters long!  The purpose of this line is for testing wrapping
+behavior because sometimes people don't wrap their text to eighty characters.
+Without the wrapping, the text might not look good in the RSS feed.
+    EXPECTED
+
+    assert_equal expected, format_text(text, 78)
   end
 
   def test_levenshtein_distance_add

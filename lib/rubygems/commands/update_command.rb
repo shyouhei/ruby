@@ -1,9 +1,3 @@
-######################################################################
-# This file is imported from the rubygems project.
-# DO NOT make modifications in this repo. They _will_ be reverted!
-# File a patch instead and assign it to Ryan Davis or Eric Hodel.
-######################################################################
-
 require 'rubygems/command'
 require 'rubygems/command_manager'
 require 'rubygems/install_update_options'
@@ -71,14 +65,14 @@ class Gem::Commands::UpdateCommand < Gem::Command
 
       hig = {} # highest installed gems
 
-      Gem.source_index.each do |name, spec|
+      Gem::Specification.each do |spec|
         if hig[spec.name].nil? or hig[spec.name].version < spec.version then
           hig[spec.name] = spec
         end
       end
     end
 
-    gems_to_update = which_to_update hig, options[:args]
+    gems_to_update = which_to_update hig, options[:args].uniq
 
     updated = update_gems gems_to_update
 
@@ -123,8 +117,8 @@ class Gem::Commands::UpdateCommand < Gem::Command
   end
 
   def update_gems gems_to_update
-    gems_to_update.uniq.sort.each do |name|
-      update_gem name
+    gems_to_update.uniq.sort.each do |(name, version)|
+      update_gem name, version
     end
 
     @updated
@@ -140,6 +134,9 @@ class Gem::Commands::UpdateCommand < Gem::Command
     end
 
     options[:user_install] = false
+
+    # TODO: rename version and other variable name conflicts
+    # TODO: get rid of all this indirection on name and other BS
 
     version = options[:system]
     if version == true then
@@ -158,18 +155,25 @@ class Gem::Commands::UpdateCommand < Gem::Command
       'rubygems-update' => rubygems_update
     }
 
-    gems_to_update = which_to_update hig, options[:args]
+    gems_to_update = which_to_update hig, options[:args], :system
+    name, up_ver   = gems_to_update.first
+    current_ver    = Gem::Version.new Gem::VERSION
 
-    if gems_to_update.empty? then
+    target = if options[:system] == true then
+               up_ver
+             else
+               version
+             end
+
+    if current_ver == target then
+      # if options[:system] != true and version == current_ver then
       say "Latest version currently installed. Aborting."
       terminate_interaction
     end
 
-    update_gem gems_to_update.first, requirement
+    update_gem name, target
 
-    Gem.source_index.refresh!
-
-    installed_gems = Gem.source_index.find_name 'rubygems-update', requirement
+    installed_gems = Gem::Specification.find_all_by_name 'rubygems-update', requirement
     version        = installed_gems.last.version
 
     args = []
@@ -193,7 +197,7 @@ class Gem::Commands::UpdateCommand < Gem::Command
     end
   end
 
-  def which_to_update(highest_installed_gems, gem_names)
+  def which_to_update highest_installed_gems, gem_names, system = false
     result = []
 
     highest_installed_gems.each do |l_name, l_spec|
@@ -213,9 +217,11 @@ class Gem::Commands::UpdateCommand < Gem::Command
         version
       end.last
 
-      if highest_remote_gem and
-         l_spec.version < highest_remote_gem.first[1] then
-        result << l_name
+      highest_remote_gem ||= [[nil, Gem::Version.new(0), nil]] # "null" object
+      highest_remote_ver = highest_remote_gem.first[1]
+
+      if system or (l_spec.version < highest_remote_ver) then
+        result << [l_spec.name, [l_spec.version, highest_remote_ver].max]
       end
     end
 

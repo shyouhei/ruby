@@ -33,6 +33,42 @@ ossl_generate_cb(int p, int n, void *arg)
     rb_yield(ary);
 }
 
+#if HAVE_BN_GENCB
+/* OpenSSL 2nd version of GN generation callback */
+int
+ossl_generate_cb_2(int p, int n, BN_GENCB *cb)
+{
+    VALUE ary, ret;
+    struct ossl_generate_cb_arg *arg;
+    int state;
+
+    arg = (struct ossl_generate_cb_arg *)cb->arg;
+    if (arg->yield) {
+	ary = rb_ary_new2(2);
+	rb_ary_store(ary, 0, INT2NUM(p));
+	rb_ary_store(ary, 1, INT2NUM(n));
+
+	/*
+	* can be break by raising exception or 'break'
+	*/
+	ret = rb_protect(rb_yield, ary, &state);
+	if (state) {
+	    arg->stop = 1;
+	    arg->state = state;
+	}
+    }
+    if (arg->stop) return 0;
+    return 1;
+}
+
+void
+ossl_generate_cb_stop(void *ptr)
+{
+    struct ossl_generate_cb_arg *arg = (struct ossl_generate_cb_arg *)ptr;
+    arg->stop = 1;
+}
+#endif
+
 /*
  * Public
  */
@@ -82,6 +118,53 @@ ossl_pkey_new_from_file(VALUE filename)
 	ossl_raise(ePKeyError, NULL);
     }
 
+    return ossl_pkey_new(pkey);
+}
+
+/*
+ *  call-seq:
+ *     OpenSSL::PKey.read(string [, pwd ] ) -> PKey
+ *     OpenSSL::PKey.read(file [, pwd ]) -> PKey
+ *
+ * === Parameters
+ * * +string+ is a DER- or PEM-encoded string containing an arbitrary private
+ * or public key.
+ * * +file+ is an instance of +File+ containing a DER- or PEM-encoded
+ * arbitrary private or public key.
+ * * +pwd+ is an optional password in case +string+ or +file+ is an encrypted
+ * PEM resource.
+ */
+static VALUE
+ossl_pkey_new_from_data(int argc, VALUE *argv, VALUE self)
+{
+     EVP_PKEY *pkey;
+     BIO *bio;
+     VALUE data, pass;
+     char *passwd = NULL;
+
+     rb_scan_args(argc, argv, "11", &data, &pass);
+
+     bio = ossl_obj2bio(data);
+     if (!(pkey = d2i_PrivateKey_bio(bio, NULL))) {
+	OSSL_BIO_reset(bio);
+	if (!NIL_P(pass)) {
+	    passwd = StringValuePtr(pass);
+	}
+	if (!(pkey = PEM_read_bio_PrivateKey(bio, NULL, ossl_pem_passwd_cb, passwd))) {
+	    OSSL_BIO_reset(bio);
+	    if (!(pkey = d2i_PUBKEY_bio(bio, NULL))) {
+		OSSL_BIO_reset(bio);
+		if (!NIL_P(pass)) {
+		    passwd = StringValuePtr(pass);
+		}
+		pkey = PEM_read_bio_PUBKEY(bio, NULL, ossl_pem_passwd_cb, passwd);
+	    }
+	}
+    }
+
+    BIO_free(bio);
+    if (!pkey)
+	ossl_raise(rb_eArgError, "Could not parse PKey");
     return ossl_pkey_new(pkey);
 }
 
@@ -322,13 +405,15 @@ Init_ossl_pkey()
     /* Document-class: OpenSSL::PKey::PKey
      *
      * An abstract class that bundles signature creation (PKey#sign) and
-     * validation (PKey#verify) that is common to all implementations:
+     * validation (PKey#verify) that is common to all implementations except
+     * OpenSSL::PKey::DH
      * * OpenSSL::PKey::RSA
      * * OpenSSL::PKey::DSA
      * * OpenSSL::PKey::EC
-     * * OpenSSL::PKey::DH
      */
     cPKey = rb_define_class_under(mPKey, "PKey", rb_cObject);
+
+    rb_define_module_function(mPKey, "read", ossl_pkey_new_from_data, -1);
 
     rb_define_alloc_func(cPKey, ossl_pkey_alloc);
     rb_define_method(cPKey, "initialize", ossl_pkey_initialize, 0);

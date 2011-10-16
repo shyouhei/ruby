@@ -52,11 +52,11 @@ module Test
         non_options(args, options)
         @help = orig_args.map { |s| s =~ /[\s|&<>$()]/ ? s.inspect : s }.join " "
         @options = options
-        @opts = @options = options
         if @options[:parallel]
           @files = args
           @args = orig_args
         end
+        options
       end
 
       private
@@ -126,6 +126,8 @@ module Test
     module GlobOption
       include Options
 
+      @@testfile_prefix = "test"
+
       def setup_options(parser, options)
         super
         parser.on '-b', '--basedir=DIR', 'Base directory of test suites.' do |dir|
@@ -143,14 +145,14 @@ module Test
         end
         files.map! {|f|
           f = f.tr(File::ALT_SEPARATOR, File::SEPARATOR) if File::ALT_SEPARATOR
-          [*(paths if /\A\.\.?(?:\z|\/)/ !~ f), nil].uniq.any? do |prefix|
+          ((paths if /\A\.\.?(?:\z|\/)/ !~ f) || [nil]).any? do |prefix|
             if prefix
               path = f.empty? ? prefix : "#{prefix}/#{f}"
             else
               next if f.empty?
               path = f
             end
-            if !(match = Dir["#{path}/**/test_*.rb"]).empty?
+            if !(match = Dir["#{path}/**/#{@@testfile_prefix}_*.rb"]).empty?
               if reject
                 match.reject! {|n|
                   n[(prefix.length+1)..-1] if prefix
@@ -317,12 +319,6 @@ module Test
 
       class << self; undef autorun; end
 
-      undef options
-
-      def options
-        @optss ||= (@options||{}).merge(@opts)
-      end
-
       @@stop_auto_run = false
       def self.autorun
         at_exit {
@@ -334,7 +330,7 @@ module Test
       end
 
       def after_worker_down(worker, e=nil, c=false)
-        return unless @opts[:parallel]
+        return unless @options[:parallel]
         return if @interrupt
         if e
           b = e.backtrace
@@ -352,10 +348,10 @@ module Test
       end
 
       def jobs_status
-        return unless @opts[:job_status]
-        puts "" unless @opts[:verbose]
+        return unless @options[:job_status]
+        puts "" unless @options[:verbose]
         status_line = @workers.map(&:to_s).join(" ")
-        if @opts[:job_status] == :replace and $stdout.tty?
+        if @options[:job_status] == :replace and $stdout.tty?
           @terminal_width ||=
             begin
               require 'io/console'
@@ -375,12 +371,12 @@ module Test
       end
 
       def del_jobs_status
-        return unless @opts[:job_status] == :replace && @jstr_size.nonzero?
+        return unless @options[:job_status] == :replace && @jstr_size.nonzero?
         print "\r"+" "*@jstr_size+"\r"
       end
 
       def after_worker_quit(worker)
-        return unless @opts[:parallel]
+        return unless @options[:parallel]
         return if @interrupt
         @workers.delete(worker)
         @dead_workers << worker
@@ -388,6 +384,11 @@ module Test
       end
 
       def _run_parallel suites, type, result
+        if @options[:parallel] < 1
+          warn "Error: parameter of -j option should be greater than 0."
+          return
+        end
+
         begin
           # Require needed things for parallel running
           require 'thread'
@@ -400,8 +401,8 @@ module Test
           rep = [] # FIXME: more good naming
 
           # Array of workers.
-          @workers = @opts[:parallel].times.map {
-            worker = Worker.launch(@opts[:ruby],@args)
+          @workers = @options[:parallel].times.map {
+            worker = Worker.launch(@options[:ruby],@args)
             worker.hook(:dead) do |w,info|
               after_worker_quit w
               after_worker_down w, *info unless info.empty?
@@ -452,7 +453,7 @@ module Test
               when /^p (.+?)$/
                 del_jobs_status
                 print $1.unpack("m")[0]
-                jobs_status if @opts[:job_status] == :replace
+                jobs_status if @options[:job_status] == :replace
               when /^after (.+?)$/
                 @warnings << Marshal.load($1.unpack("m")[0])
               when /^bye (.+?)$/
@@ -514,7 +515,7 @@ module Test
             end
           end
 
-          if @interrupt || @opts[:no_retry] || @need_quit
+          if @interrupt || @options[:no_retry] || @need_quit
             rep.each do |r|
               report.push(*r[:report])
             end
@@ -525,7 +526,6 @@ module Test
             puts ""
             puts "Retrying..."
             puts ""
-            @options = @opts
             rep.each do |r|
               if r[:testcase] && r[:file] && !r[:report].empty?
                 require r[:file]
@@ -557,7 +557,7 @@ module Test
       def _run_suites suites, type
         @interrupt = nil
         result = []
-        if @opts[:parallel]
+        if @options[:parallel]
           _run_parallel suites, type, result
         else
           suites.each {|suite|
@@ -569,13 +569,42 @@ module Test
             end
           }
         end
-        report.reject!{|r| r.start_with? "Skipped:" } if @opts[:hide_skip]
+        report.reject!{|r| r.start_with? "Skipped:" } if @options[:hide_skip]
+        report.sort_by!{|r| r.start_with?("Skipped:") ? 0 : \
+                           (r.start_with?("Failure:") ? 1 : 2) }
         result
+      end
+
+      # Overriding of MiniTest::Unit#puke
+      def puke klass, meth, e
+        # TODO:
+        #   this overriding is for minitest feature that skip messages are
+        #   hidden when not verbose (-v), note this is temporally.
+        e = case e
+            when MiniTest::Skip then
+              @skips += 1
+              "Skipped:\n#{meth}(#{klass}) [#{location e}]:\n#{e.message}\n"
+            when MiniTest::Assertion then
+              @failures += 1
+              "Failure:\n#{meth}(#{klass}) [#{location e}]:\n#{e.message}\n"
+            else
+              @errors += 1
+              bt = MiniTest::filter_backtrace(e.backtrace).join "\n    "
+              "Error:\n#{meth}(#{klass}):\n#{e.class}: #{e.message}\n    #{bt}\n"
+            end
+        @report << e
+        e[0, 1]
       end
 
       def status(*args)
         result = super
         raise @interrupt if @interrupt
+        result
+      end
+
+      def run(*args)
+        result = super
+        puts "\nruby -v: #{RUBY_DESCRIPTION}"
         result
       end
     end
@@ -595,6 +624,7 @@ module Test
           yield self if block_given?
           files
         end
+        Runner.runner = @runner
         @options = @runner.option_parser
         @argv = argv
       end

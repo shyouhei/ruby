@@ -12,13 +12,13 @@ module Psych
       alias :finished? :finished
       alias :started? :started
 
-      def initialize options = {}, emitter = Psych::TreeBuilder.new
+      def initialize options = {}, emitter = TreeBuilder.new, ss = ScalarScanner.new
         super()
         @started  = false
         @finished = false
         @emitter  = emitter
         @st       = {}
-        @ss       = ScalarScanner.new
+        @ss       = ss
         @options  = options
 
         @dispatch_cache = Hash.new do |h,klass|
@@ -214,12 +214,19 @@ module Psych
         end
       end
 
+      def binary? string
+        string.encoding == Encoding::ASCII_8BIT ||
+          string.index("\x00") ||
+          string.count("\x00-\x7F", "^ -~\t\r\n").fdiv(string.length) > 0.3
+      end
+      private :binary?
+
       def visit_String o
         plain = false
         quote = false
         style = Nodes::Scalar::ANY
 
-        if o.index("\x00") || o.count("\x00-\x7F", "^ -~\t\r\n").fdiv(o.length) > 0.3
+        if binary?(o)
           str   = [o].pack('m').chomp
           tag   = '!binary' # FIXME: change to below when syck is removed
           #tag   = 'tag:yaml.org,2002:binary'
@@ -246,8 +253,14 @@ module Psych
         end
       end
 
+      def visit_Module o
+        raise TypeError, "can't dump anonymous module: #{o}" unless o.name
+        @emitter.scalar o.name, nil, '!ruby/module', false, false, Nodes::Scalar::SINGLE_QUOTED
+      end
+
       def visit_Class o
-        raise TypeError, "can't dump anonymous class #{o.class}"
+        raise TypeError, "can't dump anonymous class: #{o}" unless o.name
+        @emitter.scalar o.name, nil, '!ruby/class', false, false, Nodes::Scalar::SINGLE_QUOTED
       end
 
       def visit_Range o
@@ -259,7 +272,10 @@ module Psych
       end
 
       def visit_Hash o
-        register(o, @emitter.start_mapping(nil, nil, true, Psych::Nodes::Mapping::BLOCK))
+        tag      = o.class == ::Hash ? nil : "!ruby/hash:#{o.class}"
+        implicit = !tag
+
+        register(o, @emitter.start_mapping(nil, tag, implicit, Psych::Nodes::Mapping::BLOCK))
 
         o.each do |k,v|
           accept k
@@ -295,11 +311,27 @@ module Psych
       end
 
       private
-      def format_time time
-        if time.utc?
-          time.strftime("%Y-%m-%d %H:%M:%S.%9N Z")
-        else
-          time.strftime("%Y-%m-%d %H:%M:%S.%9N %:z")
+      # '%:z' was no defined until 1.9.3
+      if RUBY_VERSION < '1.9.3'
+        def format_time time
+          formatted = time.strftime("%Y-%m-%d %H:%M:%S.%9N")
+
+          if time.utc?
+            formatted += " Z"
+          else
+            zone = time.strftime('%z')
+            formatted += " #{zone[0,3]}:#{zone[3,5]}"
+          end
+
+          formatted
+        end
+      else
+        def format_time time
+          if time.utc?
+            time.strftime("%Y-%m-%d %H:%M:%S.%9N Z")
+          else
+            time.strftime("%Y-%m-%d %H:%M:%S.%9N %:z")
+          end
         end
       end
 

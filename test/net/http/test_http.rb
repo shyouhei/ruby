@@ -147,22 +147,30 @@ module TestNetHTTP_version_1_1_methods
   end
 
   def test_s_post_form
+    url = "http://#{config('host')}:#{config('port')}/"
     res = Net::HTTP.post_form(
-              URI.parse("http://#{config('host')}:#{config('port')}/"),
+              URI.parse(url),
               "a" => "x")
     assert_equal ["a=x"], res.body.split(/[;&]/).sort
 
     res = Net::HTTP.post_form(
-              URI.parse("http://#{config('host')}:#{config('port')}/"),
+              URI.parse(url),
               "a" => "x",
               "b" => "y")
     assert_equal ["a=x", "b=y"], res.body.split(/[;&]/).sort
 
     res = Net::HTTP.post_form(
-              URI.parse("http://#{config('host')}:#{config('port')}/"),
+              URI.parse(url),
               "a" => ["x1", "x2"],
               "b" => "y")
+    assert_equal url, res['X-request-uri']
     assert_equal ["a=x1", "a=x2", "b=y"], res.body.split(/[;&]/).sort
+
+    res = Net::HTTP.post_form(
+              URI.parse(url + '?a=x'),
+              "b" => "y")
+    assert_equal url + '?a=x', res['X-request-uri']
+    assert_equal ["b=y"], res.body.split(/[;&]/).sort
   end
 
   def test_patch
@@ -186,7 +194,7 @@ module TestNetHTTP_version_1_1_methods
     bug4246 = "expected the HTTP session to have timed out but have not. c.f. [ruby-core:34203]"
 
     # listen for connections... but deliberately do not complete SSL handshake
-    TCPServer.open(0) {|server|
+    TCPServer.open('localhost', 0) {|server|
       port = server.addr[1]
 
       conn = Net::HTTP.new('localhost', port)
@@ -462,5 +470,86 @@ class TestNetHTTP_v1_2_chunked < Test::Unit::TestCase
         }
       }
     }
+  end
+end
+
+class TestNetHTTPContinue < Test::Unit::TestCase
+  CONFIG = {
+    'host' => '127.0.0.1',
+    'port' => 10081,
+    'proxy_host' => nil,
+    'proxy_port' => nil,
+    'chunked' => true,
+  }
+
+  include TestNetHTTPUtils
+
+  def logfile
+    @debug = StringIO.new('')
+  end
+
+  def mount_proc(&block)
+    @server.mount('/continue', WEBrick::HTTPServlet::ProcHandler.new(block.to_proc))
+  end
+
+  def test_expect_continue
+    mount_proc {|req, res|
+      req.continue
+      res.body = req.query['body']
+    }
+    start {|http|
+      http.continue_timeout = 0.2
+      http.request_post('/continue', 'body=BODY', 'expect' => '100-continue') {|res|
+        assert_equal('BODY', res.read_body)
+      }
+    }
+    assert_match(/Expect: 100-continue/, @debug.string)
+    assert_match(/HTTP\/1.1 100 continue/, @debug.string)
+  end
+
+  def test_expect_continue_timeout
+    mount_proc {|req, res|
+      sleep 0.2
+      req.continue # just ignored because it's '100'
+      res.body = req.query['body']
+    }
+    start {|http|
+      http.continue_timeout = 0
+      http.request_post('/continue', 'body=BODY', 'expect' => '100-continue') {|res|
+        assert_equal('BODY', res.read_body)
+      }
+    }
+    assert_match(/Expect: 100-continue/, @debug.string)
+    assert_match(/HTTP\/1.1 100 continue/, @debug.string)
+  end
+
+  def test_expect_continue_error
+    mount_proc {|req, res|
+      res.status = 501
+      res.body = req.query['body']
+    }
+    start {|http|
+      http.continue_timeout = 0
+      http.request_post('/continue', 'body=ERROR', 'expect' => '100-continue') {|res|
+        assert_equal('ERROR', res.read_body)
+      }
+    }
+    assert_match(/Expect: 100-continue/, @debug.string)
+    assert_not_match(/HTTP\/1.1 100 continue/, @debug.string)
+  end
+
+  def test_expect_continue_error_while_waiting
+    mount_proc {|req, res|
+      res.status = 501
+      res.body = req.query['body']
+    }
+    start {|http|
+      http.continue_timeout = 0.5
+      http.request_post('/continue', 'body=ERROR', 'expect' => '100-continue') {|res|
+        assert_equal('ERROR', res.read_body)
+      }
+    }
+    assert_match(/Expect: 100-continue/, @debug.string)
+    assert_not_match(/HTTP\/1.1 100 continue/, @debug.string)
   end
 end

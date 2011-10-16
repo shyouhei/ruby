@@ -350,7 +350,9 @@ class RDoc::Parser::Ruby < RDoc::Parser
 
   def get_constant_with_optional_parens
     skip_tkspace false
+
     nest = 0
+
     while TkLPAREN === (tk = peek_tk) or TkfLPAREN === tk do
       get_tk
       skip_tkspace
@@ -403,17 +405,9 @@ class RDoc::Parser::Ruby < RDoc::Parser
   #
   # This routine modifies its +comment+ parameter.
 
-  def look_for_directives_in(context, comment)
-    preprocess = RDoc::Markup::PreProcess.new @file_name, @options.rdoc_include
-
-    preprocess.handle comment, context do |directive, param|
+  def look_for_directives_in context, comment
+    @preprocess.handle comment, context do |directive, param|
       case directive
-      when 'enddoc' then
-        context.done_documenting = true
-        ''
-      when 'main' then
-        @options.main_page = param if @options.respond_to? :main_page
-        ''
       when 'method', 'singleton-method',
            'attr', 'attr_accessor', 'attr_reader', 'attr_writer' then
         false # handled elsewhere
@@ -421,16 +415,6 @@ class RDoc::Parser::Ruby < RDoc::Parser
         context.set_current_section param, comment
         comment.replace ''
         break
-      when 'startdoc' then
-        context.start_doc
-        context.force_documentation = true
-        ''
-      when 'stopdoc' then
-        context.stop_doc
-        ''
-      when 'title' then
-        @options.default_title = param if @options.respond_to? :default_title=
-        ''
       end
     end
 
@@ -476,7 +460,7 @@ class RDoc::Parser::Ruby < RDoc::Parser
 
       read_documentation_modifiers att, RDoc::ATTR_MODIFIERS
 
-      context.add_attribute att if att.document_self
+      context.add_attribute att
 
       @stats.add_attribute att
     else
@@ -497,6 +481,8 @@ class RDoc::Parser::Ruby < RDoc::Parser
 
     tmp = RDoc::CodeObject.new
     read_documentation_modifiers tmp, RDoc::ATTR_MODIFIERS
+    # TODO In most other places we let the context keep track of document_self
+    # and add found items appropriately but here we do not.  I'm not sure why.
     return unless tmp.document_self
 
     case tk.name
@@ -555,7 +541,7 @@ class RDoc::Parser::Ruby < RDoc::Parser
     al.line   = line_no
 
     read_documentation_modifiers al, RDoc::ATTR_MODIFIERS
-    context.add_alias al if al.document_self
+    context.add_alias al
     @stats.add_alias al
 
     al
@@ -625,13 +611,14 @@ class RDoc::Parser::Ruby < RDoc::Parser
 
       cls_type = single == SINGLE ? RDoc::SingleClass : RDoc::NormalClass
       cls = declaration_context.add_class cls_type, given_name, superclass
+      cls.ignore unless container.document_children
 
       read_documentation_modifiers cls, RDoc::CLASS_MODIFIERS
       cls.record_location @top_level
       cls.offset = offset
       cls.line   = line_no
 
-      cls.comment = comment if cls.document_self
+      cls.add_comment comment, @top_level
 
       @top_level.add_to_classes_or_modules cls
       @stats.add_class cls
@@ -650,12 +637,12 @@ class RDoc::Parser::Ruby < RDoc::Parser
           other.offset  = offset
           other.line    = line_no
 
-          other.comment = comment
+          other.add_comment comment, @top_level
         end
 
         # notify :nodoc: all if not a constant-named class/module
         # (and remove any comment)
-        unless name =~ /\A(::)?[A-Z]/
+        unless name =~ /\A(::)?[A-Z]/ then
           other.document_self = nil
           other.document_children = false
           other.clear_comment
@@ -675,7 +662,7 @@ class RDoc::Parser::Ruby < RDoc::Parser
   ##
   # Parses a constant in +context+ with +comment+
 
-  def parse_constant(container, tk, comment)
+  def parse_constant container, tk, comment
     offset  = tk.seek
     line_no = tk.line_no
 
@@ -714,7 +701,8 @@ class RDoc::Parser::Ruby < RDoc::Parser
       when TkRPAREN, TkRBRACE, TkRBRACK, TkEND then
         nest -= 1
       when TkCOMMENT then
-        if nest <= 0 && @scanner.lex_state == EXPR_END
+        if nest <= 0 &&
+           (@scanner.lex_state == EXPR_END || !@scanner.continue) then
           unget_tk tk
           break
         end
@@ -729,7 +717,6 @@ class RDoc::Parser::Ruby < RDoc::Parser
                 end
 
           container.add_module_alias mod, name, @top_level if mod
-          get_tk # TkNL
           break
         end
       when TkNL then
@@ -756,7 +743,7 @@ class RDoc::Parser::Ruby < RDoc::Parser
     read_documentation_modifiers con, RDoc::CONSTANT_MODIFIERS
 
     @stats.add_constant con
-    container.add_constant con if con.document_self
+    container.add_constant con
     true
   end
 
@@ -795,7 +782,7 @@ class RDoc::Parser::Ruby < RDoc::Parser
 
       return unless meth.name
 
-      container.add_method meth if meth.document_self
+      container.add_method meth
 
       meth.comment = comment
 
@@ -816,7 +803,6 @@ class RDoc::Parser::Ruby < RDoc::Parser
       att.line      = line_no
 
       container.add_attribute att
-
       @stats.add_attribute att
     end
 
@@ -826,14 +812,19 @@ class RDoc::Parser::Ruby < RDoc::Parser
   ##
   # Parses an +include+ in +context+ with +comment+
 
-  def parse_include(context, comment)
+  def parse_include context, comment
     loop do
       skip_tkspace_comment
 
       name = get_constant_with_optional_parens
-      context.add_include RDoc::Include.new(name, comment) unless name.empty?
+
+      unless name.empty? then
+        incl = context.add_include RDoc::Include.new(name, comment)
+        incl.record_location @top_level
+      end
 
       return unless TkCOMMA === peek_tk
+
       get_tk
     end
   end
@@ -875,7 +866,6 @@ class RDoc::Parser::Ruby < RDoc::Parser
 
     tmp = RDoc::CodeObject.new
     read_documentation_modifiers tmp, RDoc::ATTR_MODIFIERS
-    return unless tmp.document_self
 
     if comment.sub!(/^# +:?(attr(_reader|_writer|_accessor)?): *(\S*).*?\n/i, '') then
       rw = case $1
@@ -962,7 +952,7 @@ class RDoc::Parser::Ruby < RDoc::Parser
 
       extract_call_seq comment, meth
 
-      container.add_method meth if meth.document_self
+      container.add_method meth
 
       last_tk = tk
 
@@ -1231,7 +1221,7 @@ class RDoc::Parser::Ruby < RDoc::Parser
     mod.record_location @top_level
 
     read_documentation_modifiers mod, RDoc::CLASS_MODIFIERS
-    mod.comment = comment if mod.document_self
+    mod.add_comment comment, @top_level
     parse_statements(mod)
 
     @top_level.add_to_classes_or_modules mod
@@ -1295,9 +1285,12 @@ class RDoc::Parser::Ruby < RDoc::Parser
           while TkCOMMENT === tk do
             comment << tk.text << "\n"
 
-            tk = get_tk        # this is the newline
-            skip_tkspace false # leading spaces
             tk = get_tk
+
+            if TkNL === tk then
+              skip_tkspace false # leading spaces
+              tk = get_tk
+            end
           end
 
           unless comment.empty? then
@@ -1313,15 +1306,11 @@ class RDoc::Parser::Ruby < RDoc::Parser
           non_comment_seen = true
         end
 
-        unget_tk tk
+        unget_tk tk # TODO peek instead of get then unget
         keep_comment = true
 
       when TkCLASS then
-        if container.document_children then
-          parse_class container, single, tk, comment
-        else
-          nest += 1
-        end
+        parse_class container, single, tk, comment
 
       when TkMODULE then
         if container.document_children then
@@ -1331,23 +1320,15 @@ class RDoc::Parser::Ruby < RDoc::Parser
         end
 
       when TkDEF then
-        if container.document_self then
-          parse_method container, single, tk, comment
-        else
-          nest += 1
-        end
+        parse_method container, single, tk, comment
 
       when TkCONSTANT then
-        if container.document_self then
-          if not parse_constant container, tk, comment then
-            try_parse_comment = true
-          end
+        unless parse_constant container, tk, comment then
+          try_parse_comment = true
         end
 
       when TkALIAS then
-        if container.document_self and not current_method then
-          parse_alias container, single, tk, comment
-        end
+        parse_alias container, single, tk, comment unless current_method
 
       when TkYIELD then
         if current_method.nil? then
@@ -1385,12 +1366,11 @@ class RDoc::Parser::Ruby < RDoc::Parser
           when /^attr_(reader|writer|accessor)$/ then
             parse_attr_accessor container, single, tk, comment
           when 'alias_method' then
-            parse_alias container, single, tk, comment if
-              container.document_self
+            parse_alias container, single, tk, comment
           when 'require', 'include' then
             # ignore
           else
-            if container.document_self and comment =~ /\A#\#$/ then
+            if comment =~ /\A#\#$/ then
               case comment
               when /^# +:?attr(_reader|_writer|_accessor)?:/ then
                 parse_meta_attr container, single, tk, comment
@@ -1513,12 +1493,15 @@ class RDoc::Parser::Ruby < RDoc::Parser
   end
 
   ##
-  # Parses statements at the toplevel in +container+
+  # Parses statements in the top-level +container+
 
-  def parse_top_level_statements(container)
+  def parse_top_level_statements container
     comment = collect_first_comment
-    look_for_directives_in(container, comment)
+    look_for_directives_in container, comment
+
+    # HACK move if to RDoc::Context#comment=
     container.comment = comment if container.document_self unless comment.empty?
+
     parse_statements container, NORMAL, nil, comment
   end
 
@@ -1641,16 +1624,17 @@ class RDoc::Parser::Ruby < RDoc::Parser
   # Handles the directive for +context+ if the directive is listed in +allow+.
   # This method is called for directives following a definition.
 
-  def read_documentation_modifiers(context, allow)
+  def read_documentation_modifiers context, allow
     directive, value = read_directive allow
 
     return unless directive
 
-    case directive
-    when 'notnew', 'not_new', 'not-new' then
-      context.dont_rename_initialize = true
-    else
-      RDoc::Parser.process_directive context, directive, value
+    @preprocess.handle_directive '', directive, value, context do |dir, param|
+      if %w[notnew not_new not-new].include? dir then
+        context.dont_rename_initialize = true
+
+        true
+      end
     end
   end
 

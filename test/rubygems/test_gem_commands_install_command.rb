@@ -1,9 +1,3 @@
-######################################################################
-# This file is imported from the rubygems project.
-# DO NOT make modifications in this repo. They _will_ be reverted!
-# File a patch instead and assign it to Ryan Davis or Eric Hodel.
-######################################################################
-
 require 'rubygems/test_case'
 require 'rubygems/commands/install_command'
 
@@ -24,13 +18,13 @@ class TestGemCommandsInstallCommand < Gem::TestCase
   end
 
   def test_execute_exclude_prerelease
-    util_setup_fake_fetcher(:prerelease)
-    util_setup_spec_fetcher @a2, @a2_pre
+    util_setup_fake_fetcher :prerelease
+    util_setup_spec_fetcher
 
     @fetcher.data["#{@gem_repo}gems/#{@a2.file_name}"] =
-      read_binary(Gem.cache_gem(@a2.file_name, @gemhome))
+      read_binary(@a2.cache_file)
     @fetcher.data["#{@gem_repo}gems/#{@a2_pre.file_name}"] =
-      read_binary(Gem.cache_gem(@a2_pre.file_name, @gemhome))
+      read_binary(@a2_pre.cache_file)
 
     @cmd.options[:args] = [@a2.name]
 
@@ -46,13 +40,13 @@ class TestGemCommandsInstallCommand < Gem::TestCase
   end
 
   def test_execute_explicit_version_includes_prerelease
-    util_setup_fake_fetcher(:prerelease)
-    util_setup_spec_fetcher @a2, @a2_pre
+    util_setup_fake_fetcher :prerelease
+    util_setup_spec_fetcher
 
     @fetcher.data["#{@gem_repo}gems/#{@a2.file_name}"] =
-      read_binary(Gem.cache_gem(@a2.file_name, @gemhome))
+      read_binary(@a2.cache_file)
     @fetcher.data["#{@gem_repo}gems/#{@a2_pre.file_name}"] =
-      read_binary(Gem.cache_gem(@a2_pre.file_name, @gemhome))
+      read_binary(@a2_pre.cache_file)
 
     @cmd.handle_options [@a2_pre.name, '--version', @a2_pre.version.to_s,
                          "--no-ri", "--no-rdoc"]
@@ -92,7 +86,7 @@ class TestGemCommandsInstallCommand < Gem::TestCase
     util_setup_fake_fetcher
     @cmd.options[:domain] = :local
 
-    FileUtils.mv Gem.cache_gem(@a2.file_name, @gemhome), @tempdir
+    FileUtils.mv @a2.cache_file, @tempdir
 
     @cmd.options[:args] = [@a2.name]
 
@@ -121,15 +115,15 @@ class TestGemCommandsInstallCommand < Gem::TestCase
     util_setup_fake_fetcher
     @cmd.options[:user_install] = false
 
-    FileUtils.mv Gem.cache_gem(@a2.file_name, @gemhome), @tempdir
+    FileUtils.mv @a2.cache_file, @tempdir
 
     @cmd.options[:args] = [@a2.name]
 
     use_ui @ui do
       orig_dir = Dir.pwd
       begin
-        File.chmod 0755, @userhome
-        File.chmod 0555, @gemhome
+        FileUtils.chmod 0755, @userhome
+        FileUtils.chmod 0555, @gemhome
 
         Dir.chdir @tempdir
         assert_raises Gem::FilePermissionError do
@@ -137,7 +131,7 @@ class TestGemCommandsInstallCommand < Gem::TestCase
         end
       ensure
         Dir.chdir orig_dir
-        File.chmod 0755, @gemhome
+        FileUtils.chmod 0755, @gemhome
       end
     end
   end
@@ -208,13 +202,14 @@ ERROR:  Possible alternatives: non_existent_with_hint
   end
 
   def test_execute_prerelease
-    util_setup_fake_fetcher(:prerelease)
+    util_setup_fake_fetcher :prerelease
+    util_clear_gems
     util_setup_spec_fetcher @a2, @a2_pre
 
     @fetcher.data["#{@gem_repo}gems/#{@a2.file_name}"] =
-      read_binary(Gem.cache_gem(@a2.file_name, @gemhome))
+      read_binary(@a2.cache_file)
     @fetcher.data["#{@gem_repo}gems/#{@a2_pre.file_name}"] =
-      read_binary(Gem.cache_gem(@a2_pre.file_name, @gemhome))
+      read_binary(@a2_pre.cache_file)
 
     @cmd.options[:prerelease] = true
     @cmd.options[:args] = [@a2_pre.name]
@@ -235,10 +230,10 @@ ERROR:  Possible alternatives: non_existent_with_hint
     @cmd.options[:generate_ri] = true
 
     util_setup_fake_fetcher
-    util_setup_spec_fetcher @a2
+    util_setup_spec_fetcher
 
     @fetcher.data["#{@gem_repo}gems/#{@a2.file_name}"] =
-      read_binary(Gem.cache_gem(@a2.file_name, @gemhome))
+      read_binary(@a2.cache_file)
 
     @cmd.options[:args] = [@a2.name]
 
@@ -265,9 +260,9 @@ ERROR:  Possible alternatives: non_existent_with_hint
     util_setup_fake_fetcher
     @cmd.options[:domain] = :local
 
-    FileUtils.mv Gem.cache_gem(@a2.file_name, @gemhome), @tempdir
+    FileUtils.mv @a2.cache_file, @tempdir
 
-    FileUtils.mv Gem.cache_gem(@b2.file_name, @gemhome), @tempdir
+    FileUtils.mv @b2.cache_file, @tempdir
 
     @cmd.options[:args] = [@a2.name, @b2.name]
 
@@ -293,10 +288,10 @@ ERROR:  Possible alternatives: non_existent_with_hint
 
   def test_execute_conservative
     util_setup_fake_fetcher
-    util_setup_spec_fetcher @b2
+    util_setup_spec_fetcher
 
     @fetcher.data["#{@gem_repo}gems/#{@b2.file_name}"] =
-      read_binary(Gem.cache_gem(@b2.file_name, @gemhome))
+      read_binary(@b2.cache_file)
 
     uninstall_gem(@b2)
 
@@ -308,16 +303,16 @@ ERROR:  Possible alternatives: non_existent_with_hint
       orig_dir = Dir.pwd
       begin
         Dir.chdir @tempdir
-        e = assert_raises Gem::SystemExitException do
+        assert_raises Gem::SystemExitException do
           @cmd.execute
         end
-        assert_equal 0, e.exit_code
       ensure
         Dir.chdir orig_dir
       end
     end
 
     out = @ui.output.split "\n"
+    assert_equal "", @ui.error
     assert_equal "Successfully installed #{@b2.full_name}", out.shift
     assert_equal "1 gem installed", out.shift
     assert out.empty?, out.inspect

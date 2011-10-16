@@ -1,9 +1,3 @@
-######################################################################
-# This file is imported from the rubygems project.
-# DO NOT make modifications in this repo. They _will_ be reverted!
-# File a patch instead and assign it to Ryan Davis or Eric Hodel.
-######################################################################
-
 require 'rubygems/command'
 require 'rubygems/security'
 
@@ -56,7 +50,7 @@ class Gem::Commands::CertCommand < Gem::Command
                'Build private key and self-signed',
                'certificate for EMAIL_ADDR.') do |value, options|
       vals = Gem::Security.build_self_signed_cert(value)
-      File.chmod 0600, vals[:key_path]
+      FileUtils.chmod 0600, vals[:key_path]
       say "Public Cert: #{vals[:cert_path]}"
       say "Private Key: #{vals[:key_path]}"
       say "Don't forget to move the key file to somewhere private..."

@@ -11,6 +11,7 @@
 
 #include "ruby/ruby.h"
 #include "ruby/encoding.h"
+#include "internal.h"
 #include "regenc.h"
 #include <ctype.h>
 #ifndef NO_LOCALE_CHARMAP
@@ -158,8 +159,9 @@ rb_to_encoding_index(VALUE enc)
     return rb_enc_find_index(StringValueCStr(enc));
 }
 
-static rb_encoding *
-to_encoding(VALUE enc)
+/* Returns encoding index or UNSPECIFIED_ENCODING */
+static int
+str_to_encindex(VALUE enc)
 {
     int idx;
 
@@ -171,14 +173,20 @@ to_encoding(VALUE enc)
     if (idx < 0) {
 	rb_raise(rb_eArgError, "unknown encoding name - %s", RSTRING_PTR(enc));
     }
-    return rb_enc_from_index(idx);
+    return idx;
+}
+
+static rb_encoding *
+str_to_encoding(VALUE enc)
+{
+    return rb_enc_from_index(str_to_encindex(enc));
 }
 
 rb_encoding *
 rb_to_encoding(VALUE enc)
 {
     if (enc_check_encoding(enc) >= 0) return RDATA(enc)->data;
-    return to_encoding(enc);
+    return str_to_encoding(enc);
 }
 
 void
@@ -535,7 +543,8 @@ rb_enc_registered(const char *name)
 static VALUE
 require_enc(VALUE enclib)
 {
-    return rb_require_safe(enclib, rb_safe_level());
+    int safe = rb_safe_level();
+    return rb_require_safe(enclib, safe > 3 ? 3 : safe);
 }
 
 static int
@@ -553,6 +562,7 @@ load_encoding(const char *name)
 	else if (ISUPPER(*s)) *s = TOLOWER(*s);
 	++s;
     }
+    FL_UNSET(enclib, FL_TAINT|FL_UNTRUSTED);
     OBJ_FREEZE(enclib);
     ruby_verbose = Qfalse;
     ruby_debug = Qfalse;
@@ -589,6 +599,7 @@ enc_autoload(rb_encoding *enc)
     return i;
 }
 
+/* Return encoding index or UNSPECIFIED_ENCODING from encoding name */
 int
 rb_enc_find_index(const char *name)
 {
@@ -684,8 +695,8 @@ rb_enc_get_index(VALUE obj)
     return i;
 }
 
-void
-rb_enc_set_index(VALUE obj, int idx)
+static void
+enc_set_index(VALUE obj, int idx)
 {
     if (idx < ENCODING_INLINE_MAX) {
 	ENCODING_SET_INLINED(obj, idx);
@@ -693,13 +704,20 @@ rb_enc_set_index(VALUE obj, int idx)
     }
     ENCODING_SET_INLINED(obj, ENCODING_INLINE_MAX);
     rb_ivar_set(obj, rb_id_encoding(), INT2NUM(idx));
-    return;
+}
+
+void
+rb_enc_set_index(VALUE obj, int idx)
+{
+    rb_check_frozen(obj);
+    enc_set_index(obj, idx);
 }
 
 VALUE
 rb_enc_associate_index(VALUE obj, int idx)
 {
 /*    enc_check_capable(obj);*/
+    rb_check_frozen(obj);
     if (rb_enc_get_index(obj) == idx)
 	return obj;
     if (SPECIAL_CONST_P(obj)) {
@@ -709,7 +727,7 @@ rb_enc_associate_index(VALUE obj, int idx)
 	!rb_enc_asciicompat(rb_enc_from_index(idx))) {
 	ENC_CODERANGE_CLEAR(obj);
     }
-    rb_enc_set_index(obj, idx);
+    enc_set_index(obj, idx);
     return obj;
 }
 
@@ -815,11 +833,11 @@ rb_enc_copy(VALUE obj1, VALUE obj2)
 VALUE
 rb_obj_encoding(VALUE obj)
 {
-    rb_encoding *enc = rb_enc_get(obj);
-    if (!enc) {
+    int idx = rb_enc_get_index(obj);
+    if (idx < 0) {
 	rb_raise(rb_eTypeError, "unknown encoding");
     }
-    return rb_enc_from_encoding(enc);
+    return rb_enc_from_encoding_index(idx);
 }
 
 int
@@ -1037,17 +1055,23 @@ enc_list(VALUE klass)
 static VALUE
 enc_find(VALUE klass, VALUE enc)
 {
-    return rb_enc_from_encoding(rb_to_encoding(enc));
+    int idx;
+    if (RB_TYPE_P(enc, T_DATA) && is_data_encoding(enc))
+	return enc;
+    idx = str_to_encindex(enc);
+    if (idx == UNSPECIFIED_ENCODING) return Qnil;
+    return rb_enc_from_encoding_index(idx);
 }
 
 /*
  * call-seq:
- *   Encoding.compatible?(str1, str2) -> enc or nil
+ *   Encoding.compatible?(obj1, obj2) -> enc or nil
  *
- * Checks the compatibility of two strings.
- * If they are compatible, means concatenatable,
- * returns an encoding which the concatenated string will be.
- * If they are not compatible, nil is returned.
+ * Checks the compatibility of two objects.
+ *
+ * If the objects are both strings they are compatible when they are
+ * concatenatable.  The encoding of the concatenated string will be returned
+ * if they are compatible, nil if they are not.
  *
  *   Encoding.compatible?("\xa1".force_encoding("iso-8859-1"), "b")
  *   #=> #<Encoding:ISO-8859-1>
@@ -1056,6 +1080,11 @@ enc_find(VALUE klass, VALUE enc)
  *     "\xa1".force_encoding("iso-8859-1"),
  *     "\xa1\xa1".force_encoding("euc-jp"))
  *   #=> nil
+ *
+ * If the objects are non-strings their encodings are compatible when they
+ * have an encoding and:
+ * * Either encoding is US ASCII compatible
+ * * One of the encodings is a 7-bit encoding
  *
  */
 static VALUE
@@ -1421,7 +1450,9 @@ rb_locale_charmap(VALUE klass)
     const char *codeset = nl_langinfo_codeset();
     char cp[sizeof(int) * 3 + 4];
     if (!codeset) {
-	snprintf(cp, sizeof(cp), "CP%d", GetConsoleCP());
+	UINT codepage = GetConsoleCP();
+	if(!codepage) codepage = GetACP();
+	snprintf(cp, sizeof(cp), "CP%d", codepage);
 	codeset = cp;
     }
     return rb_usascii_str_new2(codeset);

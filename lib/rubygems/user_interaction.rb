@@ -1,9 +1,3 @@
-######################################################################
-# This file is imported from the rubygems project.
-# DO NOT make modifications in this repo. They _will_ be reverted!
-# File a patch instead and assign it to Ryan Davis or Eric Hodel.
-######################################################################
-
 #--
 # Copyright 2006 by Chad Fowler, Rich Kilmer, Jim Weirich and others.
 # All rights reserved.
@@ -90,44 +84,40 @@ module Gem::UserInteraction
 
   include Gem::DefaultUserInteraction
 
-  ##
-  # :method: alert
+  def alert(*args)
+    ui.alert(*args)
+  end
 
-  ##
-  # :method: alert_error
+  def alert_error(*args)
+    ui.alert_error(*args)
+  end
 
-  ##
-  # :method: alert_warning
+  def alert_warning(*args)
+    ui.alert_warning(*args)
+  end
 
-  ##
-  # :method: ask
+  def ask(*args)
+    ui.ask(*args)
+  end
 
-  ##
-  # :method: ask_yes_no
+  def ask_for_password(*args)
+    ui.ask_for_password(*args)
+  end
 
-  ##
-  # :method: choose_from_list
+  def ask_yes_no(*args)
+    ui.ask_yes_no(*args)
+  end
 
-  ##
-  # :method: say
+  def choose_from_list(*args)
+    ui.choose_from_list(*args)
+  end
 
-  ##
-  # :method: terminate_interaction
+  def say(*args)
+    ui.say(*args)
+  end
 
-  [:alert,
-   :alert_error,
-   :alert_warning,
-   :ask,
-   :ask_for_password,
-   :ask_yes_no,
-   :choose_from_list,
-   :say,
-   :terminate_interaction ].each do |methname|
-    class_eval %{
-      def #{methname}(*args)
-        ui.#{methname}(*args)
-      end
-    }, __FILE__, __LINE__
+  def terminate_interaction(*args)
+    ui.terminate_interaction(*args)
   end
 end
 
@@ -146,7 +136,7 @@ class Gem::StreamUI
   end
 
   def tty?
-    if RUBY_PLATFORM =~ /mingw|mswin/
+    if RUBY_VERSION < '1.9.3' and RUBY_PLATFORM =~ /mingw|mswin/ then
       @usetty
     else
       @usetty && @ins.tty?

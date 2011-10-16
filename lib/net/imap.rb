@@ -295,6 +295,22 @@ module Net
       @@authenticators[auth_type] = authenticator
     end
 
+    # The default port for IMAP connections, port 143
+    def self.default_port
+      return PORT
+    end
+    
+    # The default port for IMAPS connections, port 993
+    def self.default_tls_port
+      return SSL_PORT
+    end
+
+    class << self
+      alias default_imap_port default_port
+      alias default_imaps_port default_tls_port
+      alias default_ssl_port default_tls_port
+    end
+
     # Disconnects from the server.
     def disconnect
       begin
@@ -905,10 +921,15 @@ module Net
           @idle_done_cond = new_cond
           @idle_done_cond.wait
           @idle_done_cond = nil
+          if @receiver_thread_terminating
+            raise Net::IMAP::Error, "connection closed"
+          end
         ensure
-          remove_response_handler(response_handler)
-          put_string("DONE#{CRLF}")
-          response = get_tagged_response(tag, "IDLE")
+          unless @receiver_thread_terminating
+            remove_response_handler(response_handler)
+            put_string("DONE#{CRLF}")
+            response = get_tagged_response(tag, "IDLE")
+          end
         end
       end
 
@@ -980,7 +1001,7 @@ module Net
     @@authenticators = {}
     @@max_flag_count = 10000
 
-    # call-seq:
+    # :call-seq:
     #    Net::IMAP.new(host, options = {})
     #
     # Creates a new Net::IMAP object and connects it to the specified
@@ -1056,6 +1077,7 @@ module Net
         rescue Exception
         end
       }
+      @receiver_thread_terminating = false
     end
 
     def receive_responses
@@ -1115,8 +1137,12 @@ module Net
         end
       end
       synchronize do
+        @receiver_thread_terminating = true
         @tagged_response_arrival.broadcast
         @continuation_request_arrival.broadcast
+        if @idle_done_cond
+          @idle_done_cond.signal 
+        end
       end
     end
 
@@ -2170,7 +2196,7 @@ module Net
             break
           when T_SPACE
             shift_token
-            token = lookahead
+            next
           end
           case token.value
           when /\A(?:ENVELOPE)\z/ni
@@ -2748,8 +2774,9 @@ module Net
               break
             when T_SPACE
               shift_token
+            else
+              data.push(number)
             end
-            data.push(number)
           end
         else
           data = []

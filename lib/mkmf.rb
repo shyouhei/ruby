@@ -390,24 +390,25 @@ MSG
 end
 
 def link_command(ldflags, opt="", libpath=$DEFLIBPATH|$LIBPATH)
+  librubyarg = $extmk ? $LIBRUBYARG_STATIC : "$(LIBRUBYARG)"
   conf = RbConfig::CONFIG.merge('hdrdir' => $hdrdir.quote,
                                 'src' => "#{CONFTEST_C}",
-                                'arch_hdrdir' => "#$arch_hdrdir",
+                                'arch_hdrdir' => $arch_hdrdir.quote,
                                 'top_srcdir' => $top_srcdir.quote,
                                 'INCFLAGS' => "#$INCFLAGS",
                                 'CPPFLAGS' => "#$CPPFLAGS",
                                 'CFLAGS' => "#$CFLAGS",
                                 'ARCH_FLAG' => "#$ARCH_FLAG",
                                 'LDFLAGS' => "#$LDFLAGS #{ldflags}",
-                                'LIBPATH' => libpathflag(libpath),
                                 'LOCAL_LIBS' => "#$LOCAL_LIBS #$libs",
-                                'LIBS' => "#$LIBRUBYARG_STATIC #{opt} #$LIBS")
+                                'LIBS' => "#{librubyarg} #{opt} #$LIBS")
+  conf['LIBPATH'] = libpathflag(libpath.map {|s| RbConfig::expand(s.dup, conf)})
   RbConfig::expand(TRY_LINK.dup, conf)
 end
 
 def cc_command(opt="")
   conf = RbConfig::CONFIG.merge('hdrdir' => $hdrdir.quote, 'srcdir' => $srcdir.quote,
-                                'arch_hdrdir' => "#$arch_hdrdir",
+                                'arch_hdrdir' => $arch_hdrdir.quote,
                                 'top_srcdir' => $top_srcdir.quote)
   RbConfig::expand("$(CC) #$INCFLAGS #$CPPFLAGS #$CFLAGS #$ARCH_FLAG #{opt} -c #{CONFTEST_C}",
                    conf)
@@ -415,7 +416,7 @@ end
 
 def cpp_command(outfile, opt="")
   conf = RbConfig::CONFIG.merge('hdrdir' => $hdrdir.quote, 'srcdir' => $srcdir.quote,
-                                'arch_hdrdir' => "#$arch_hdrdir",
+                                'arch_hdrdir' => $arch_hdrdir.quote,
                                 'top_srcdir' => $top_srcdir.quote)
   RbConfig::expand("$(CPP) #$INCFLAGS #$CPPFLAGS #$CFLAGS #{opt} #{CONFTEST_C} #{outfile}",
                    conf)
@@ -946,7 +947,7 @@ end
 def have_framework(fw, &b)
   checking_for fw do
     src = cpp_include("#{fw}/#{fw}.h") << "\n" "int main(void){return 0;}"
-    if try_link(src, opt = "-framework #{fw}", &b)
+    if try_link(src, opt = "-ObjC -framework #{fw}", &b)
       $defs.push(format("-DHAVE_FRAMEWORK_%s", fw.tr_cpp))
       $LDFLAGS << " " << opt
       true
@@ -1640,7 +1641,8 @@ SHELL = /bin/sh
 V = 0
 Q1 = $(V:1=)
 Q = $(Q1:0=@)
-ECHO1 = $(V:1=@:)
+n=$(NULLCMD)
+ECHO1 = $(V:1=@$n)
 ECHO = $(ECHO1:0=@echo)
 
 #### Start of system configuration section. ####
@@ -1648,7 +1650,7 @@ ECHO = $(ECHO1:0=@echo)
 srcdir = #{srcdir.gsub(/\$\((srcdir)\)|\$\{(srcdir)\}/) {mkintpath(CONFIG[$1||$2])}.quote}
 topdir = #{mkintpath($extmk ? CONFIG["topdir"] : $topdir).quote}
 hdrdir = #{mkintpath(CONFIG["hdrdir"]).quote}
-arch_hdrdir = #{$arch_hdrdir}
+arch_hdrdir = #{$arch_hdrdir.quote}
 VPATH = #{vpath.join(CONFIG['PATH_SEPARATOR'])}
 }
   if $extmk
@@ -1676,6 +1678,8 @@ VPATH = #{vpath.join(CONFIG['PATH_SEPARATOR'])}
   possible_command = (proc {|s| s if /top_srcdir/ !~ s} unless $extmk)
   extconf_h = $extconf_h ? "-DRUBY_EXTCONF_H=\\\"$(RUBY_EXTCONF_H)\\\" " : $defs.join(" ") << " "
   mk << %{
+NULLCMD = #{CONFIG['NULLCMD']}
+
 CC = #{CONFIG['CC']}
 CXX = #{CONFIG['CXX']}
 LIBRUBY = #{CONFIG['LIBRUBY']}

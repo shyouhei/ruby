@@ -13,7 +13,7 @@
 
 #include <process.h>
 
-#define WIN32_WAIT_TIMEOUT 10	/* 10 ms */
+#define TIME_QUANTUM_USEC (100 * 1000)
 #define RB_CONDATTR_CLOCK_MONOTONIC 1 /* no effect */
 
 #undef Sleep
@@ -104,6 +104,15 @@ gvl_release(rb_vm_t *vm)
 {
     ReleaseMutex(vm->gvl.lock);
 }
+
+static void
+gvl_yield(rb_vm_t *vm, rb_thread_t *th)
+{
+  gvl_release(th->vm);
+  native_thread_yield();
+  gvl_acquire(vm, th);
+}
+
 
 static void
 gvl_atfork(rb_vm_t *vm)
@@ -414,9 +423,6 @@ native_cond_signal(rb_thread_cond_t *cond)
 
 	SetEvent(e->event);
     }
-    else {
-	rb_bug("native_cond_signal: no pending threads");
-    }
 }
 
 static void
@@ -532,7 +538,6 @@ native_cond_timeout(rb_thread_cond_t *cond, struct timespec timeout_rel)
     now.tv_sec = tv.tv_sec;
     now.tv_nsec = tv.tv_usec * 1000;
 
-  out:
     timeout.tv_sec = now.tv_sec;
     timeout.tv_nsec = now.tv_nsec;
     timeout.tv_sec += timeout_rel.tv_sec;
@@ -668,6 +673,34 @@ native_thread_apply_priority(rb_thread_t *th)
 
 #endif /* USE_NATIVE_THREAD_PRIORITY */
 
+int rb_w32_select_with_thread(int, fd_set *, fd_set *, fd_set *, struct timeval *, void *);	/* @internal */
+
+static int
+native_fd_select(int n, rb_fdset_t *readfds, rb_fdset_t *writefds, rb_fdset_t *exceptfds, struct timeval *timeout, rb_thread_t *th)
+{
+    fd_set *r = NULL, *w = NULL, *e = NULL;
+    if (readfds) {
+        rb_fd_resize(n - 1, readfds);
+        r = rb_fd_ptr(readfds);
+    }
+    if (writefds) {
+        rb_fd_resize(n - 1, writefds);
+        w = rb_fd_ptr(writefds);
+    }
+    if (exceptfds) {
+        rb_fd_resize(n - 1, exceptfds);
+        e = rb_fd_ptr(exceptfds);
+    }
+    return rb_w32_select_with_thread(n, r, w, e, timeout, th);
+}
+
+/* @internal */
+int
+rb_w32_check_interrupt(rb_thread_t *th)
+{
+    return w32_wait_events(0, 0, 0, th);
+}
+
 static void
 ubf_handle(void *ptr)
 {
@@ -684,12 +717,18 @@ static unsigned long _stdcall
 timer_thread_func(void *dummy)
 {
     thread_debug("timer_thread\n");
-    while (WaitForSingleObject(timer_thread_lock, WIN32_WAIT_TIMEOUT) ==
+    while (WaitForSingleObject(timer_thread_lock, TIME_QUANTUM_USEC/1000) ==
 	   WAIT_TIMEOUT) {
 	timer_thread_function(dummy);
     }
     thread_debug("timer killed\n");
     return 0;
+}
+
+void
+rb_thread_wakeup_timer_thread(void)
+{
+    /* do nothing */
 }
 
 static void
@@ -706,7 +745,7 @@ rb_thread_create_timer_thread(void)
 }
 
 static int
-native_stop_timer_thread(void)
+native_stop_timer_thread(int close_anyway)
 {
     int stopped = --system_working <= 0;
     if (stopped) {
@@ -740,4 +779,9 @@ ruby_alloca_chkstk(size_t len, void *sp)
     }
 }
 #endif
+int
+rb_reserved_fd_p(int fd)
+{
+    return 0;
+}
 #endif /* THREAD_SYSTEM_DEPENDENT_IMPLEMENTATION */

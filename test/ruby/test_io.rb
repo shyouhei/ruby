@@ -78,6 +78,14 @@ class TestIO < Test::Unit::TestCase
     }
   end
 
+  def trapping_usr1
+    @usr1_rcvd  = 0
+    trap(:USR1) { @usr1_rcvd += 1 }
+    yield
+  ensure
+    trap(:USR1, "DEFAULT")
+  end
+
   def test_pipe
     r, w = IO.pipe
     assert_instance_of(IO, r)
@@ -225,6 +233,16 @@ class TestIO < Test::Unit::TestCase
       r.each_byte {|byte| break if byte == 32 }
       assert_equal("def", r.read, "[ruby-dev:31659]")
     end)
+  end
+
+  def test_each_byte_with_seek
+    t = make_tempfile
+    bug5119 = '[ruby-core:38609]'
+    i = 0
+    open(t.path) do |f|
+      f.each_byte {i = f.pos}
+    end
+    assert_equal(12, i, bug5119)
   end
 
   def test_each_codepoint
@@ -593,6 +611,33 @@ class TestIO < Test::Unit::TestCase
           s1.close
           result = t.value
           assert_equal(megacontent, result)
+        }
+        with_socketpair {|s1, s2|
+          begin
+            s1.nonblock = true
+          rescue Errno::EBADF
+            skip "nonblocking IO for pipe is not implemented"
+          end
+          trapping_usr1 do
+            nr = 30
+            begin
+              pid = fork do
+                s1.close
+                IO.select([s2])
+                Process.kill(:USR1, Process.ppid)
+                s2.read
+              end
+              s2.close
+              nr.times do
+                assert_equal megacontent.bytesize, IO.copy_stream("megasrc", s1)
+              end
+              assert_equal(1, @usr1_rcvd)
+            ensure
+              s1.close
+              _, status = Process.waitpid2(pid) if pid
+            end
+            assert status.success?, status.inspect
+          end
         }
       end
     }
@@ -1865,4 +1910,96 @@ End
     end
   end
 
+  def test_s_write
+    mkcdtmpdir do
+      path = "test_s_write"
+      File.write(path, "foo\nbar\nbaz")
+      assert_equal("foo\nbar\nbaz", File.read(path))
+      File.write(path, "FOO", 0)
+      assert_equal("FOO\nbar\nbaz", File.read(path))
+      File.write(path, "BAR")
+      assert_equal("BAR", File.read(path))
+      File.write(path, "\u{3042}", mode: "w", encoding: "EUC-JP")
+      assert_equal("\u{3042}".encode("EUC-JP"), File.read(path, encoding: "EUC-JP"))
+      File.delete path
+      assert_equal(6, File.write(path, 'string', 2))
+      File.delete path
+      assert_raise(Errno::EINVAL) { File.write('nonexisting','string', -2) }
+      assert_equal(6, File.write(path, 'string'))
+      assert_equal(3, File.write(path, 'sub', 1))
+      assert_equal("ssubng", File.read(path))
+      File.delete path
+      assert_equal(3, File.write(path, "foo", encoding: "UTF-8"))
+      File.delete path
+      assert_equal(3, File.write(path, "foo", 0, encoding: "UTF-8"))
+      assert_equal("foo", File.read(path))
+      assert_equal(1, File.write(path, "f", 1, encoding: "UTF-8"))
+      assert_equal("ffo", File.read(path))
+      File.delete path
+      assert_equal(1, File.write(path, "f", 1, encoding: "UTF-8"))
+      assert_equal("\00f", File.read(path))
+      assert_equal(1, File.write(path, "f", 0, encoding: "UTF-8"))
+      assert_equal("ff", File.read(path))
+    end
+  end
+
+  def test_s_binwrite
+    mkcdtmpdir do
+      path = "test_s_binwrite"
+      File.binwrite(path, "foo\nbar\nbaz")
+      assert_equal("foo\nbar\nbaz", File.read(path))
+      File.binwrite(path, "FOO", 0)
+      assert_equal("FOO\nbar\nbaz", File.read(path))
+      File.binwrite(path, "BAR")
+      assert_equal("BAR", File.read(path))
+      File.binwrite(path, "\u{3042}")
+      assert_equal("\u{3042}".force_encoding("ASCII-8BIT"), File.binread(path))
+      File.delete path
+      assert_equal(6, File.binwrite(path, 'string', 2))
+      File.delete path
+      assert_equal(6, File.binwrite(path, 'string'))
+      assert_equal(3, File.binwrite(path, 'sub', 1))
+      assert_equal("ssubng", File.binread(path))
+      assert_equal(6, File.size(path))
+      assert_raise(Errno::EINVAL) { File.binwrite('nonexisting', 'string', -2) }
+      assert_nothing_raised(TypeError) { File.binwrite(path, "string", mode: "w", encoding: "EUC-JP") }
+    end
+  end
+
+  def test_race_between_read
+    file = Tempfile.new("test")
+    path = file.path
+    file.close
+    write_file = File.open(path, "wt")
+    read_file = File.open(path, "rt")
+
+    threads = []
+    10.times do |i|
+      threads << Thread.new {write_file.print(i)}
+      threads << Thread.new {read_file.read}
+    end
+    threads.each {|t| t.join}
+    assert(true, "[ruby-core:37197]")
+  ensure
+    read_file.close
+    write_file.close
+    file.close!
+  end
+
+  def test_warn
+    stderr = EnvUtil.verbose_warning do
+      warn "warning"
+    end
+    assert_equal("warning\n", stderr)
+
+    stderr = EnvUtil.verbose_warning do
+      warn
+    end
+    assert_equal("", stderr)
+
+    stderr = EnvUtil.verbose_warning do
+      warn "[Feature #5029]", "[ruby-core:38070]"
+    end
+    assert_equal("[Feature #5029]\n[ruby-core:38070]\n", stderr)
+  end
 end

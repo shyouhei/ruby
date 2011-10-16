@@ -1,9 +1,3 @@
-######################################################################
-# This file is imported from the rubygems project.
-# DO NOT make modifications in this repo. They _will_ be reverted!
-# File a patch instead and assign it to Ryan Davis or Eric Hodel.
-######################################################################
-
 require 'rubygems/test_case'
 require 'rubygems/security'
 require 'rubygems/fix_openssl_warnings' if RUBY_VERSION < "1.9"
@@ -49,6 +43,7 @@ class TestGemSecurity < Gem::TestCase
       :key_size  => 512,
       :save_cert => false,
       :save_key  => false,
+      :trust_dir => File.join(Gem.user_home, '.gem', 'trust'),
     }
 
     result = Gem::Security.build_self_signed_cert email, opt

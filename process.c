@@ -14,6 +14,7 @@
 #include "ruby/ruby.h"
 #include "ruby/io.h"
 #include "ruby/util.h"
+#include "internal.h"
 #include "vm_core.h"
 
 #include <stdio.h>
@@ -28,6 +29,9 @@
 #ifdef HAVE_FCNTL_H
 #include <fcntl.h>
 #endif
+#ifdef HAVE_PROCESS_H
+#include <process.h>
+#endif
 
 #include <time.h>
 #include <ctype.h>
@@ -38,8 +42,6 @@
 #ifndef EXIT_FAILURE
 #define EXIT_FAILURE 1
 #endif
-
-struct timeval rb_time_interval(VALUE);
 
 #ifdef HAVE_SYS_WAIT_H
 # include <sys/wait.h>
@@ -125,9 +127,6 @@ static VALUE rb_cProcessTms;
 #define preserving_errno(stmts) \
 	do {int saved_errno = errno; stmts; errno = saved_errno;} while (0)
 
-
-ssize_t rb_io_bufwrite(VALUE io, const void *buf, size_t size);
-ssize_t rb_io_bufread(VALUE io, void *buf, size_t size);
 
 /*
  *  call-seq:
@@ -978,28 +977,20 @@ proc_detach(VALUE obj, VALUE pid)
 char *strtok();
 #endif
 
-void rb_thread_stop_timer_thread(void);
-void rb_thread_start_timer_thread(void);
-void rb_thread_reset_timer_thread(void);
-
 static int forked_child = 0;
 
 #ifdef SIGPIPE
 static RETSIGTYPE (*saved_sigpipe_handler)(int) = 0;
 #endif
 
-#if defined(POSIX_SIGNAL)
-# define signal(a,b) posix_signal((a),(b))
+#ifdef SIGPIPE
+static RETSIGTYPE sig_do_nothing(int sig)
+{
+}
 #endif
 
 static void before_exec(void)
 {
-    /*
-     * signalmask is inherited across exec() and almost system commands don't
-     * work if signalmask is blocked.
-     */
-    rb_enable_interrupt();
-
 #ifdef SIGPIPE
     /*
      * Some OS commands don't initialize signal handler properly. Thus we have
@@ -1007,16 +998,16 @@ static void before_exec(void)
      * child process interaction might fail. (e.g. ruby -e "system 'yes | ls'")
      * [ruby-dev:12261]
      */
-    saved_sigpipe_handler = signal(SIGPIPE, SIG_DFL);
+    saved_sigpipe_handler = signal(SIGPIPE, sig_do_nothing);
 #endif
 
     if (!forked_child) {
 	/*
-	 * On old MacOS X, exec() may return ENOTSUPP if the process have
-	 * multiple threads. Therefore we have to kill internal threads at once.
-	 * [ruby-core: 10583]
+	 * On Mac OS X 10.5.x (Leopard) or earlier, exec() may return ENOTSUPP
+	 * if the process have multiple threads. Therefore we have to kill
+	 * internal threads temporary. [ruby-core: 10583]
 	 */
-	rb_thread_stop_timer_thread();
+	rb_thread_stop_timer_thread(0);
     }
 }
 
@@ -1030,7 +1021,6 @@ static void after_exec(void)
 #endif
 
     forked_child = 0;
-    rb_disable_interrupt();
 }
 
 #define before_fork() before_exec()
@@ -1218,6 +1208,15 @@ rb_proc_exec(const char *str)
 #endif
 
 #if !defined(HAVE_FORK) && defined(HAVE_SPAWNV)
+# define USE_SPAWNV 1
+#else
+# define USE_SPAWNV 0
+#endif
+#ifndef P_NOWAIT
+# define P_NOWAIT _P_NOWAIT
+#endif
+
+#if USE_SPAWNV
 #if defined(_WIN32)
 #define proc_spawn_v(argv, prog) rb_w32_aspawn(P_NOWAIT, (prog), (argv))
 #else
@@ -1235,14 +1234,15 @@ proc_spawn_v(char **argv, char *prog)
 	return -1;
 
     before_exec();
-    status = spawnv(P_WAIT, prog, argv);
-    preserving_errno({
-	rb_last_status_set(status == -1 ? 127 : status, 0);
+    status = spawnv(P_NOWAIT, prog, (const char **)argv);
+    if (status == -1 && errno == ENOEXEC) {
 	*argv = (char *)prog;
 	*--argv = (char *)"sh";
-	status = spawnv("/bin/sh", argv);
+	status = spawnv(P_NOWAIT, "/bin/sh", (const char **)argv);
 	after_exec();
-    });
+	if (status == -1) errno = ENOEXEC;
+    }
+    rb_last_status_set(status == -1 ? 127 : status, 0);
     return status;
 }
 #endif
@@ -1282,7 +1282,7 @@ proc_spawn(char *str)
 	if (*s != ' ' && !ISALPHA(*s) && strchr("*?{}[]<>()~&|\\$;'`\"\n",*s)) {
 	    char *shell = dln_find_exe_r("sh", 0, fbuf, sizeof(fbuf));
 	    before_exec();
-	    status = shell?spawnl(P_WAIT,shell,"sh","-c",str,(char*)NULL):system(str);
+	    status = spawnl(P_NOWAIT, (shell ? shell : "/bin/sh"), "sh", "-c", str, (char*)NULL);
 	    rb_last_status_set(status == -1 ? 127 : status, 0);
 	    after_exec();
 	    return status;
@@ -1418,7 +1418,7 @@ check_exec_redirect(VALUE key, VALUE val, VALUE options)
             flags = rb_ary_entry(val, 1);
             if (NIL_P(flags))
                 flags = INT2NUM(O_RDONLY);
-            else if (TYPE(flags) == T_STRING)
+            else if (RB_TYPE_P(flags, T_STRING))
                 flags = INT2NUM(rb_io_modestr_oflags(StringValueCStr(flags)));
             else
                 flags = rb_to_int(flags);
@@ -1433,7 +1433,7 @@ check_exec_redirect(VALUE key, VALUE val, VALUE options)
         index = EXEC_OPTION_OPEN;
         path = val;
         FilePathValue(path);
-        if (TYPE(key) == T_FILE)
+        if (RB_TYPE_P(key, T_FILE))
             key = check_exec_redirect_fd(key, 1);
         if (FIXNUM_P(key) && (FIX2INT(key) == 1 || FIX2INT(key) == 2))
             flags = INT2NUM(O_WRONLY|O_CREAT|O_TRUNC);
@@ -1453,7 +1453,7 @@ check_exec_redirect(VALUE key, VALUE val, VALUE options)
         ary = hide_obj(rb_ary_new());
         rb_ary_store(options, index, ary);
     }
-    if (TYPE(key) != T_ARRAY) {
+    if (!RB_TYPE_P(key, T_ARRAY)) {
         VALUE fd = check_exec_redirect_fd(key, !NIL_P(param));
         rb_ary_push(ary, hide_obj(rb_assoc_new(fd, param)));
     }
@@ -1477,7 +1477,7 @@ rb_exec_arg_addopt(struct rb_exec_arg *e, VALUE key, VALUE val)
 {
     VALUE options = e->options;
     ID id;
-#ifdef RLIM2NUM
+#if defined(HAVE_SETRLIMIT) && defined(NUM2RLIM)
     int rtype;
 #endif
 
@@ -1963,6 +1963,7 @@ save_redirect_fd(int fd, VALUE save, char *errmsg, size_t errmsg_buflen)
             ERRMSG("dup");
             return -1;
         }
+        rb_update_max_fd(save_fd);
         newary = rb_ary_entry(save, EXEC_OPTION_DUP2);
         if (NIL_P(newary)) {
             newary = hide_obj(rb_ary_new());
@@ -2079,6 +2080,7 @@ run_exec_dup2(VALUE ary, VALUE save, char *errmsg, size_t errmsg_buflen)
                 ERRMSG("dup2");
                 goto fail;
             }
+            rb_update_max_fd(pairs[j].newfd);
             pairs[j].oldfd = -1;
             j = pairs[j].older_index;
             if (j != -1)
@@ -2117,6 +2119,7 @@ run_exec_dup2(VALUE ary, VALUE save, char *errmsg, size_t errmsg_buflen)
                 ERRMSG("dup");
                 goto fail;
             }
+            rb_update_max_fd(extra_fd);
         }
         else {
             ret = redirect_dup2(pairs[i].oldfd, extra_fd);
@@ -2124,6 +2127,7 @@ run_exec_dup2(VALUE ary, VALUE save, char *errmsg, size_t errmsg_buflen)
                 ERRMSG("dup2");
                 goto fail;
             }
+            rb_update_max_fd(extra_fd);
         }
         pairs[i].oldfd = extra_fd;
         j = pairs[i].older_index;
@@ -2134,6 +2138,7 @@ run_exec_dup2(VALUE ary, VALUE save, char *errmsg, size_t errmsg_buflen)
                 ERRMSG("dup2");
                 goto fail;
             }
+            rb_update_max_fd(ret);
             pairs[j].oldfd = -1;
             j = pairs[j].older_index;
         }
@@ -2191,6 +2196,7 @@ run_exec_open(VALUE ary, VALUE save, char *errmsg, size_t errmsg_buflen)
             ERRMSG("open");
             return -1;
         }
+        rb_update_max_fd(fd2);
         while (i < RARRAY_LEN(ary) &&
                (elt = RARRAY_PTR(ary)[i], RARRAY_PTR(elt)[1] == param)) {
             fd = FIX2INT(RARRAY_PTR(elt)[0]);
@@ -2205,6 +2211,7 @@ run_exec_open(VALUE ary, VALUE save, char *errmsg, size_t errmsg_buflen)
                     ERRMSG("dup2");
                     return -1;
                 }
+                rb_update_max_fd(fd);
             }
             i++;
         }
@@ -2237,6 +2244,7 @@ run_exec_dup2_child(VALUE ary, VALUE save, char *errmsg, size_t errmsg_buflen)
             ERRMSG("dup2");
             return -1;
         }
+        rb_update_max_fd(newfd);
     }
     return 0;
 }
@@ -2503,6 +2511,7 @@ move_fds_to_avoid_crash(int *fdp, int n, VALUE fds)
             ret = fcntl(fdp[i], F_DUPFD, min);
             if (ret == -1)
                 return -1;
+            rb_update_max_fd(ret);
             close(fdp[i]);
             fdp[i] = ret;
         }
@@ -2927,8 +2936,6 @@ rb_f_exit(int argc, VALUE *argv)
 VALUE
 rb_f_abort(int argc, VALUE *argv)
 {
-    extern void ruby_error_print(void);
-
     rb_secure(4);
     if (argc == 0) {
 	if (!NIL_P(GET_THREAD()->errinfo)) {
@@ -2951,43 +2958,9 @@ rb_f_abort(int argc, VALUE *argv)
 void
 rb_syswait(rb_pid_t pid)
 {
-    static int overriding;
-#ifdef SIGHUP
-    RETSIGTYPE (*hfunc)(int) = 0;
-#endif
-#ifdef SIGQUIT
-    RETSIGTYPE (*qfunc)(int) = 0;
-#endif
-    RETSIGTYPE (*ifunc)(int) = 0;
     int status;
-    int i, hooked = FALSE;
 
-    if (!overriding) {
-#ifdef SIGHUP
-	hfunc = signal(SIGHUP, SIG_IGN);
-#endif
-#ifdef SIGQUIT
-	qfunc = signal(SIGQUIT, SIG_IGN);
-#endif
-	ifunc = signal(SIGINT, SIG_IGN);
-	overriding = TRUE;
-	hooked = TRUE;
-    }
-
-    do {
-	i = rb_waitpid(pid, &status, 0);
-    } while (i == -1 && errno == EINTR);
-
-    if (hooked) {
-#ifdef SIGHUP
-	signal(SIGHUP, hfunc);
-#endif
-#ifdef SIGQUIT
-	signal(SIGQUIT, qfunc);
-#endif
-	signal(SIGINT, ifunc);
-	overriding = FALSE;
-    }
+    rb_waitpid(pid, &status, 0);
 }
 
 static VALUE
@@ -3006,16 +2979,16 @@ static rb_pid_t
 rb_spawn_process(struct rb_exec_arg *earg, VALUE prog, char *errmsg, size_t errmsg_buflen)
 {
     rb_pid_t pid;
-#if defined HAVE_FORK || !defined HAVE_SPAWNV
+#if !USE_SPAWNV
     int status;
 #endif
-#if !defined HAVE_FORK
+#if !defined HAVE_FORK || USE_SPAWNV
     struct rb_exec_arg sarg;
     int argc;
     VALUE *argv;
 #endif
 
-#if defined HAVE_FORK
+#if defined HAVE_FORK && !USE_SPAWNV
     pid = rb_fork_err(&status, rb_exec_atfork, earg, earg->redirect_fds, errmsg, errmsg_buflen);
 #else
     if (rb_run_exec_options_err(earg, &sarg, errmsg, errmsg_buflen) < 0) {
@@ -3587,6 +3560,7 @@ ruby_setsid(void)
     if (ret == -1) return -1;
 
     if ((fd = open("/dev/tty", O_RDWR)) >= 0) {
+        rb_update_max_fd(fd);
 	ioctl(fd, TIOCNOTTY, NULL);
 	close(fd);
     }
@@ -4810,10 +4784,7 @@ proc_setmaxgroups(VALUE obj, VALUE val)
 #endif
 
 #if defined(HAVE_DAEMON) || (defined(HAVE_FORK) && defined(HAVE_SETSID))
-#ifndef HAVE_DAEMON
 static int rb_daemon(int nochdir, int noclose);
-#define daemon(nochdir, noclose) rb_daemon((nochdir), (noclose))
-#endif
 
 /*
  *  call-seq:
@@ -4839,18 +4810,21 @@ proc_daemon(int argc, VALUE *argv)
     rb_scan_args(argc, argv, "02", &nochdir, &noclose);
 
     prefork();
-    before_fork();
-    n = daemon(RTEST(nochdir), RTEST(noclose));
-    after_fork();
+    n = rb_daemon(RTEST(nochdir), RTEST(noclose));
     if (n < 0) rb_sys_fail("daemon");
     return INT2FIX(n);
 }
 
-#ifndef HAVE_DAEMON
 static int
 rb_daemon(int nochdir, int noclose)
 {
-    int n, err = 0;
+    int err = 0;
+#ifdef HAVE_DAEMON
+    before_fork();
+    err = daemon(nochdir, noclose);
+    after_fork();
+#else
+    int n;
 
     switch (rb_fork(0, 0, 0, Qnil)) {
       case -1:
@@ -4877,15 +4851,16 @@ rb_daemon(int nochdir, int noclose)
 	err = chdir("/");
 
     if (!noclose && (n = open("/dev/null", O_RDWR, 0)) != -1) {
+        rb_update_max_fd(n);
 	(void)dup2(n, 0);
 	(void)dup2(n, 1);
 	(void)dup2(n, 2);
 	if (n > 2)
 	    (void)close (n);
     }
+#endif
     return err;
 }
-#endif
 #else
 #define proc_daemon rb_f_notimplement
 #endif

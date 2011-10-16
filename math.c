@@ -10,16 +10,21 @@
 **********************************************************************/
 
 #include "ruby/ruby.h"
+#include "internal.h"
 #include <math.h>
 #include <errno.h>
+
+#if defined(HAVE_SIGNBIT) && defined(__GNUC__) && defined(__sun__) && \
+    !defined(signbit)
+    extern int signbit(double);
+#endif
 
 #define numberof(array) (int)(sizeof(array) / sizeof((array)[0]))
 
 VALUE rb_mMath;
 VALUE rb_eMathDomainError;
 
-extern VALUE rb_to_float(VALUE val);
-#define Need_Float(x) do {if (TYPE(x) != T_FLOAT) {(x) = rb_to_float(x);}} while(0)
+#define Need_Float(x) do {if (!RB_TYPE_P(x, T_FLOAT)) {(x) = rb_to_float(x);}} while(0)
 #define Need_Float2(x,y) do {\
     Need_Float(x);\
     Need_Float(y);\
@@ -760,6 +765,8 @@ exp1(sqrt)
  */
 
 /*
+ *  Document-class: Math
+ *
  *  The <code>Math</code> module contains module functions for basic
  *  trigonometric and transcendental functions. See class
  *  <code>Float</code> for a list of constants that

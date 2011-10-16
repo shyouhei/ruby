@@ -12,6 +12,7 @@ MiniTest::Unit.autorun
 
 module MyModule; end
 class AnError < StandardError; include MyModule; end
+class ImmutableString < String; def inspect; super.freeze; end; end
 
 class TestMiniTestUnit < MiniTest::Unit::TestCase
   pwd = Pathname.new(File.expand_path(Dir.pwd))
@@ -46,6 +47,7 @@ Finished tests in 0.00
     MiniTest::Unit::TestCase.reset
     @tu = MiniTest::Unit.new
     @output = StringIO.new("")
+    MiniTest::Unit.runner = nil # protect the outer runner from the inner tests
     MiniTest::Unit.output = @output
   end
 
@@ -254,7 +256,7 @@ RuntimeError: unhandled exception
     assert_report expected
   end
 
-  def test_run_failing # TODO: add error test
+  def test_run_failing
     tc = Class.new(MiniTest::Unit::TestCase) do
       def test_something
         assert true
@@ -351,6 +353,36 @@ S.
 
 Finished tests in 0.00
 
+2 tests, 1 assertions, 0 failures, 0 errors, 1 skips
+"
+    assert_report expected
+  end
+
+  def test_run_skip_verbose
+    tc = Class.new(MiniTest::Unit::TestCase) do
+      def test_something
+        assert true
+      end
+
+      def test_skip
+        skip "not yet"
+      end
+    end
+
+    Object.const_set(:ATestCase, tc)
+
+    @tu.run %w[--seed 42 --verbose]
+
+    expected = "Run options: --seed 42 --verbose
+
+# Running tests:
+
+ATestCase#test_skip = 0.00 s = S
+ATestCase#test_something = 0.00 s = .
+
+
+Finished tests in 0.00
+
   1) Skipped:
 test_skip(ATestCase) [FILE:LINE]:
 not yet
@@ -358,6 +390,200 @@ not yet
 2 tests, 1 assertions, 0 failures, 0 errors, 1 skips
 "
     assert_report expected
+  end
+
+  def test_default_runner_is_minitest_unit
+    assert_instance_of MiniTest::Unit, MiniTest::Unit.runner
+  end
+
+  def test_run_with_other_runner
+
+    runner = Class.new(MiniTest::Unit) do
+      # Run once before each suite
+      def _run_suite(suite, type)
+        begin
+          suite.before_suite
+          super(suite, type)
+        end
+      end
+    end
+
+    tc = Class.new(MiniTest::Unit::TestCase) do
+
+      def self.before_suite
+        MiniTest::Unit.output.puts "Running #{self.name} tests"
+        @@foo = 1
+      end
+
+      def test_something
+        assert_equal 1, @@foo
+      end
+
+      def test_something_else
+        assert_equal 1, @@foo
+      end
+    end
+
+    Object.const_set(:ATestCase, tc)
+    MiniTest::Unit.runner = runner.new
+    @tu.run %w[--seed 42]
+
+    # We should only see 'running ATestCase tests' once
+    expected = "Run options: --seed 42
+
+# Running tests:
+
+Running ATestCase tests
+..
+
+Finished tests in 0.00
+
+2 tests, 2 assertions, 0 failures, 0 errors, 0 skips
+"
+    assert_report expected
+  end
+
+  def with_overridden_include
+    Class.class_eval do
+      def inherited_with_hacks klass
+        throw :inherited_hook
+      end
+
+      alias inherited_without_hacks inherited
+      alias inherited               inherited_with_hacks
+      alias IGNORE_ME!              inherited # 1.8 bug. god I love venture bros
+    end
+
+    yield
+
+  ensure
+    Class.class_eval do
+      alias inherited inherited_without_hacks
+
+      undef_method :inherited_with_hacks
+      undef_method :inherited_without_hacks
+    end
+
+    refute_respond_to Class, :inherited_with_hacks
+    refute_respond_to Class, :inherited_without_hacks
+  end
+
+  def test_inherited_hook_plays_nice_with_others
+    with_overridden_include do
+      assert_throws :inherited_hook do
+        Class.new MiniTest::Unit::TestCase
+      end
+    end
+  end
+
+  def test_setup_hooks
+    call_order = []
+
+    tc = Class.new(MiniTest::Unit::TestCase) do
+      define_method :setup do
+        super()
+        call_order << :method
+      end
+
+      define_method :test2 do
+        call_order << :test2
+      end
+
+      define_method :test1 do
+        call_order << :test1
+      end
+    end
+
+    tc.add_setup_hook lambda { call_order << :proc }
+
+    argument = nil
+
+    tc.add_setup_hook do |arg|
+      argument = arg
+      call_order << :block
+    end
+
+    @tu.run %w[--seed 42]
+
+    assert_kind_of tc, argument
+
+    expected = [:method, :proc, :block, :test1,
+                :method, :proc, :block, :test2]
+
+    assert_equal expected, call_order
+  end
+
+  def test_teardown_hooks
+    call_order = []
+
+    tc = Class.new(MiniTest::Unit::TestCase) do
+      define_method :teardown do
+        super()
+        call_order << :method
+      end
+
+      define_method :test2 do
+        call_order << :test2
+      end
+
+      define_method :test1 do
+        call_order << :test1
+      end
+    end
+
+    tc.add_teardown_hook lambda { call_order << :proc }
+
+    argument = nil
+
+    tc.add_teardown_hook do |arg|
+      argument = arg
+      call_order << :block
+    end
+
+    @tu.run %w[--seed 42]
+
+    assert_kind_of tc, argument
+
+    expected = [:test1, :block, :proc, :method,
+                :test2, :block, :proc, :method]
+
+    assert_equal expected, call_order
+  end
+
+  def test_setup_and_teardown_hooks_survive_inheritance
+    call_order = []
+
+    parent = Class.new(MiniTest::Unit::TestCase) do
+      define_method :setup do
+        super()
+        call_order << :setup_method
+      end
+
+      define_method :teardown do
+        super()
+        call_order << :teardown_method
+      end
+
+      define_method :test_something do
+        call_order << :test
+      end
+    end
+
+    parent.add_setup_hook     { call_order << :setup_hook }
+    parent.add_teardown_hook  { call_order << :teardown_hook }
+
+    _ = Class.new parent
+
+    parent.add_setup_hook     { call_order << :setup_after }
+    parent.add_teardown_hook  { call_order << :teardown_after }
+
+    @tu.run %w[--seed 42]
+
+    # Once for the parent class, once for the child
+    expected = [:setup_method, :setup_hook, :setup_after, :test,
+                :teardown_after, :teardown_hook, :teardown_method] * 2
+
+    assert_equal expected, call_order
   end
 
   def util_expand_bt bt
@@ -434,9 +660,112 @@ class TestMiniTestUnitTestCase < MiniTest::Unit::TestCase
     @tc.assert_equal 1, 1
   end
 
-  def test_assert_equal_different
-    util_assert_triggered "Expected 1, not 2." do
+  def test_assert_equal_different_diff_deactivated
+    without_diff do
+      util_assert_triggered util_msg("haha" * 10, "blah" * 10) do
+        o1 = "haha" * 10
+        o2 = "blah" * 10
+
+        @tc.assert_equal o1, o2
+      end
+    end
+  end
+
+  def test_assert_equal_different_hex
+    c = Class.new do
+      def initialize s; @name = s; end
+    end
+
+    o1 = c.new "a"
+    o2 = c.new "b"
+    msg = "--- expected
+           +++ actual
+           @@ -1 +1 @@
+           -#<#<Class:0xXXXXXX>:0xXXXXXX @name=\"a\">
+           +#<#<Class:0xXXXXXX>:0xXXXXXX @name=\"b\">
+           ".gsub(/^ +/, "")
+
+    util_assert_triggered msg do
+      @tc.assert_equal o1, o2
+    end
+  end
+
+  def test_assert_equal_different_hex_invisible
+    o1 = Object.new
+    o2 = Object.new
+
+    msg = "No visible difference.
+           You should look at your implementation of Object#==.
+           #<Object:0xXXXXXX>".gsub(/^ +/, "")
+
+    util_assert_triggered msg do
+      @tc.assert_equal o1, o2
+    end
+  end
+
+  def test_assert_equal_different_long
+    msg = "--- expected
+           +++ actual
+           @@ -1 +1 @@
+           -\"hahahahahahahahahahahahahahahahahahahaha\"
+           +\"blahblahblahblahblahblahblahblahblahblah\"
+           ".gsub(/^ +/, "")
+
+    util_assert_triggered msg do
+      o1 = "haha" * 10
+      o2 = "blah" * 10
+
+      @tc.assert_equal o1, o2
+    end
+  end
+
+  def test_assert_equal_different_long_invisible
+    msg = "No visible difference.
+           You should look at your implementation of String#==.
+           \"blahblahblahblahblahblahblahblahblahblah\"".gsub(/^ +/, "")
+
+    util_assert_triggered msg do
+      o1 = "blah" * 10
+      o2 = "blah" * 10
+      def o1.== o
+        false
+      end
+      @tc.assert_equal o1, o2
+    end
+  end
+
+  def test_assert_equal_different_long_msg
+    msg = "message.
+           --- expected
+           +++ actual
+           @@ -1 +1 @@
+           -\"hahahahahahahahahahahahahahahahahahahaha\"
+           +\"blahblahblahblahblahblahblahblahblahblah\"
+           ".gsub(/^ +/, "")
+
+    util_assert_triggered msg do
+      o1 = "haha" * 10
+      o2 = "blah" * 10
+      @tc.assert_equal o1, o2, "message"
+    end
+  end
+
+  def test_assert_equal_different_short
+    util_assert_triggered util_msg(1, 2) do
       @tc.assert_equal 1, 2
+    end
+  end
+
+  def test_assert_equal_different_short_msg
+    util_assert_triggered util_msg(1, 2, "message") do
+      @tc.assert_equal 1, 2, "message"
+    end
+  end
+
+  def test_assert_equal_different_short_multiline
+    msg = "--- expected\n+++ actual\n@@ -1,2 +1,2 @@\n \"a\n-b\"\n+c\"\n"
+    util_assert_triggered msg do
+      @tc.assert_equal "a\nb", "a\nc"
     end
   end
 
@@ -590,7 +919,7 @@ class TestMiniTestUnitTestCase < MiniTest::Unit::TestCase
   end
 
   def test_assert_output_triggered_both
-    util_assert_triggered "In stdout.\nExpected \"yay\", not \"boo\"." do
+    util_assert_triggered util_msg("yay", "boo", "In stdout") do
       @tc.assert_output "yay", "blah" do
         print "boo"
         $stderr.print "blah blah"
@@ -599,7 +928,7 @@ class TestMiniTestUnitTestCase < MiniTest::Unit::TestCase
   end
 
   def test_assert_output_triggered_err
-    util_assert_triggered "In stderr.\nExpected \"blah\", not \"blah blah\"." do
+    util_assert_triggered util_msg("blah", "blah blah", "In stderr") do
       @tc.assert_output nil, "blah" do
         $stderr.print "blah blah"
       end
@@ -607,7 +936,7 @@ class TestMiniTestUnitTestCase < MiniTest::Unit::TestCase
   end
 
   def test_assert_output_triggered_out
-    util_assert_triggered "In stdout.\nExpected \"blah\", not \"blah blah\"." do
+    util_assert_triggered util_msg("blah", "blah blah", "In stdout") do
       @tc.assert_output "blah" do
         print "blah blah"
       end
@@ -786,7 +1115,7 @@ FILE:LINE:in `test_assert_raises_triggered_subclass'
   def test_assert_silent_triggered_err
     @assertion_count = 2
 
-    util_assert_triggered "In stderr.\nExpected \"\", not \"blah blah\"." do
+    util_assert_triggered util_msg("", "blah blah", "In stderr") do
       @tc.assert_silent do
         $stderr.print "blah blah"
       end
@@ -794,7 +1123,7 @@ FILE:LINE:in `test_assert_raises_triggered_subclass'
   end
 
   def test_assert_silent_triggered_out
-    util_assert_triggered "In stdout.\nExpected \"\", not \"blah blah\"." do
+    util_assert_triggered util_msg("", "blah blah", "In stdout") do
       @tc.assert_silent do
         print "blah blah"
       end
@@ -889,13 +1218,19 @@ FILE:LINE:in `test_assert_raises_triggered_subclass'
   def test_message
     @assertion_count = 0
 
-    assert_equal "blah2.",         @tc.message { "blah2" }.call
-    assert_equal "blah2.",         @tc.message("") { "blah2" }.call
+    assert_equal "blah2.",         @tc.message          { "blah2" }.call
+    assert_equal "blah2.",         @tc.message("")      { "blah2" }.call
+    assert_equal "blah1.\nblah2.", @tc.message(:blah1)  { "blah2" }.call
     assert_equal "blah1.\nblah2.", @tc.message("blah1") { "blah2" }.call
   end
 
   def test_pass
     @tc.pass
+  end
+
+  def test_prints
+    printer = Class.new { extend MiniTest::Assertions }
+    @tc.assert_equal '"test"', printer.mu_pp(ImmutableString.new 'test')
   end
 
   def test_refute
@@ -1100,5 +1435,20 @@ FILE:LINE:in `test_assert_raises_triggered_subclass'
     msg.gsub!(/\(oid=[-0-9]+\)/, '(oid=N)')
 
     assert_equal expected, msg
+  end
+
+  def util_msg exp, act, msg = nil
+    s = "Expected: #{exp.inspect}\n  Actual: #{act.inspect}"
+    s = "#{msg}.\n#{s}" if msg
+    s
+  end
+
+  def without_diff
+    old_diff = MiniTest::Assertions.diff
+    MiniTest::Assertions.diff = nil
+
+    yield
+  ensure
+    MiniTest::Assertions.diff = old_diff
   end
 end

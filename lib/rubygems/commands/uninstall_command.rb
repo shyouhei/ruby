@@ -1,9 +1,3 @@
-######################################################################
-# This file is imported from the rubygems project.
-# DO NOT make modifications in this repo. They _will_ be reverted!
-# File a patch instead and assign it to Ryan Davis or Eric Hodel.
-######################################################################
-
 require 'rubygems/command'
 require 'rubygems/version_option'
 require 'rubygems/uninstaller'
@@ -79,13 +73,19 @@ class Gem::Commands::UninstallCommand < Gem::Command
   end
 
   def execute
+    original_path = Gem.path
+
     get_all_gem_names.each do |gem_name|
       begin
         Gem::Uninstaller.new(gem_name, options).uninstall
+      rescue Gem::InstallError => e
+        alert e.message
       rescue Gem::GemNotInHomeException => e
         spec = e.spec
         alert("In order to remove #{spec.name}, please execute:\n" \
               "\tgem uninstall #{spec.name} --install-dir=#{spec.installation_path}")
+      ensure
+        Gem.use_paths(*original_path)
       end
     end
   end

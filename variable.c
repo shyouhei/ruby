@@ -19,9 +19,6 @@
 #include "constant.h"
 #include "internal.h"
 
-void rb_vm_change_state(void);
-void rb_vm_inc_const_missing_count(void);
-
 st_table *rb_global_tbl;
 st_table *rb_class_tbl;
 static ID autoload, classpath, tmp_classpath, classid;
@@ -164,7 +161,7 @@ classname(VALUE klass)
 	else {
 	    path = (VALUE)n;
 	}
-	if (TYPE(path) != T_STRING) {
+	if (!RB_TYPE_P(path, T_STRING)) {
 	    rb_bug("class path is not set properly");
 	}
 	return path;
@@ -202,7 +199,7 @@ rb_class_path(VALUE klass)
     else {
 	const char *s = "Class";
 
-	if (TYPE(klass) == T_MODULE) {
+	if (RB_TYPE_P(klass, T_MODULE)) {
 	    if (rb_obj_class(klass) == rb_cModule) {
 		s = "Module";
 	    }
@@ -637,7 +634,10 @@ rb_f_untrace_var(int argc, VALUE *argv)
 
     rb_secure(4);
     rb_scan_args(argc, argv, "11", &var, &cmd);
-    id = rb_to_id(var);
+    id = rb_check_id(&var);
+    if (!id) {
+	rb_name_error_str(var, "undefined global variable %s", RSTRING_PTR(var));
+    }
     if (!st_lookup(rb_global_tbl, (st_data_t)id, &data)) {
 	rb_name_error(id, "undefined global variable %s", rb_id2name(id));
     }
@@ -1302,7 +1302,7 @@ VALUE
 rb_obj_remove_instance_variable(VALUE obj, VALUE name)
 {
     VALUE val = Qnil;
-    const ID id = rb_to_id(name);
+    const ID id = rb_check_id(&name);
     st_data_t n, v;
     struct st_table *iv_index_tbl;
     st_data_t index;
@@ -1310,6 +1310,14 @@ rb_obj_remove_instance_variable(VALUE obj, VALUE name)
     if (!OBJ_UNTRUSTED(obj) && rb_safe_level() >= 4)
 	rb_raise(rb_eSecurityError, "Insecure: can't modify instance variable");
     rb_check_frozen(obj);
+    if (!id) {
+	if (rb_is_instance_name(name)) {
+	    rb_name_error_str(name, "instance variable %s not defined", RSTRING_PTR(name));
+	}
+	else {
+	    rb_name_error_str(name, "`%s' is not allowed as an instance variable name", RSTRING_PTR(name));
+	}
+    }
     if (!rb_is_instance_id(id)) {
 	rb_name_error(id, "`%s' is not allowed as an instance variable name", rb_id2name(id));
     }
@@ -1370,27 +1378,35 @@ const_missing(VALUE klass, ID id)
  * call-seq:
  *    mod.const_missing(sym)    -> obj
  *
- *  Invoked when a reference is made to an undefined constant in
- *  <i>mod</i>. It is passed a symbol for the undefined constant, and
- *  returns a value to be used for that constant. The
- *  following code is a (very bad) example: if reference is made to
- *  an undefined constant, it attempts to load a file whose name is
- *  the lowercase version of the constant (thus class <code>Fred</code> is
- *  assumed to be in file <code>fred.rb</code>). If found, it returns the
- *  value of the loaded class. It therefore implements a perverse
- *  kind of autoload facility.
+ * Invoked when a reference is made to an undefined constant in
+ * <i>mod</i>. It is passed a symbol for the undefined constant, and
+ * returns a value to be used for that constant. The
+ * following code is an example of the same:
  *
- *    def Object.const_missing(name)
- *      @looked_for ||= {}
- *      str_name = name.to_s
- *      raise "Class not found: #{name}" if @looked_for[str_name]
- *      @looked_for[str_name] = 1
- *      file = str_name.downcase
- *      require file
- *      klass = const_get(name)
- *      return klass if klass
- *      raise "Class not found: #{name}"
- *    end
+ *   def Foo.const_missing(name)
+ *     name # return the constant name as Symbol
+ *   end
+ *
+ *   Foo::UNDEFINED_CONST    #=> :UNDEFINED_CONST: symbol returned
+ *
+ * In the next example when a reference is made to an undefined constant,
+ * it attempts to load a file whose name is the lowercase version of the
+ * constant (thus class <code>Fred</code> is assumed to be in file
+ * <code>fred.rb</code>).  If found, it returns the loaded class. It
+ * therefore implements an autoload feature similar to Kernel#autoload and
+ * Module#autoload.
+ *
+ *   def Object.const_missing(name)
+ *     @looked_for ||= {}
+ *     str_name = name.to_s
+ *     raise "Class not found: #{name}" if @looked_for[str_name]
+ *     @looked_for[str_name] = 1
+ *     file = str_name.downcase
+ *     require file
+ *     klass = const_get(name)
+ *     return klass if klass
+ *     raise "Class not found: #{name}"
+ *   end
  *
  */
 
@@ -1429,12 +1445,63 @@ static const rb_data_type_t autoload_data_type = {
 #define check_autoload_table(av) \
     (struct st_table *)rb_check_typeddata((av), &autoload_data_type)
 
+static VALUE
+autoload_data(VALUE mod, ID id)
+{
+    struct st_table *tbl;
+    st_data_t val;
+
+    if (!st_lookup(RCLASS_IV_TBL(mod), autoload, &val) ||
+	    !(tbl = check_autoload_table((VALUE)val)) || !st_lookup(tbl, (st_data_t)id, &val)) {
+	return 0;
+    }
+    return (VALUE)val;
+}
+
+struct autoload_data_i {
+    VALUE feature;
+    int safe_level;
+    VALUE thread;
+    VALUE value;
+};
+
+static void
+autoload_i_mark(void *ptr)
+{
+    struct autoload_data_i *p = ptr;
+    rb_gc_mark(p->feature);
+    rb_gc_mark(p->thread);
+    rb_gc_mark(p->value);
+}
+
+static void
+autoload_i_free(void *ptr)
+{
+    struct autoload_data_i *p = ptr;
+    xfree(p);
+}
+
+static size_t
+autoload_i_memsize(const void *ptr)
+{
+    return sizeof(struct autoload_data_i);
+}
+
+static const rb_data_type_t autoload_data_i_type = {
+    "autoload_i",
+    {autoload_i_mark, autoload_i_free, autoload_i_memsize,},
+};
+
+#define check_autoload_data(av) \
+    (struct autoload_data_i *)rb_check_typeddata((av), &autoload_data_i_type)
+
 void
 rb_autoload(VALUE mod, ID id, const char *file)
 {
     st_data_t av;
-    VALUE fn;
+    VALUE ad, fn;
     struct st_table *tbl;
+    struct autoload_data_i *ele;
 
     if (!rb_is_const_id(id)) {
 	rb_raise(rb_eNameError, "autoload must be constant name: %s", rb_id2name(id));
@@ -1460,10 +1527,17 @@ rb_autoload(VALUE mod, ID id, const char *file)
     fn = rb_str_new2(file);
     FL_UNSET(fn, FL_TAINT);
     OBJ_FREEZE(fn);
-    st_insert(tbl, (st_data_t)id, (st_data_t)rb_node_newnode(NODE_MEMO, fn, rb_safe_level(), 0));
+
+    ele = ALLOC(struct autoload_data_i);
+    ele->feature = fn;
+    ele->safe_level = rb_safe_level();
+    ele->thread = Qnil;
+    ele->value = Qundef;
+    ad = TypedData_Wrap_Struct(0, &autoload_data_i_type, ele);
+    st_insert(tbl, (st_data_t)id, (st_data_t)ad);
 }
 
-static NODE*
+static void
 autoload_delete(VALUE mod, ID id)
 {
     st_data_t val, load = 0, n = id;
@@ -1479,13 +1553,9 @@ autoload_delete(VALUE mod, ID id)
 
 	if (tbl->num_entries == 0) {
 	    n = autoload;
-	    st_delete(RCLASS_CONST_TBL(mod), &n, &val);
-	    ce = (rb_const_entry_t*)val;
-	    if (ce) xfree(ce);
+	    st_delete(RCLASS_IV_TBL(mod), &n, &val);
 	}
     }
-
-    return (NODE *)load;
 }
 
 static VALUE
@@ -1502,22 +1572,18 @@ reset_safe(VALUE safe)
     return safe;
 }
 
-static NODE *
-autoload_node(VALUE mod, ID id, const char **loadingpath)
+static VALUE
+check_autoload_required(VALUE mod, ID id, const char **loadingpath)
 {
-    VALUE file;
-    struct st_table *tbl;
-    st_data_t val;
-    NODE *load;
+    VALUE file, load;
+    struct autoload_data_i *ele;
     const char *loading;
     int safe;
 
-    if (!st_lookup(RCLASS_IV_TBL(mod), autoload, &val) ||
-	!(tbl = check_autoload_table((VALUE)val)) || !st_lookup(tbl, (st_data_t)id, &val)) {
+    if (!(load = autoload_data(mod, id)) || !(ele = check_autoload_data(load))) {
 	return 0;
     }
-    load = (NODE *)val;
-    file = load->nd_lit;
+    file = ele->feature;
     Check_Type(file, T_STRING);
     if (!RSTRING_PTR(file) || !*RSTRING_PTR(file)) {
 	rb_raise(rb_eArgError, "empty file name");
@@ -1535,8 +1601,28 @@ autoload_node(VALUE mod, ID id, const char **loadingpath)
     return 0;
 }
 
+int
+rb_autoloading_value(VALUE mod, ID id, VALUE* value)
+{
+    VALUE load;
+    struct autoload_data_i *ele;
+
+    if (!(load = autoload_data(mod, id)) || !(ele = check_autoload_data(load))) {
+	return 0;
+    }
+    if (ele->thread == rb_thread_current()) {
+	if (ele->value != Qundef) {
+    	    if (value) {
+    		*value = ele->value;
+    	    }
+	    return 1;
+	}
+    }
+    return 0;
+}
+
 static int
-autoload_node_id(VALUE mod, ID id)
+autoload_defined_p(VALUE mod, ID id)
 {
     struct st_table *tbl = RCLASS_CONST_TBL(mod);
     st_data_t val;
@@ -1544,45 +1630,92 @@ autoload_node_id(VALUE mod, ID id)
     if (!tbl || !st_lookup(tbl, (st_data_t)id, &val) || ((rb_const_entry_t*)val)->value != Qundef) {
 	return 0;
     }
-    return 1;
+    return !rb_autoloading_value(mod, id, NULL);
+}
+
+struct autoload_const_set_args {
+    VALUE mod;
+    ID id;
+    VALUE value;
+};
+
+static void
+autoload_const_set(struct autoload_const_set_args* args)
+{
+    autoload_delete(args->mod, args->id);
+    rb_const_set(args->mod, args->id, args->value);
+}
+
+static VALUE
+autoload_require(struct autoload_data_i *ele)
+{
+    return rb_require_safe(ele->feature, ele->safe_level);
 }
 
 VALUE
 rb_autoload_load(VALUE mod, ID id)
 {
-    VALUE file;
-    NODE *load;
+    VALUE load, result;
     const char *loading = 0, *src;
+    struct autoload_data_i *ele;
+    int state = 0;
 
-    if (!autoload_node_id(mod, id)) return Qfalse;
-    load = autoload_node(mod, id, &loading);
+    if (!autoload_defined_p(mod, id)) return Qfalse;
+    load = check_autoload_required(mod, id, &loading);
     if (!load) return Qfalse;
     src = rb_sourcefile();
     if (src && loading && strcmp(src, loading) == 0) return Qfalse;
-    file = load->nd_lit;
-    return rb_require_safe(file, (int)load->nd_nth);
+
+    /* set ele->thread for a marker of autoloading thread */
+    if (!(ele = check_autoload_data(load))) {
+	return Qfalse;
+    }
+    if (ele->thread == Qnil) {
+	ele->thread = rb_thread_current();
+    }
+    /* autoload_data_i can be deleted by another thread while require */
+    result = rb_protect((VALUE(*)(VALUE))autoload_require, (VALUE)ele, &state);
+    if (ele->thread == rb_thread_current()) {
+	ele->thread = Qnil;
+    }
+    if (state) rb_jump_tag(state);
+
+    if (RTEST(result)) {
+	/* At the last, move a value defined in autoload to constant table */
+	if (ele->value != Qundef) {
+	    int safe_backup;
+	    struct autoload_const_set_args args;
+	    args.mod = mod;
+	    args.id = id;
+	    args.value = ele->value;
+	    safe_backup = rb_safe_level();
+	    rb_set_safe_level_force(ele->safe_level);
+	    rb_ensure((VALUE(*)(VALUE))autoload_const_set, (VALUE)&args, reset_safe, (VALUE)safe_backup);
+	}
+    }
+    RB_GC_GUARD(load);
+    return result;
 }
 
 VALUE
 rb_autoload_p(VALUE mod, ID id)
 {
-    VALUE file;
-    NODE *load;
-    const char *loading = 0;
+    VALUE load;
+    struct autoload_data_i *ele;
 
-    while (!autoload_node_id(mod, id)) {
+    while (!autoload_defined_p(mod, id)) {
 	mod = RCLASS_SUPER(mod);
 	if (!mod) return Qnil;
     }
-    load = autoload_node(mod, id, &loading);
+    load = check_autoload_required(mod, id, 0);
     if (!load) return Qnil;
-    return load && (file = load->nd_lit) ? file : Qnil;
+    return (ele = check_autoload_data(load)) ? ele->feature : Qnil;
 }
 
 static VALUE
 rb_const_get_0(VALUE klass, ID id, int exclude, int recurse, int visibility)
 {
-    VALUE value, tmp;
+    VALUE value, tmp, av;
     int mod_retry = 0;
 
     tmp = klass;
@@ -1599,6 +1732,7 @@ rb_const_get_0(VALUE klass, ID id, int exclude, int recurse, int visibility)
 	    if (value == Qundef) {
 		if (am == tmp) break;
 		am = tmp;
+		if (rb_autoloading_value(tmp, id, &av)) return av;
 		rb_autoload_load(tmp, id);
 		continue;
 	    }
@@ -1608,7 +1742,7 @@ rb_const_get_0(VALUE klass, ID id, int exclude, int recurse, int visibility)
 	    }
 	    return value;
 	}
-	if (!recurse && klass != rb_cObject) break;
+	if (!recurse) break;
 	tmp = RCLASS_SUPER(tmp);
     }
     if (!exclude && !mod_retry && BUILTIN_TYPE(klass) == T_MODULE) {
@@ -1672,8 +1806,17 @@ rb_public_const_get_at(VALUE klass, ID id)
 VALUE
 rb_mod_remove_const(VALUE mod, VALUE name)
 {
-    const ID id = rb_to_id(name);
+    const ID id = rb_check_id(&name);
 
+    if (!id) {
+	if (rb_is_const_name(name)) {
+	    rb_name_error_str(name, "constant %s::%s not defined",
+			      rb_class2name(mod), RSTRING_PTR(name));
+	}
+	else {
+	    rb_name_error_str(name, "`%s' is not allowed as a constant name", RSTRING_PTR(name));
+	}
+    }
     if (!rb_is_const_id(id)) {
 	rb_name_error(id, "`%s' is not allowed as a constant name", rb_id2name(id));
     }
@@ -1820,11 +1963,11 @@ rb_const_defined_0(VALUE klass, ID id, int exclude, int recurse, int visibility)
 	    if (visibility && ce->flag == CONST_PRIVATE) {
 		return (int)Qfalse;
 	    }
-	    if (ce->value == Qundef && !autoload_node(tmp, id, 0))
+	    if (ce->value == Qundef && !check_autoload_required(tmp, id, 0) && !rb_autoloading_value(tmp, id, 0))
 		return (int)Qfalse;
 	    return (int)Qtrue;
 	}
-	if (!recurse && klass != rb_cObject) break;
+	if (!recurse) break;
 	tmp = RCLASS_SUPER(tmp);
     }
     if (!exclude && !mod_retry && BUILTIN_TYPE(klass) == T_MODULE) {
@@ -1871,7 +2014,7 @@ rb_public_const_defined_at(VALUE klass, ID id)
     return rb_const_defined_0(klass, id, TRUE, FALSE, TRUE);
 }
 
-void
+static void
 check_before_mod_set(VALUE klass, ID id, VALUE val, const char *dest)
 {
     if (!OBJ_UNTRUSTED(klass) && rb_safe_level() >= 4)
@@ -1899,11 +2042,28 @@ rb_const_set(VALUE klass, ID id, VALUE val)
 
 	if (st_lookup(RCLASS_CONST_TBL(klass), (st_data_t)id, &value)) {
 	    rb_const_entry_t *ce = (rb_const_entry_t*)value;
-	    if (ce->value == Qundef)
+	    if (ce->value == Qundef) {
+		VALUE load;
+		struct autoload_data_i *ele;
+
+		load = autoload_data(klass, id);
+		/* for autoloading thread, keep the defined value to autoloading storage */
+		if (load && (ele = check_autoload_data(load)) && (ele->thread == rb_thread_current())) {
+		    rb_vm_change_state();
+		    ele->value = val;
+		    return;
+		}
+		/* otherwise, allow to override */
 		autoload_delete(klass, id);
+	    }
 	    else {
+		const char *name = rb_id2name(id);
 		visibility = ce->flag;
-		rb_warn("already initialized constant %s", rb_id2name(id));
+		rb_warn("already initialized constant %s", name);
+		if (!NIL_P(ce->file) && ce->line) {
+		    rb_compile_warn(RSTRING_PTR(ce->file), ce->line,
+				    "previous definition of %s was here", name);
+		}
 	    }
 	}
     }
@@ -1913,6 +2073,8 @@ rb_const_set(VALUE klass, ID id, VALUE val)
     ce = ALLOC(rb_const_entry_t);
     ce->flag = (rb_const_flag_t)visibility;
     ce->value = val;
+    ce->file = rb_sourcefilename();
+    ce->line = rb_sourceline();
 
     st_insert(RCLASS_CONST_TBL(klass), (st_data_t)id, (st_data_t)ce);
 }
@@ -1950,7 +2112,11 @@ set_const_visibility(VALUE mod, int argc, VALUE *argv, rb_const_flag_t flag)
     }
 
     for (i = 0; i < argc; i++) {
-	id = rb_to_id(argv[i]);
+	VALUE val = argv[i];
+	id = rb_check_id(&val);
+	if (!id) {
+	    rb_name_error_str(val, "constant %s::%s not defined", rb_class2name(mod), RSTRING_PTR(val));
+	}
 	if (RCLASS_CONST_TBL(mod) && st_lookup(RCLASS_CONST_TBL(mod), (st_data_t)id, &v)) {
 	    ((rb_const_entry_t*)v)->flag = flag;
 	    return;
@@ -1991,7 +2157,7 @@ rb_mod_public_constant(int argc, VALUE *argv, VALUE obj)
 static VALUE
 original_module(VALUE c)
 {
-    if (TYPE(c) == T_ICLASS)
+    if (RB_TYPE_P(c, T_ICLASS))
 	return RBASIC(c)->klass;
     return c;
 }
@@ -2184,9 +2350,18 @@ rb_mod_class_variables(VALUE obj)
 VALUE
 rb_mod_remove_cvar(VALUE mod, VALUE name)
 {
-    const ID id = rb_to_id(name);
+    const ID id = rb_check_id(&name);
     st_data_t val, n = id;
 
+    if (!id) {
+	if (rb_is_class_name(name)) {
+	    rb_name_error_str(name, "class variable %s not defined for %s",
+			      RSTRING_PTR(name), rb_class2name(mod));
+	}
+	else {
+	    rb_name_error_str(name, "wrong class variable name %s", RSTRING_PTR(name));
+	}
+    }
     if (!rb_is_class_id(id)) {
 	rb_name_error(id, "wrong class variable name %s", rb_id2name(id));
     }

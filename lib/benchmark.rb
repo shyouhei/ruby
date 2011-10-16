@@ -1,5 +1,4 @@
-=begin
-#
+#--
 # benchmark.rb - a performance benchmarking library
 #
 # $Id$
@@ -8,9 +7,8 @@
 #
 # Documentation by Gotoken (original RD), Lyle Johnson (RDoc conversion), and
 # Gavin Sinclair (editing).
+#++
 #
-=end
-
 # == Overview
 #
 # The Benchmark module provides methods for benchmarking Ruby code, giving
@@ -169,6 +167,7 @@ module Benchmark
     sync = STDOUT.sync
     STDOUT.sync = true
     label_width ||= 0
+    label_width += 1
     format ||= FORMAT
     print ' '*label_width + caption
     report = Report.new(label_width, format)
@@ -176,8 +175,9 @@ module Benchmark
     Array === results and results.grep(Tms).each {|t|
       print((labels.shift || t.label || "").ljust(label_width), t.format(format))
     }
-    STDOUT.sync = sync
     report.list
+  ensure
+    STDOUT.sync = sync unless sync.nil?
   end
 
 
@@ -246,7 +246,7 @@ module Benchmark
   def bmbm(width = 0, &blk) # :yield: job
     job = Job.new(width)
     yield(job)
-    width = job.width
+    width = job.width + 1
     sync = STDOUT.sync
     STDOUT.sync = true
 
@@ -265,7 +265,7 @@ module Benchmark
     job.list.map { |label,item|
       GC.start
       print label.ljust(width)
-      Benchmark.measure(&item).tap { |res| print res.format }
+      Benchmark.measure(label, &item).tap { |res| print res }
     }
   ensure
     STDOUT.sync = sync unless sync.nil?
@@ -290,7 +290,7 @@ module Benchmark
   #
   # Returns the elapsed real time used to execute the given block.
   #
-  def realtime(&blk) # :yield:
+  def realtime # :yield:
     r0 = Time.now
     yield
     Time.now - r0
@@ -512,6 +512,15 @@ module Benchmark
     end
 
     protected
+    
+    #
+    # Returns a new Tms object obtained by memberwise operation +op+
+    # of the individual times for this Tms object with those of the other
+    # Tms object.
+    #
+    # +op+ can be a mathematical operation such as <tt>+</tt>, <tt>-</tt>,
+    # <tt>*</tt>, <tt>/</tt>
+    #
     def memberwise(op, x)
       case x
       when Benchmark::Tms

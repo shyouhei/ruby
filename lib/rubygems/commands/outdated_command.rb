@@ -1,9 +1,3 @@
-######################################################################
-# This file is imported from the rubygems project.
-# DO NOT make modifications in this repo. They _will_ be reverted!
-# File a patch instead and assign it to Ryan Davis or Eric Hodel.
-######################################################################
-
 require 'rubygems/command'
 require 'rubygems/local_remote_options'
 require 'rubygems/spec_fetcher'
@@ -22,10 +16,8 @@ class Gem::Commands::OutdatedCommand < Gem::Command
   end
 
   def execute
-    locals = Gem::SourceIndex.from_installed_gems
-
-    locals.outdated.sort.each do |name|
-      local   = locals.find_name(name).last
+    Gem::Specification.outdated.sort.each do |name|
+      local   = Gem::Specification.find_all_by_name(name).max
       dep     = Gem::Dependency.new local.name, ">= #{local.version}"
       remotes = Gem::SpecFetcher.fetcher.fetch dep
 
@@ -35,6 +27,4 @@ class Gem::Commands::OutdatedCommand < Gem::Command
       say "#{local.name} (#{local.version} < #{remote.version})"
     end
   end
-
 end
-

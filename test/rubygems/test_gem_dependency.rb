@@ -1,9 +1,3 @@
-######################################################################
-# This file is imported from the rubygems project.
-# DO NOT make modifications in this repo. They _will_ be reverted!
-# File a patch instead and assign it to Ryan Davis or Eric Hodel.
-######################################################################
-
 require 'rubygems/test_case'
 require 'rubygems/dependency'
 
@@ -67,16 +61,20 @@ class TestGemDependency < Gem::TestCase
     assert_match d,                  d,             "match self"
     assert_match dep("a", ">= 0"),   d,             "match version exact"
     assert_match dep("a", ">= 0"),   dep("a", "1"), "match version"
-    assert_match dep(/a/, ">= 0"),   d,             "match simple regexp"
-    assert_match dep(/a|b/, ">= 0"), d,             "match scary regexp"
-
-    refute_match dep(/a/), dep("b")
     refute_match dep("a"), Object.new
+
+    Gem::Deprecate.skip_during do
+      assert_match dep(/a/, ">= 0"),   d,             "match simple regexp"
+      assert_match dep(/a|b/, ">= 0"), d,             "match scary regexp"
+      refute_match dep(/a/), dep("b")
+    end
   end
 
   def test_equals_tilde_escape
     refute_match dep("a|b"), dep("a", "1")
-    assert_match dep(/a|b/), dep("a", "1")
+    Gem::Deprecate.skip_during do
+      assert_match dep(/a|b/), dep("a", "1")
+    end
   end
 
   def test_equals_tilde_object
@@ -90,9 +88,11 @@ class TestGemDependency < Gem::TestCase
   def test_equals_tilde_spec
     assert_match dep("a", ">= 0"),   spec("a", "0")
     assert_match dep("a", "1"),      spec("a", "1")
-    assert_match dep(/a/, ">= 0"),   spec("a", "0")
-    assert_match dep(/a|b/, ">= 0"), spec("b", "0")
-    refute_match dep(/a/, ">= 0"),   spec("b", "0")
+    Gem::Deprecate.skip_during do
+      assert_match dep(/a/, ">= 0"),   spec("a", "0")
+      assert_match dep(/a|b/, ">= 0"), spec("b", "0")
+      refute_match dep(/a/, ">= 0"),   spec("b", "0")
+    end
   end
 
   def test_hash
@@ -166,5 +166,12 @@ class TestGemDependency < Gem::TestCase
 
     assert d.prerelease?
   end
+
+  def test_specific
+    refute dep('a', '> 1').specific?
+
+    assert dep('a', '= 1').specific?
+  end
+
 end
 

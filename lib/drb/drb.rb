@@ -1341,6 +1341,7 @@ module DRb
 
       @protocol = DRbProtocol.open_server(uri, @config)
       @uri = @protocol.uri
+      @exported_uri = [@uri]
 
       @front = front
       @idconv = @config[:idconv]
@@ -1387,6 +1388,10 @@ module DRb
     def alive?
       @thread.alive?
     end
+    
+    def here?(uri)
+      @exported_uri.include?(uri)
+    end
 
     # Stop this server.
     def stop_service
@@ -1412,20 +1417,6 @@ module DRb
     end
 
     private
-    def kill_sub_thread
-      Thread.new do
-        grp = ThreadGroup.new
-        grp.add(Thread.current)
-        list = @grp.list
-        while list.size > 0
-          list.each do |th|
-            th.kill if th.alive?
-          end
-          list = @grp.list
-        end
-      end
-    end
-
     def run
       Thread.start do
         begin
@@ -1434,7 +1425,6 @@ module DRb
           end
         ensure
           @protocol.close if @protocol
-          kill_sub_thread
         end
       end
     end
@@ -1585,6 +1575,10 @@ module DRb
         @grp.add Thread.current
         Thread.current['DRb'] = { 'client' => client ,
                                   'server' => self }
+        DRb.mutex.synchronize do
+          client_uri = client.uri
+          @exported_uri << client_uri unless @exported_uri.include?(client_uri)
+        end
         loop do
           begin
             succ = false
@@ -1681,7 +1675,8 @@ module DRb
 
   # Is +uri+ the URI for the current local server?
   def here?(uri)
-    (current_server.uri rescue nil) == uri
+    current_server.here?(uri) rescue false
+    # (current_server.uri rescue nil) == uri
   end
   module_function :here?
 
@@ -1773,6 +1768,7 @@ module DRb
   module_function :fetch_server
 end
 
+# :stopdoc:
 DRbObject = DRb::DRbObject
 DRbUndumped = DRb::DRbUndumped
 DRbIdConv = DRb::DRbIdConv

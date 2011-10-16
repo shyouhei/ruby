@@ -2,6 +2,7 @@ require 'minitest/autorun'
 require 'stringio'
 require 'tempfile'
 require 'date'
+require 'psych'
 
 module Psych
   class TestCase < MiniTest::Unit::TestCase
@@ -32,7 +33,7 @@ module Psych
     def assert_cycle( obj )
       v = Visitors::YAMLTree.new
       v << obj
-      assert_equal(obj, Psych.load(v.tree.to_yaml))
+      assert_equal(obj, Psych.load(v.tree.yaml))
       assert_equal( obj, Psych::load(Psych.dump(obj)))
       assert_equal( obj, Psych::load( obj.psych_to_yaml ) )
     end
@@ -53,11 +54,3 @@ module Psych
     end
   end
 end
-
-require 'psych'
-
-# FIXME: remove this when syck is removed
-o = Object.new
-a = o.method(:psych_to_yaml)
-b = o.method(:to_yaml)
-raise "psych should define to_yaml" unless a == b

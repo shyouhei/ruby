@@ -94,7 +94,7 @@ class ConditionVariable
   # Wakes up all threads waiting for this lock.
   #
   def broadcast
-    # TODO: imcomplete
+    # TODO: incomplete
     waiters0 = nil
     @waiters_mutex.synchronize do
       waiters0 = @waiters.dup
@@ -144,7 +144,7 @@ class Queue
   def initialize
     @que = []
     @waiting = []
-    @que.taint          # enable tainted comunication
+    @que.taint          # enable tainted communication
     @waiting.taint
     self.taint
     @mutex = Mutex.new
@@ -185,7 +185,9 @@ class Queue
       while true
         if @que.empty?
           raise ThreadError, "queue empty" if non_block
-          @waiting.push Thread.current
+          # @waiting.include? check is necessary for avoiding a race against
+          # Thread.wakeup [Bug 5195]
+          @waiting.push Thread.current unless @waiting.include?(Thread.current)
           @mutex.sleep
         else
           return @que.shift
@@ -267,6 +269,7 @@ class SizedQueue < Queue
   # Sets the maximum size of the queue.
   #
   def max=(max)
+    raise ArgumentError, "queue size must be positive" unless max > 0
     diff = nil
     @mutex.synchronize {
       if max <= @max

@@ -23,6 +23,7 @@
 #include "ruby/io.h"
 #include "ruby/util.h"
 #include "dln.h"
+#include "internal.h"
 
 #ifdef HAVE_UNISTD_H
 #include <unistd.h>
@@ -489,7 +490,7 @@ static VALUE
 rb_stat_rdev(VALUE self)
 {
 #ifdef HAVE_ST_RDEV
-    return ULONG2NUM(get_stat(self)->st_rdev);
+    return DEVT2NUM(get_stat(self)->st_rdev);
 #else
     return Qnil;
 #endif
@@ -510,8 +511,7 @@ static VALUE
 rb_stat_rdev_major(VALUE self)
 {
 #if defined(HAVE_ST_RDEV) && defined(major)
-    long rdev = get_stat(self)->st_rdev;
-    return ULONG2NUM(major(rdev));
+    return DEVT2NUM(major(get_stat(self)->st_rdev));
 #else
     return Qnil;
 #endif
@@ -532,8 +532,7 @@ static VALUE
 rb_stat_rdev_minor(VALUE self)
 {
 #if defined(HAVE_ST_RDEV) && defined(minor)
-    long rdev = get_stat(self)->st_rdev;
-    return ULONG2NUM(minor(rdev));
+    return DEVT2NUM(minor(get_stat(self)->st_rdev));
 #else
     return Qnil;
 #endif
@@ -2204,8 +2203,6 @@ rb_file_s_lchown(int argc, VALUE *argv)
 #else
 #define rb_file_s_lchown rb_f_notimplement
 #endif
-
-struct timespec rb_time_timespec(VALUE time);
 
 struct utime_args {
     const struct timespec* tsp;
@@ -3917,6 +3914,7 @@ rb_file_s_truncate(VALUE klass, VALUE path, VALUE len)
 	if ((tmpfd = open(StringValueCStr(path), 0)) < 0) {
 	    rb_sys_fail(RSTRING_PTR(path));
 	}
+        rb_update_max_fd(tmpfd);
 	if (chsize(tmpfd, pos) < 0) {
 	    close(tmpfd);
 	    rb_sys_fail(RSTRING_PTR(path));
@@ -5009,7 +5007,8 @@ path_check_0(VALUE path, int execpath)
 	    && !(p && execpath && (st.st_mode & S_ISVTX))
 #endif
 	    && !access(p0, W_OK)) {
-	    rb_warn("Insecure world writable dir %s in %sPATH, mode 0%o",
+	    rb_warn("Insecure world writable dir %s in %sPATH, mode 0%"
+		    PRI_MODET_PREFIX"o",
 		    p0, (execpath ? "" : "LOAD_"), st.st_mode);
 	    if (p) *p = '/';
 	    RB_GC_GUARD(path);
@@ -5063,6 +5062,7 @@ file_load_ok(const char *path)
     int ret = 1;
     int fd = open(path, O_RDONLY);
     if (fd == -1) return 0;
+    rb_update_max_fd(fd);
 #if !defined DOSISH
     {
 	struct stat st;
@@ -5088,8 +5088,6 @@ is_explicit_relative(const char *path)
     if (*path == '.') path++;
     return isdirsep(*path);
 }
-
-VALUE rb_get_load_path(void);
 
 static VALUE
 copy_path_class(VALUE path, VALUE orig)

@@ -17,6 +17,7 @@ require 'fileutils'
 require 'shellwords'
 require 'optparse'
 require 'optparse/shellwords'
+require 'ostruct'
 
 STDOUT.sync = true
 File.umask(0)
@@ -136,7 +137,7 @@ def install?(*types, &block)
   end
 end
 
-def strip_file(file)
+def strip_file(files)
   if !defined?($strip_command) and (cmd = CONFIG["STRIP"])
     case cmd
     when "", "true", ":" then return
@@ -145,7 +146,7 @@ def strip_file(file)
   elsif !$strip_command
     return
   end
-  system(*($strip_command + [file]))
+  system(*($strip_command + [files].flatten))
 end
 
 def install(src, dest, options = {})
@@ -154,12 +155,13 @@ def install(src, dest, options = {})
   options[:preserve] = true
   d = with_destdir(dest)
   super(src, d, options)
+  srcs = Array(src)
   if strip
-    d = File.join(d, File.basename(src)) if $made_dirs[dest]
+    d = srcs.map {|src| File.join(d, File.basename(src))} if $made_dirs[dest]
     strip_file(d)
   end
   if $installed_list
-    dest = File.join(dest, File.basename(src)) if $made_dirs[dest]
+    dest = srcs.map {|src| File.join(dest, File.basename(src))} if $made_dirs[dest]
     $installed_list.puts dest
   end
 end
@@ -531,37 +533,114 @@ install?(:local, :comm, :man) do
   end
 end
 
-install?(:ext, :comm, :gem) do
-  directories = []
-  IO.foreach(File.join(srcdir, "lib/rubygems.rb")) do |line|
-    if /^\s*DIRECTORIES\s*=\s*%w\[(.*?)\]/ =~ line
-      directories = $1.split
-      break
+# :stopdoc:
+module Gem
+  if defined?(Specification)
+    remove_const(:Specification)
+  end
+
+  class Specification < OpenStruct
+    def initialize(*)
+      super
+      yield(self) if defined?(yield)
+      self.executables ||= []
+    end
+
+    def self.load(path)
+      src = File.open(path, "rb") {|f| f.read}
+      src.sub!(/\A#.*/, '')
+      eval(src, nil, path)
     end
   end
-  gpath = CONFIG["sitelibdir"].sub(%r'/site_ruby/(?=[^/]+)', '/gems/')
-  prepare "default gems", gpath, directories
+end
 
-  destdir = File.join(gpath, directories.grep(/^spec/)[0])
-  default_gems = [
-    ['rake', 'lib/rake.rb'],
-    ['rdoc', 'lib/rdoc.rb'],
-    ['minitest', 'lib/minitest/unit.rb'],
-    ['json', 'ext/json/lib/json/version.rb'],
-  ]
-  default_gems.each do |name, src|
-    src = File.join(srcdir, src)
-    version = open(src) {|f| f.find {|s| /^\s*\w*VERSION\s*=(?!=)/ =~ s}} or next
-    version = version.split(%r"=\s*", 2)[1].strip[/\A([\'\"])(.*?)\1/, 2]
-    puts "#{" "*30}#{name} #{version}"
-    open_for_install(File.join(destdir, "#{name}-#{version}.gemspec"), $data_mode) do
-      <<-GEMSPEC
+module RbInstall
+  module Specs
+    class Reader < Struct.new(:src)
+      def gemspec
+        @gemspec ||= begin
+          Gem::Specification.load(src) || raise("invalid spec in #{src}")
+        end
+      end
+
+      def spec_source
+        File.read src
+      end
+    end
+
+    class Generator < Struct.new(:name, :src, :execs)
+      def gemspec
+        @gemspec ||= eval spec_source
+      end
+
+      def spec_source
+        <<-GEMSPEC
 Gem::Specification.new do |s|
   s.name = #{name.dump}
   s.version = #{version.dump}
   s.summary = "This #{name} is bundled with Ruby"
+  s.executables = #{execs.inspect}
 end
-      GEMSPEC
+        GEMSPEC
+      end
+
+      private
+      def version
+        version = open(src) { |f|
+          f.find { |s| /^\s*\w*VERSION\s*=(?!=)/ =~ s }
+        } or return
+        version.split(%r"=\s*", 2)[1].strip[/\A([\'\"])(.*?)\1/, 2]
+      end
+    end
+  end
+end
+# :startdoc:
+
+install?(:ext, :comm, :gem) do
+  $:.unshift(File.join(srcdir, "lib"))
+  require("rubygems.rb")
+  gem_dir = Gem.default_dir
+  directories = Gem.ensure_gem_subdirectories(gem_dir)
+  prepare "default gems", gem_dir, directories
+
+  spec_dir = File.join(gem_dir, directories.grep(/^spec/)[0])
+  gems = {}
+  File.foreach(File.join(srcdir, "defs/default_gems")) do |line|
+    line.chomp!
+    line.sub!(/\s*#.*/, '')
+    next if line.empty?
+    words = []
+    line.scan(/\G\s*([^\[\]\s]+|\[([^\[\]]*)\])/) do
+      words << ($2 ? $2.split : $1)
+    end
+    name, src, execs = *words
+    next unless name and src
+
+    src       = File.join(srcdir, src)
+    specgen   = RbInstall::Specs::Generator.new(name, src, execs || [])
+    gems[name] ||= specgen
+  end
+
+  Dir.glob(srcdir+"/{lib,ext}/**/*.gemspec").each do |src|
+    specgen   = RbInstall::Specs::Reader.new(src)
+    gems[specgen.gemspec.name] ||= specgen
+  end
+
+  gems.sort.each do |name, specgen|
+    gemspec   = specgen.gemspec
+    full_name = "#{gemspec.name}-#{gemspec.version}"
+
+    puts "#{" "*30}#{gemspec.name} #{gemspec.version}"
+    open_for_install(File.join(spec_dir, "#{full_name}.gemspec"), $data_mode) do
+      specgen.spec_source
+    end
+
+    unless gemspec.executables.empty? then
+      bin_dir = File.join(gem_dir, 'gems', full_name, 'bin')
+      makedirs(bin_dir)
+
+      execs = gemspec.executables.map {|exec| File.join(srcdir, 'bin', exec)}
+      install(execs, bin_dir, :mode => $prog_mode)
     end
   end
 end

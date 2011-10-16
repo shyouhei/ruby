@@ -1,9 +1,3 @@
-######################################################################
-# This file is imported from the rubygems project.
-# DO NOT make modifications in this repo. They _will_ be reverted!
-# File a patch instead and assign it to Ryan Davis or Eric Hodel.
-######################################################################
-
 require 'rubygems/test_case'
 require 'rubygems/commands/stale_command'
 
@@ -25,12 +19,12 @@ class TestGemCommandsStaleCommand < Gem::TestCase
     end
 
     files.each do |file|
-      filename = bar_baz.full_gem_path + "/#{file}"
-      FileUtils.mkdir_p(File.dirname(filename))
+      filename = File.join(bar_baz.full_gem_path, file)
+      FileUtils.mkdir_p File.dirname filename
       FileUtils.touch(filename, :mtime => Time.now)
 
-      filename = foo_bar.full_gem_path + "/#{file}"
-      FileUtils.mkdir_p(File.dirname(filename))
+      filename = File.join(foo_bar.full_gem_path, file)
+      FileUtils.mkdir_p File.dirname filename
       FileUtils.touch(filename, :mtime => Time.now - 86400)
     end
 

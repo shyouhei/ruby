@@ -51,6 +51,11 @@ struct timezone {
 };
 #endif
 
+#if defined(HAVE___SYSCALL) && (defined(__APPLE__) || defined(__OpenBSD__))
+/* Mac OS X and OpenBSD have __syscall but don't define it in headers */
+off_t __syscall(quad_t number, ...);
+#endif
+
 #ifdef RUBY_EXPORT
 #undef RUBY_EXTERN
 #endif
@@ -78,6 +83,10 @@ RUBY_EXTERN int dup2(int, int);
 
 #ifndef HAVE_EACCESS
 RUBY_EXTERN int eaccess(const char*, int);
+#endif
+
+#ifndef HAVE_ROUND
+RUBY_EXTERN double round(double);	/* numeric.c */
 #endif
 
 #ifndef HAVE_FINITE
@@ -115,9 +124,28 @@ RUBY_EXTERN double lgamma_r(double, int *);
 RUBY_EXTERN double cbrt(double);
 #endif
 
+#ifdef INFINITY
+# define HAVE_INFINITY
+#else
+/** @internal */
+RUBY_EXTERN const unsigned char rb_infinity[];
+# define INFINITY (*(float *)rb_infinity)
+#endif
+
+#ifdef NAN
+# define HAVE_NAN
+#else
+/** @internal */
+RUBY_EXTERN const unsigned char rb_nan[];
+# define NAN (*(float *)rb_nan)
+#endif
+
 #ifndef isinf
 # ifndef HAVE_ISINF
 #  if defined(HAVE_FINITE) && defined(HAVE_ISNAN)
+#    ifdef HAVE_IEEEFP_H
+#    include <ieeefp.h>
+#    endif
 #  define isinf(x) (!finite(x) && !isnan(x))
 #  else
 RUBY_EXTERN int isinf(double);

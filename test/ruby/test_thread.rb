@@ -243,7 +243,7 @@ class TestThread < Test::Unit::TestCase
     end
     t1.kill
     t2.kill
-    # assert_operator(c1, :>, c2, "[ruby-dev:33124]") # not guaranteed
+    assert_operator(c1, :>, c2, "[ruby-dev:33124]") # not guaranteed
   end
 
   def test_new
@@ -298,6 +298,24 @@ class TestThread < Test::Unit::TestCase
       Thread.kill Thread.current
       p 2
     INPUT
+  end
+
+  def test_kill_wrong_argument
+    bug4367 = '[ruby-core:35086]'
+    assert_raise(TypeError, bug4367) {
+      Thread.kill(nil)
+    }
+    o = Object.new
+    assert_raise(TypeError, bug4367) {
+      Thread.kill(o)
+    }
+  end
+
+  def test_kill_thread_subclass
+    c = Class.new(Thread)
+    t = c.new { sleep 10 }
+    assert_nothing_raised { Thread.kill(t) }
+    assert_equal(nil, t.value)
   end
 
   def test_exit
@@ -585,6 +603,19 @@ class TestThread < Test::Unit::TestCase
         @data = :data
       end
     INPUT
+  end
+
+  def test_no_valid_cfp
+    skip 'with win32ole, cannot run this testcase because win32ole redefines Thread#intialize' if defined?(WIN32OLE)
+    bug5083 = '[ruby-dev:44208]'
+    error = assert_raise(RuntimeError) do
+      Thread.new(&Module.method(:nesting)).join
+    end
+    assert_equal("Can't call on top of Fiber or Thread", error.message, bug5083)
+    error = assert_raise(RuntimeError) do
+      Thread.new(:to_s, &Module.method(:undef_method)).join
+    end
+    assert_equal("Can't call on top of Fiber or Thread", error.message, bug5083)
   end
 end
 

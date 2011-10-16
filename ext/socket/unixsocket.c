@@ -66,7 +66,7 @@ rsock_init_unixsock(VALUE sock, VALUE path, int server)
     }
 
     if (server) {
-	if (listen(fd, 5) < 0) {
+	if (listen(fd, SOMAXCONN) < 0) {
 	    close(fd);
 	    rb_sys_fail("listen(2)");
 	}
@@ -248,9 +248,10 @@ unix_send_io(VALUE sock, VALUE val)
 #endif
 
     arg.fd = fptr->fd;
-    rb_thread_fd_writable(arg.fd);
-    if ((int)BLOCKING_REGION_FD(sendmsg_blocking, &arg) == -1)
-	rb_sys_fail("sendmsg(2)");
+    while ((int)BLOCKING_REGION_FD(sendmsg_blocking, &arg) == -1) {
+	if (!rb_io_wait_writable(arg.fd))
+	    rb_sys_fail("sendmsg(2)");
+    }
 
     return Qnil;
 }
@@ -334,9 +335,10 @@ unix_recv_io(int argc, VALUE *argv, VALUE sock)
 #endif
 
     arg.fd = fptr->fd;
-    rb_thread_wait_fd(arg.fd);
-    if ((int)BLOCKING_REGION_FD(recvmsg_blocking, &arg) == -1)
-	rb_sys_fail("recvmsg(2)");
+    while ((int)BLOCKING_REGION_FD(recvmsg_blocking, &arg) == -1) {
+	if (!rb_io_wait_readable(arg.fd))
+	    rb_sys_fail("recvmsg(2)");
+    }
 
 #if FD_PASSING_BY_MSG_CONTROL
     if (arg.msg.msg_controllen < (socklen_t)sizeof(struct cmsghdr)) {
@@ -365,7 +367,7 @@ unix_recv_io(int argc, VALUE *argv, VALUE sock)
 		 (int)arg.msg.msg_controllen, (int)CMSG_SPACE(sizeof(int)));
     }
     if (cmsg.hdr.cmsg_len != CMSG_LEN(sizeof(int))) {
-	rsock_discard_cmsg_resource(&arg.msg);
+	rsock_discard_cmsg_resource(&arg.msg, 0);
 	rb_raise(rb_eSocket,
 		 "file descriptor was not passed (cmsg_len=%d, %d expected)",
 		 (int)cmsg.hdr.cmsg_len, (int)CMSG_LEN(sizeof(int)));
@@ -381,6 +383,7 @@ unix_recv_io(int argc, VALUE *argv, VALUE sock)
 #if FD_PASSING_BY_MSG_CONTROL
     memcpy(&fd, CMSG_DATA(&cmsg.hdr), sizeof(int));
 #endif
+    rb_update_max_fd(fd);
 
     if (klass == Qnil)
 	return INT2FIX(fd);
@@ -489,15 +492,15 @@ unix_s_socketpair(int argc, VALUE *argv, VALUE klass)
 }
 #endif
 
-/*
- * Document-class: ::UNIXSocket < BasicSocket
- *
- * UNIXSocket represents a UNIX domain stream client socket.
- */
 void
 rsock_init_unixsocket(void)
 {
 #ifdef HAVE_SYS_UN_H
+    /*
+     * Document-class: UNIXSocket < BasicSocket
+     *
+     * UNIXSocket represents a UNIX domain stream client socket.
+     */
     rb_cUNIXSocket = rb_define_class("UNIXSocket", rb_cBasicSocket);
     rb_define_method(rb_cUNIXSocket, "initialize", unix_init, 1);
     rb_define_method(rb_cUNIXSocket, "path", unix_path, 0);

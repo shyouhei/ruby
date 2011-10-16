@@ -1,9 +1,3 @@
-######################################################################
-# This file is imported from the rubygems project.
-# DO NOT make modifications in this repo. They _will_ be reverted!
-# File a patch instead and assign it to Ryan Davis or Eric Hodel.
-######################################################################
-
 require 'rubygems/remote_fetcher'
 require 'rubygems/user_interaction'
 require 'rubygems/errors'
@@ -91,6 +85,7 @@ class Gem::SpecFetcher
                         all               = false,
                         matching_platform = true,
                         prerelease        = false)
+
     specs_and_sources, errors = find_matching_with_errors(dependency,
                                                           all,
                                                           matching_platform,
@@ -144,7 +139,10 @@ class Gem::SpecFetcher
   # matching released versions are returned.  If +matching_platform+
   # is false, gems for all platforms are returned.
 
-  def find_matching_with_errors(dependency, all = false, matching_platform = true, prerelease = false)
+  def find_matching_with_errors(dependency,
+                                all               = false,
+                                matching_platform = true,
+                                prerelease        = false)
     found = {}
 
     rejected_specs = {}
@@ -169,7 +167,7 @@ class Gem::SpecFetcher
 
     found.each do |source_uri, specs|
       uri_str = source_uri.to_s
-      specs_and_sources.push(*specs.map { |spec| [spec, uri_str] })
+      specs_and_sources.concat(specs.map { |spec| [spec, uri_str] })
     end
 
     [specs_and_sources, errors]
@@ -257,13 +255,12 @@ class Gem::SpecFetcher
     loaded     = false
 
     if File.exist? local_file then
-      spec_dump = @fetcher.fetch_path spec_path, File.mtime(local_file)
+      spec_dump =
+        @fetcher.fetch_path(spec_path, File.mtime(local_file)) rescue nil
 
-      if spec_dump.nil? then
-        spec_dump = Gem.read_binary local_file
-      else
-        loaded = true
-      end
+      loaded = true if spec_dump
+
+      spec_dump ||= Gem.read_binary local_file
     else
       spec_dump = @fetcher.fetch_path spec_path
       loaded = true

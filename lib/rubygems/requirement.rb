@@ -1,10 +1,30 @@
-######################################################################
-# This file is imported from the rubygems project.
-# DO NOT make modifications in this repo. They _will_ be reverted!
-# File a patch instead and assign it to Ryan Davis or Eric Hodel.
-######################################################################
-
 require "rubygems/version"
+
+# :stopdoc:
+
+# Hack to handle syck's DefaultKey bug with psych
+#
+# Quick note! If/when psych loads in 1.9, it will redefine
+# YAML to point to Psych by removing the YAML constant.
+# Thusly, over in Gem.load_yaml, we define DefaultKey again
+# after proper yaml library has been loaded.
+#
+# All this is so that there is always a YAML::Syck::DefaultKey
+# class no matter if the full yaml library has loaded or not.
+#
+module YAML
+  if !defined? Syck
+    module Syck
+      class DefaultKey
+        def to_s
+          '='
+        end
+      end
+    end
+  end
+end
+
+# :startdoc:
 
 ##
 # A Requirement is a set of one or more version restrictions. It supports a
@@ -116,11 +136,15 @@ class Gem::Requirement
   end
 
   def marshal_dump # :nodoc:
+    fix_syck_default_key_in_requirements
+
     [@requirements]
   end
 
   def marshal_load array # :nodoc:
     @requirements = array[0]
+
+    fix_syck_default_key_in_requirements
   end
 
   def prerelease?
@@ -141,12 +165,35 @@ class Gem::Requirement
     requirements.all? { |op, rv| (OPS[op] || OPS["="]).call version, rv }
   end
 
+  alias :=== :satisfied_by?
+  alias :=~ :satisfied_by?
+
+  ##
+  # True if the requirement will not always match the latest version.
+
+  def specific?
+    return true if @requirements.length > 1 # GIGO, > 1, > 2 is silly
+
+    not %w[> >=].include? @requirements.first.first # grab the operator
+  end
+
   def to_s # :nodoc:
     as_list.join ", "
   end
 
   def <=> other # :nodoc:
     to_s <=> other.to_s
+  end
+
+  private
+
+  def fix_syck_default_key_in_requirements
+    # Fixup the Syck DefaultKey bug
+    @requirements.each do |r|
+      if r[0].kind_of? YAML::Syck::DefaultKey
+        r[0] = "="
+      end
+    end
   end
 end
 

@@ -1,9 +1,3 @@
-######################################################################
-# This file is imported from the rubygems project.
-# DO NOT make modifications in this repo. They _will_ be reverted!
-# File a patch instead and assign it to Ryan Davis or Eric Hodel.
-######################################################################
-
 require "rubygems/requirement"
 
 ##
@@ -38,6 +32,12 @@ class Gem::Dependency
   # <tt>:runtime</tt>.
 
   def initialize name, *requirements
+    if Regexp === name then
+      msg = ["NOTE: Dependency.new w/ a regexp is deprecated.",
+             "Dependency.new called from #{Gem.location_of_caller.join(":")}"]
+      warn msg.join("\n") unless Gem::Deprecate.skip
+    end
+
     type         = Symbol === requirements.last ? requirements.pop : :runtime
     requirements = requirements.first if 1 == requirements.length # unpack
 
@@ -212,5 +212,49 @@ class Gem::Dependency
     self.class.new name, self_req.as_list.concat(other_req.as_list)
   end
 
-end
+  def matching_specs platform_only = false
+    matches = Gem::Specification.find_all { |spec|
+      self.name === spec.name and # TODO: == instead of ===
+        requirement.satisfied_by? spec.version
+    }
 
+    if platform_only
+      matches.reject! { |spec|
+        not Gem::Platform.match spec.platform
+      }
+    end
+
+    matches = matches.sort_by { |s| s.sort_obj } # HACK: shouldn't be needed
+  end
+
+  ##
+  # True if the dependency will not always match the latest version.
+
+  def specific?
+    @requirement.specific?
+  end
+
+  def to_specs
+    matches = matching_specs true
+
+    # TODO: check Gem.activated_spec[self.name] in case matches falls outside
+
+    if matches.empty? then
+      specs = Gem::Specification.all_names.join ", "
+      error = Gem::LoadError.new "Could not find #{name} (#{requirement}) amongst [#{specs}]"
+      error.name        = self.name
+      error.requirement = self.requirement
+      raise error
+    end
+
+    # TODO: any other resolver validations should go here
+
+    matches
+  end
+
+  def to_spec
+    matches = self.to_specs
+
+    matches.find { |spec| spec.activated? } or matches.last
+  end
+end

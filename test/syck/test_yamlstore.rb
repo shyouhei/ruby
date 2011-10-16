@@ -1,15 +1,26 @@
 require 'test/unit'
+require 'yaml/store'
+require 'tmpdir'
+
+Syck::Store = YAML::Store unless defined?(Syck::Store)
 
 module Syck
   class YAMLStoreTest < Test::Unit::TestCase
     def setup
-      require 'yaml/store'
-      @yamlstore_file = "yamlstore.tmp.#{Process.pid}"
+      @engine, YAML::ENGINE.yamler = YAML::ENGINE.yamler, 'syck'
+      @dir = Dir.mktmpdir("rubytest-file")
+      File.chown(-1, Process.gid, @dir)
+      @yamlstore_file = make_tmp_filename("yamlstore")
       @yamlstore = YAML::Store.new(@yamlstore_file)
     end
 
     def teardown
-      File.unlink(@yamlstore_file) rescue nil
+      YAML::ENGINE.yamler = @engine
+      FileUtils.remove_entry_secure @dir
+    end
+
+    def make_tmp_filename(prefix)
+      @dir + "/" + prefix + File.basename(__FILE__) + ".#{$$}.test"
     end
 
     def test_opening_new_file_in_readonly_mode_should_result_in_empty_values

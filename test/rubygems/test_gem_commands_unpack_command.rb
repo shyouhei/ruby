@@ -1,9 +1,3 @@
-######################################################################
-# This file is imported from the rubygems project.
-# DO NOT make modifications in this repo. They _will_ be reverted!
-# File a patch instead and assign it to Ryan Davis or Eric Hodel.
-######################################################################
-
 require 'rubygems/test_case'
 require 'rubygems/commands/unpack_command'
 
@@ -21,20 +15,20 @@ class TestGemCommandsUnpackCommand < Gem::TestCase
     util_make_gems
 
     assert_equal(
-      @cmd.find_in_cache(@a1.file_name),
-      Gem.cache_gem(@a1.file_name, @gemhome),
+      @cmd.find_in_cache(File.basename @a1.cache_file),
+      @a1.cache_file,
       'found a-1.gem in the cache'
     )
   end
 
   def test_get_path
-    util_make_gems
     util_setup_fake_fetcher
+    util_clear_gems
     util_setup_spec_fetcher @a1
 
     a1_data = nil
 
-    open Gem.cache_gem(@a1.file_name, @gemhome), 'rb' do |fp|
+    open @a1.cache_file, 'rb' do |fp|
       a1_data = fp.read
     end
 
@@ -44,15 +38,15 @@ class TestGemCommandsUnpackCommand < Gem::TestCase
     dep = Gem::Dependency.new(@a1.name, @a1.version)
     assert_equal(
       @cmd.get_path(dep),
-      Gem.cache_gem(@a1.file_name, @gemhome),
+      @a1.cache_file,
       'fetches a-1 and returns the cache path'
     )
 
-    FileUtils.rm Gem.cache_gem(@a1.file_name, @gemhome)
+    FileUtils.rm @a1.cache_file
 
     assert_equal(
       @cmd.get_path(dep),
-      Gem.cache_gem(@a1.file_name, @gemhome),
+      @a1.cache_file,
       'when removed from cache, refetches a-1'
     )
   end
@@ -73,16 +67,14 @@ class TestGemCommandsUnpackCommand < Gem::TestCase
   end
 
   def test_execute_gem_path
-    util_make_gems
-    util_setup_spec_fetcher
     util_setup_fake_fetcher
+    util_setup_spec_fetcher
 
     Gem.clear_paths
 
     gemhome2 = File.join @tempdir, 'gemhome2'
 
-    Gem.send :set_paths, [gemhome2, @gemhome].join(File::PATH_SEPARATOR)
-    Gem.send :set_home, gemhome2
+    Gem.paths = { "GEM_PATH" => [gemhome2, @gemhome], "GEM_HOME" => gemhome2 }
 
     @cmd.options[:args] = %w[a]
 
@@ -96,15 +88,14 @@ class TestGemCommandsUnpackCommand < Gem::TestCase
   end
 
   def test_execute_gem_path_missing
-    util_make_gems
+    util_setup_fake_fetcher
     util_setup_spec_fetcher
 
     Gem.clear_paths
 
     gemhome2 = File.join @tempdir, 'gemhome2'
 
-    Gem.send :set_paths, [gemhome2, @gemhome].join(File::PATH_SEPARATOR)
-    Gem.send :set_home, gemhome2
+    Gem.paths = { "GEM_PATH" => [gemhome2, @gemhome], "GEM_HOME" => gemhome2 }
 
     @cmd.options[:args] = %w[z]
 
@@ -123,7 +114,7 @@ class TestGemCommandsUnpackCommand < Gem::TestCase
     util_clear_gems
 
     a2_data = nil
-    open Gem.cache_gem(@a2.file_name, @gemhome), 'rb' do |fp|
+    open @a2.cache_file, 'rb' do |fp|
       a2_data = fp.read
     end
 
@@ -142,10 +133,28 @@ class TestGemCommandsUnpackCommand < Gem::TestCase
     assert File.exist?(File.join(@tempdir, 'a-2')), 'a should be unpacked'
   end
 
-  def test_execute_sudo
+  def test_execute_spec
     util_make_gems
 
-    File.chmod 0555, @gemhome
+    @cmd.options[:args] = %w[a b]
+    @cmd.options[:spec] = true
+
+    use_ui @ui do
+      Dir.chdir @tempdir do
+        @cmd.execute
+      end
+    end
+
+    assert File.exist?(File.join(@tempdir, 'a-3.a.gemspec'))
+    assert File.exist?(File.join(@tempdir, 'b-2.gemspec'))
+  end
+
+  def test_execute_sudo
+    skip 'Cannot perform this test on windows (chmod)' if win_platform?
+
+    util_make_gems
+
+    FileUtils.chmod 0555, @gemhome
 
     @cmd.options[:args] = %w[b]
 
@@ -157,7 +166,7 @@ class TestGemCommandsUnpackCommand < Gem::TestCase
 
     assert File.exist?(File.join(@tempdir, 'b-2')), 'b should be unpacked'
   ensure
-    File.chmod 0755, @gemhome
+    FileUtils.chmod 0755, @gemhome
   end
 
   def test_execute_with_target_option
@@ -201,6 +210,14 @@ class TestGemCommandsUnpackCommand < Gem::TestCase
     end
 
     assert File.exist?(File.join(@tempdir, foo_spec.full_name))
+  end
+
+  def test_handle_options_metadata
+    refute @cmd.options[:spec]
+
+    @cmd.send :handle_options, %w[--spec a]
+
+    assert @cmd.options[:spec]
   end
 
 end

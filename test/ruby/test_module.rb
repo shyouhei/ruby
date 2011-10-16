@@ -73,9 +73,14 @@ class TestModule < Test::Unit::TestCase
   end
 
   def remove_rake_mixins(list)
-    list.
-      reject {|c| c.to_s == "RakeFileUtils" }.
-      reject {|c| c.to_s.start_with?("FileUtils") }
+    list.reject {|c|
+      name = c.name
+      name.start_with?("Rake") or name.start_with?("FileUtils")
+    }
+  end
+
+  def remove_minitest_mixins(list)
+    list.reject {|c| c.to_s.start_with?("MiniTest") }
   end
 
   module Mixin
@@ -216,9 +221,9 @@ class TestModule < Test::Unit::TestCase
     assert_equal([Mixin],            Mixin.ancestors)
 
     assert_equal([Object, Kernel, BasicObject],
-                 remove_rake_mixins(remove_json_mixins(remove_pp_mixins(Object.ancestors))))
+                 remove_minitest_mixins(remove_rake_mixins(remove_json_mixins(remove_pp_mixins(Object.ancestors)))))
     assert_equal([String, Comparable, Object, Kernel, BasicObject],
-                 remove_rake_mixins(remove_json_mixins(remove_pp_mixins(String.ancestors))))
+                 remove_minitest_mixins(remove_rake_mixins(remove_json_mixins(remove_pp_mixins(String.ancestors)))))
   end
 
   CLASS_EVAL = 2
@@ -276,9 +281,9 @@ class TestModule < Test::Unit::TestCase
     assert_equal([], Mixin.included_modules)
     assert_equal([Mixin], User.included_modules)
     assert_equal([Kernel],
-                 remove_rake_mixins(remove_json_mixins(remove_pp_mixins(Object.included_modules))))
+                 remove_minitest_mixins(remove_rake_mixins(remove_json_mixins(remove_pp_mixins(Object.included_modules)))))
     assert_equal([Comparable, Kernel],
-                 remove_rake_mixins(remove_json_mixins(remove_pp_mixins(String.included_modules))))
+                 remove_minitest_mixins(remove_rake_mixins(remove_json_mixins(remove_pp_mixins(String.included_modules)))))
   end
 
   def test_instance_methods
@@ -456,7 +461,7 @@ class TestModule < Test::Unit::TestCase
     assert_equal(false, o.respond_to?(:bar=))
   end
 
-  def test_const_get2
+  def test_const_get_evaled
     c1 = Class.new
     c2 = Class.new(c1)
 
@@ -471,6 +476,9 @@ class TestModule < Test::Unit::TestCase
     assert_raise(NameError) { c2::Bar }
     assert_raise(NameError) { c2.const_get(:Bar) }
     assert_raise(NameError) { c2.const_get(:Bar, false) }
+    assert_raise(NameError) { c2.const_get("Bar", false) }
+    assert_raise(NameError) { c2.const_get("BaR11", false) }
+    assert_raise(NameError) { Object.const_get("BaR11", false) }
 
     c1.instance_eval do
       def const_missing(x)
@@ -482,18 +490,80 @@ class TestModule < Test::Unit::TestCase
     assert_equal(:Bar, c2::Bar)
     assert_equal(:Bar, c2.const_get(:Bar))
     assert_equal(:Bar, c2.const_get(:Bar, false))
+    assert_equal(:Bar, c2.const_get("Bar"))
+    assert_equal(:Bar, c2.const_get("Bar", false))
+
+    v = c2.const_get("Bar11", false)
+    assert_equal("Bar11".to_sym, v)
 
     assert_raise(NameError) { c1.const_get(:foo) }
   end
 
-  def test_const_set2
+  def test_const_set_invalid_name
     c1 = Class.new
     assert_raise(NameError) { c1.const_set(:foo, :foo) }
   end
 
-  def test_const_get3
+  def test_const_get_invalid_name
     c1 = Class.new
     assert_raise(NameError) { c1.const_defined?(:foo) }
+    bug5084 = '[ruby-dev:44200]'
+    assert_raise(TypeError, bug5084) { c1.const_defined?(1) }
+  end
+
+  def test_const_get_no_inherited
+    bug3422 = '[ruby-core:30719]'
+    assert_in_out_err([], <<-INPUT, %w[1 NameError A], [], bug3422)
+    BasicObject::A = 1
+    puts [true, false].map {|inh|
+      begin
+        Object.const_get(:A, inh)
+      rescue NameError => e
+        [e.class, e.name]
+      end
+    }
+    INPUT
+  end
+
+  def test_const_get_inherited
+    bug3423 = '[ruby-core:30720]'
+    assert_in_out_err([], <<-INPUT, %w[NameError A NameError A], [], bug3423)
+    module Foo; A = 1; end
+    class Object; include Foo; end
+    class Bar; include Foo; end
+
+    puts [Object, Bar].map {|klass|
+      begin
+        klass.const_get(:A, false)
+      rescue NameError => e
+        [e.class, e.name]
+      end
+    }
+    INPUT
+  end
+
+  def test_const_in_module
+    bug3423 = '[ruby-core:37698]'
+    assert_in_out_err([], <<-INPUT, %w[ok], [], bug3423)
+    module LangModuleSpecInObject
+      module LangModuleTop
+      end
+    end
+    include LangModuleSpecInObject
+    module LangModuleTop
+    end
+    puts "ok" if LangModuleSpecInObject::LangModuleTop == LangModuleTop
+    INPUT
+
+    bug5264 = '[ruby-core:39227]'
+    assert_in_out_err([], <<-'INPUT', [], [], bug5264)
+    class A
+      class X; end
+    end
+    class B < A
+      module X; end
+    end
+    INPUT
   end
 
   def test_class_variable_get
@@ -834,6 +904,64 @@ class TestModule < Test::Unit::TestCase
     assert_equal mod.instance_method(:a=), memo.shift
   end
 
+  def test_method_undefined
+    added = []
+    undefed = []
+    removed = []
+    mod = Module.new do
+      mod = self
+      def f
+      end
+      (class << self ; self ; end).class_eval do
+        define_method :method_added do |sym|
+          added << sym
+        end
+        define_method :method_undefined do |sym|
+          undefed << sym
+        end
+        define_method :method_removed do |sym|
+          removed << sym
+        end
+      end
+    end
+    assert_method_defined?(mod, :f)
+    mod.module_eval do
+      undef :f
+    end
+    assert_equal [], added
+    assert_equal [:f], undefed
+    assert_equal [], removed
+  end
+
+  def test_method_removed
+    added = []
+    undefed = []
+    removed = []
+    mod = Module.new do
+      mod = self
+      def f
+      end
+      (class << self ; self ; end).class_eval do
+        define_method :method_added do |sym|
+          added << sym
+        end
+        define_method :method_undefined do |sym|
+          undefed << sym
+        end
+        define_method :method_removed do |sym|
+          removed << sym
+        end
+      end
+    end
+    assert_method_defined?(mod, :f)
+    mod.module_eval do
+      remove_method :f
+    end
+    assert_equal [], added
+    assert_equal [], undefed
+    assert_equal [:f], removed
+  end
+
   def test_method_redefinition
     feature2155 = '[ruby-dev:39400]'
 
@@ -1067,5 +1195,64 @@ class TestModule < Test::Unit::TestCase
       end
     INPUT
     assert_in_out_err([], src, ["NameError"], [])
+  end
+
+  def test_mix_method
+    american = Module.new do
+      attr_accessor :address
+    end
+    japanese = Module.new do
+      attr_accessor :address
+    end
+
+    japanese_american = Class.new
+    assert_nothing_raised(ArgumentError) {
+      japanese_american.class_eval {mix american}
+    }
+    assert_raise(ArgumentError) {
+      japanese_american.class_eval {mix japanese}
+    }
+
+    japanese_american = Class.new
+    assert_nothing_raised(ArgumentError) {
+      japanese_american.class_eval {
+        mix american, :address => :us_address, :address= => :us_address=
+      }
+    }
+    assert_nothing_raised(ArgumentError) {
+      japanese_american.class_eval {
+        mix japanese, :address => :jp_address, :address= => :jp_address=
+      }
+    }
+
+    japanese_american = Class.new
+    assert_nothing_raised(ArgumentError) {
+      japanese_american.class_eval {
+        mix japanese, :address => nil, :address= => nil
+      }
+    }
+    assert_raise(NoMethodError) {
+      japanese_american.new.address
+    }
+    assert_nothing_raised(ArgumentError) {
+      japanese_american.class_eval {
+        mix american
+      }
+    }
+  end
+
+  def test_mix_const
+    foo = Module.new do
+      const_set(:D, 55)
+    end
+    bar = Class.new do
+      const_set(:D, 42)
+    end
+    assert_nothing_raised(ArgumentError) {
+      bar.class_eval {
+        mix foo
+      }
+    }
+    assert_equal(42, bar::D)
   end
 end

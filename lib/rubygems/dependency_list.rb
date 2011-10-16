@@ -1,9 +1,3 @@
-######################################################################
-# This file is imported from the rubygems project.
-# DO NOT make modifications in this repo. They _will_ be reverted!
-# File a patch instead and assign it to Ryan Davis or Eric Hodel.
-######################################################################
-
 #--
 # Copyright 2006 by Chad Fowler, Rich Kilmer, Jim Weirich and others.
 # All rights reserved.
@@ -11,6 +5,7 @@
 #++
 
 require 'tsort'
+require 'rubygems/deprecate'
 
 ##
 # Gem::DependencyList is used for installing and uninstalling gems in the
@@ -28,16 +23,21 @@ class Gem::DependencyList
   attr_accessor :development
 
   ##
+  # Creates a DependencyList from the current specs.
+
+  def self.from_specs
+    list = new
+    list.add(*Gem::Specification.map)
+    list
+  end
+
+  ##
   # Creates a DependencyList from a Gem::SourceIndex +source_index+
 
-  def self.from_source_index(source_index)
-    list = new
+  def self.from_source_index(ignored=nil)
+    warn "NOTE: DependencyList.from_source_index ignores it's arg" if ignored
 
-    source_index.each do |full_name, spec|
-      list.add spec
-    end
-
-    list
+    from_specs
   end
 
   ##
@@ -120,10 +120,9 @@ class Gem::DependencyList
 
   def why_not_ok? quick = false
     unsatisfied = Hash.new { |h,k| h[k] = [] }
-    source_index = Gem.source_index
     each do |spec|
       spec.runtime_dependencies.each do |dep|
-        inst = source_index.any? { |_, installed_spec|
+        inst = Gem::Specification.any? { |installed_spec|
           dep.name == installed_spec.name and
             dep.requirement.satisfied_by? installed_spec.version
         }
@@ -134,6 +133,7 @@ class Gem::DependencyList
         end
       end
     end
+
     unsatisfied
   end
 
@@ -242,6 +242,11 @@ class Gem::DependencyList
   def active_count(specs, ignored)
     specs.count { |spec| ignored[spec.full_name].nil? }
   end
-
 end
 
+class Gem::DependencyList
+  class << self
+    extend Gem::Deprecate
+    deprecate :from_source_index, "from_specs", 2011, 11
+  end
+end

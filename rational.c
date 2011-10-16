@@ -6,6 +6,7 @@
 */
 
 #include "ruby.h"
+#include "internal.h"
 #include <math.h>
 #include <float.h>
 
@@ -105,7 +106,7 @@ f_mul(VALUE x, VALUE y)
     if (FIXNUM_P(y)) {
 	long iy = FIX2LONG(y);
 	if (iy == 0) {
-	    if (FIXNUM_P(x) || TYPE(x) == T_BIGNUM)
+	    if (FIXNUM_P(x) || RB_TYPE_P(x, T_BIGNUM))
 		return ZERO;
 	}
 	else if (iy == 1)
@@ -114,7 +115,7 @@ f_mul(VALUE x, VALUE y)
     else if (FIXNUM_P(x)) {
 	long ix = FIX2LONG(x);
 	if (ix == 0) {
-	    if (FIXNUM_P(y) || TYPE(y) == T_BIGNUM)
+	    if (FIXNUM_P(y) || RB_TYPE_P(y, T_BIGNUM))
 		return ZERO;
 	}
 	else if (ix == 1)
@@ -140,14 +141,14 @@ fun1(negate)
 inline static VALUE
 f_to_i(VALUE x)
 {
-    if (TYPE(x) == T_STRING)
+    if (RB_TYPE_P(x, T_STRING))
 	return rb_str_to_inum(x, 10, 0);
     return rb_funcall(x, id_to_i, 0);
 }
 inline static VALUE
 f_to_f(VALUE x)
 {
-    if (TYPE(x) == T_STRING)
+    if (RB_TYPE_P(x, T_STRING))
 	return DBL2NUM(rb_str_to_dbl(x, 0));
     return rb_funcall(x, id_to_f, 0);
 }
@@ -1107,6 +1108,8 @@ nurat_coerce(VALUE self, VALUE other)
 	if (k_exact_zero_p(RCOMPLEX(other)->imag))
 	    return rb_assoc_new(f_rational_new_bang1
 				(CLASS_OF(self), RCOMPLEX(other)->real), self);
+	else
+	    return rb_assoc_new(other, rb_Complex(self, INT2FIX(0)));
     }
 
     rb_raise(rb_eTypeError, "%s can't be coerced into %s",
@@ -2018,12 +2021,6 @@ make_patterns(void)
 #define id_match rb_intern("match")
 #define f_match(x,y) rb_funcall((x), id_match, 1, (y))
 
-#define id_aref rb_intern("[]")
-#define f_aref(x,y) rb_funcall((x), id_aref, 1, (y))
-
-#define id_post_match rb_intern("post_match")
-#define f_post_match(x) rb_funcall((x), id_post_match, 0)
-
 #define id_split rb_intern("split")
 #define f_split(x,y) rb_funcall((x), id_split, 1, (y))
 
@@ -2043,10 +2040,10 @@ string_to_r_internal(VALUE self)
 
     if (!NIL_P(m)) {
 	VALUE v, ifp, exp, ip, fp;
-	VALUE si = f_aref(m, INT2FIX(1));
-	VALUE nu = f_aref(m, INT2FIX(2));
-	VALUE de = f_aref(m, INT2FIX(3));
-	VALUE re = f_post_match(m);
+	VALUE si = rb_reg_nth_match(1, m);
+	VALUE nu = rb_reg_nth_match(2, m);
+	VALUE de = rb_reg_nth_match(3, m);
+	VALUE re = rb_reg_match_post(m);
 
 	{
 	    VALUE a;
@@ -2152,7 +2149,7 @@ string_to_r_strict(VALUE self)
 static VALUE
 string_to_r(VALUE self)
 {
-    VALUE s, a, backref;
+    VALUE s, a, a1, backref;
 
     backref = rb_backref_get();
     rb_match_busy(backref);
@@ -2162,8 +2159,12 @@ string_to_r(VALUE self)
 
     rb_backref_set(backref);
 
-    if (!NIL_P(RARRAY_PTR(a)[0]))
-	return RARRAY_PTR(a)[0];
+    a1 = RARRAY_PTR(a)[0];
+    if (!NIL_P(a1)) {
+	if (RB_TYPE_P(a1, T_FLOAT))
+	    rb_raise(rb_eFloatDomainError, "Infinity");
+	return a1;
+    }
     return rb_rational_new1(INT2FIX(0));
 }
 

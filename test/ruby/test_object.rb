@@ -181,17 +181,29 @@ class TestObject < Test::Unit::TestCase
     o = Object.new
     def o.to_s; 1; end
     assert_raise(TypeError) { String(o) }
+    def o.to_s; "o"; end
+    assert_equal("o", String(o))
+    def o.respond_to?(*) false; end
+    assert_raise(TypeError) { String(o) }
   end
 
   def test_check_convert_type
     o = Object.new
     def o.to_a; 1; end
     assert_raise(TypeError) { Array(o) }
+    def o.to_a; [1]; end
+    assert_equal([1], Array(o))
+    def o.respond_to?(*) false; end
+    assert_equal([o], Array(o))
   end
 
   def test_to_integer
     o = Object.new
     def o.to_i; nil; end
+    assert_raise(TypeError) { Integer(o) }
+    def o.to_i; 42; end
+    assert_equal(42, Integer(o))
+    def o.respond_to?(*) false; end
     assert_raise(TypeError) { Integer(o) }
   end
 
@@ -334,16 +346,29 @@ class TestObject < Test::Unit::TestCase
     assert_nothing_raised(bug2494) {[b].flatten}
   end
 
+  def test_respond_to_missing_string
+    c = Class.new do
+      def respond_to_missing?(id, priv)
+        !(id !~ /\Agadzoks\d+\z/) ^ priv
+      end
+    end
+    foo = c.new
+    assert_equal(false, foo.respond_to?("gadzooks16"))
+    assert_equal(true, foo.respond_to?("gadzooks17", true))
+    assert_equal(true, foo.respond_to?("gadzoks16"))
+    assert_equal(false, foo.respond_to?("gadzoks17", true))
+  end
+
   def test_respond_to_missing
     c = Class.new do
-      def respond_to_missing?(id, priv=false)
+      def respond_to_missing?(id, priv)
         if id == :foobar
           true
         else
           false
         end
       end
-      def method_missing(id,*args)
+      def method_missing(id, *args)
         if id == :foobar
           return [:foo, *args]
         else
@@ -381,6 +406,31 @@ class TestObject < Test::Unit::TestCase
     assert_raise(NameError, '[ruby-core:25748]') do
       m.instance_method(:foobar)
     end
+  end
+
+  def test_implicit_respond_to
+    bug5158 = '[ruby-core:38799]'
+
+    p = Object.new
+
+    called = []
+    p.singleton_class.class_eval do
+      define_method(:to_ary) do
+        called << [:to_ary, bug5158]
+      end
+    end
+    [[p]].flatten
+    assert_equal([[:to_ary, bug5158]], called, bug5158)
+
+    called = []
+    p.singleton_class.class_eval do
+      define_method(:respond_to?) do |*a|
+        called << [:respond_to?, *a]
+        false
+      end
+    end
+    [[p]].flatten
+    assert_equal([[:respond_to?, :to_ary, true]], called, bug5158)
   end
 
   def test_send_with_no_arguments

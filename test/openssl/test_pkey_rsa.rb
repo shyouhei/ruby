@@ -48,8 +48,15 @@ class OpenSSL::TestPKeyRSA < Test::Unit::TestCase
     assert_equal([], OpenSSL.errors)
   end
 
+  def test_new_break
+    assert_nil(OpenSSL::PKey::RSA.new(1024) { break })
+    assert_raise(RuntimeError) do
+      OpenSSL::PKey::RSA.new(1024) { raise }
+    end
+  end
+
   def test_sign_verify
-    key = OpenSSL::PKey::RSA.new(512)
+    key = OpenSSL::TestUtils::TEST_KEY_RSA1024
     digest = OpenSSL::Digest::SHA1.new
     data = 'Sign me!'
     sig = key.sign(digest, data)
@@ -57,7 +64,7 @@ class OpenSSL::TestPKeyRSA < Test::Unit::TestCase
   end
 
   def test_digest_state_irrelevant_sign
-    key = OpenSSL::PKey::RSA.new(512)
+    key = OpenSSL::TestUtils::TEST_KEY_RSA1024
     digest1 = OpenSSL::Digest::SHA1.new
     digest2 = OpenSSL::Digest::SHA1.new
     data = 'Sign me!'
@@ -68,7 +75,7 @@ class OpenSSL::TestPKeyRSA < Test::Unit::TestCase
   end
 
   def test_digest_state_irrelevant_verify
-    key = OpenSSL::PKey::RSA.new(512)
+    key = OpenSSL::TestUtils::TEST_KEY_RSA1024
     digest1 = OpenSSL::Digest::SHA1.new
     digest2 = OpenSSL::Digest::SHA1.new
     data = 'Sign me!'
@@ -91,6 +98,7 @@ class OpenSSL::TestPKeyRSA < Test::Unit::TestCase
     assert_equal(nil, key.d)
     assert_equal(nil, key.p)
     assert_equal(nil, key.q)
+    assert_equal([], OpenSSL.errors)
   end
 
   def test_read_RSA_PUBKEY
@@ -109,6 +117,7 @@ class OpenSSL::TestPKeyRSA < Test::Unit::TestCase
     assert_equal(nil, key.d)
     assert_equal(nil, key.p)
     assert_equal(nil, key.q)
+    assert_equal([], OpenSSL.errors)
   end
 
   def test_read_RSAPublicKey_pem
@@ -128,6 +137,7 @@ AudJR1JobbIbDJrQu6AXnWh5k/YtAgMBAAE=
     assert_equal(nil, key.d)
     assert_equal(nil, key.p)
     assert_equal(nil, key.q)
+    assert_equal([], OpenSSL.errors)
   end
 
   def test_read_RSA_PUBKEY_pem
@@ -148,6 +158,7 @@ AwEAAQ==
     assert_equal(nil, key.d)
     assert_equal(nil, key.p)
     assert_equal(nil, key.q)
+    assert_equal([], OpenSSL.errors)
   end
 
   def test_export_format_is_RSA_PUBKEY
@@ -162,6 +173,52 @@ AwEAAQ==
     pem.gsub!(/^-+(\w|\s)+-+$/, "") # eliminate --------BEGIN...-------
     asn1 = OpenSSL::ASN1.decode(Base64.decode64(pem))
     check_PUBKEY(asn1, key)
+  end
+
+  def test_read_private_key_der
+    der = OpenSSL::TestUtils::TEST_KEY_RSA1024.to_der
+    key = OpenSSL::PKey.read(der)
+    assert(key.private?)
+    assert_equal(der, key.to_der)
+    assert_equal([], OpenSSL.errors)
+  end
+
+  def test_read_private_key_pem
+    pem = OpenSSL::TestUtils::TEST_KEY_RSA1024.to_pem
+    key = OpenSSL::PKey.read(pem)
+    assert(key.private?)
+    assert_equal(pem, key.to_pem)
+    assert_equal([], OpenSSL.errors)
+  end
+
+  def test_read_public_key_der
+    der = OpenSSL::TestUtils::TEST_KEY_RSA1024.public_key.to_der
+    key = OpenSSL::PKey.read(der)
+    assert(!key.private?)
+    assert_equal(der, key.to_der)
+    assert_equal([], OpenSSL.errors)
+  end
+
+  def test_read_public_key_pem
+    pem = OpenSSL::TestUtils::TEST_KEY_RSA1024.public_key.to_pem
+    key = OpenSSL::PKey.read(pem)
+    assert(!key.private?)
+    assert_equal(pem, key.to_pem)
+    assert_equal([], OpenSSL.errors)
+  end
+
+  def test_read_private_key_pem_pw
+    pem = OpenSSL::TestUtils::TEST_KEY_RSA1024.to_pem(OpenSSL::Cipher.new('AES-128-CBC'), 'secret')
+    #callback form for password
+    key = OpenSSL::PKey.read(pem) do
+      'secret'
+    end
+    assert(key.private?)
+    # pass password directly
+    key = OpenSSL::PKey.read(pem, 'secret')
+    assert(key.private?)
+    #omit pem equality check, will be different due to cipher iv
+    assert_equal([], OpenSSL.errors)
   end
 
   private
@@ -186,6 +243,7 @@ AwEAAQ==
     assert_equal(key.n, pub_key.value[0].value)
     assert_equal(OpenSSL::ASN1::INTEGER, pub_key.value[1].tag)
     assert_equal(key.e, pub_key.value[1].value)
+    assert_equal([], OpenSSL.errors)
   end
 
 end

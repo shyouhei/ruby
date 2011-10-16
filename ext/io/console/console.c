@@ -410,7 +410,9 @@ console_set_winsize(VALUE io, VALUE size)
     int newrow, newcol;
 #endif
     VALUE row, col, xpixel, ypixel;
+#if defined TIOCSWINSZ
     int fd;
+#endif
 
     GetOpenFile(io, fptr);
     size = rb_Array(size);
@@ -544,41 +546,54 @@ console_dev(VALUE klass)
     {
 	VALUE args[2];
 #if defined HAVE_TERMIOS_H || defined HAVE_TERMIO_H || defined HAVE_SGTTY_H
-# define CONSOLE_DEVISE "/dev/tty"
+# define CONSOLE_DEVICE "/dev/tty"
 #elif defined _WIN32
-# define CONSOLE_DEVISE "con$"
-# define CONSOLE_DEVISE_FOR_READING "conin$"
-# define CONSOLE_DEVISE_FOR_WRITING "conout$"
+# define CONSOLE_DEVICE "con$"
+# define CONSOLE_DEVICE_FOR_READING "conin$"
+# define CONSOLE_DEVICE_FOR_WRITING "conout$"
 #endif
-#ifndef CONSOLE_DEVISE_FOR_READING
-# define CONSOLE_DEVISE_FOR_READING CONSOLE_DEVISE
+#ifndef CONSOLE_DEVICE_FOR_READING
+# define CONSOLE_DEVICE_FOR_READING CONSOLE_DEVICE
 #endif
-#ifdef CONSOLE_DEVISE_FOR_WRITING
+#ifdef CONSOLE_DEVICE_FOR_WRITING
 	VALUE out;
 	rb_io_t *ofptr;
 #endif
+	int fd;
 
-	args[1] = INT2FIX(O_RDWR);
-#ifdef CONSOLE_DEVISE_FOR_WRITING
-	args[0] = rb_str_new2(CONSOLE_DEVISE_FOR_WRITING);
+#ifdef CONSOLE_DEVICE_FOR_WRITING
+	fd = open(CONSOLE_DEVICE_FOR_WRITING, O_WRONLY);
+	if (fd < 0) return Qnil;
+        rb_update_max_fd(fd);
+	args[1] = INT2FIX(O_WRONLY);
+	args[0] = INT2NUM(fd);
 	out = rb_class_new_instance(2, args, klass);
 #endif
-	args[0] = rb_str_new2(CONSOLE_DEVISE_FOR_READING);
+	fd = open(CONSOLE_DEVICE_FOR_READING, O_RDWR);
+	if (fd < 0) {
+#ifdef CONSOLE_DEVICE_FOR_WRITING
+	    rb_io_close(out);
+#endif
+	    return Qnil;
+	}
+        rb_update_max_fd(fd);
+	args[1] = INT2FIX(O_RDWR);
+	args[0] = INT2NUM(fd);
 	con = rb_class_new_instance(2, args, klass);
-#ifdef CONSOLE_DEVISE_FOR_WRITING
 	GetOpenFile(con, fptr);
+	fptr->pathv = rb_obj_freeze(rb_str_new2(CONSOLE_DEVICE));
+#ifdef CONSOLE_DEVICE_FOR_WRITING
 	GetOpenFile(out, ofptr);
 # ifdef HAVE_RB_IO_GET_WRITE_IO
-#   ifdef _WIN32
-	ofptr->pathv = fptr->pathv = rb_str_new2(CONSOLE_DEVISE);
-#   endif
+	ofptr->pathv = fptr->pathv;
 	fptr->tied_io_for_writing = out;
 # else
 	fptr->f2 = ofptr->f;
 	ofptr->f = 0;
 # endif
-	fptr->mode |= FMODE_WRITABLE;
+	ofptr->mode |= FMODE_SYNC;
 #endif
+	fptr->mode |= FMODE_SYNC;
 	rb_const_set(klass, id_console, con);
     }
     return con;

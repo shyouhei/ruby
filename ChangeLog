@@ -1,3 +1,52 @@
+Wed Oct 19 17:06:54 2011  Yukihiro Matsumoto  <matz@ruby-lang.org>
+
+	* version.h (RUBY_VERSION): finally declare start of 2.0 work!
+
+Wed Oct 19 11:48:44 2011  Eric Hodel  <drbrain@segment7.net>
+
+	* error.c (Init_Exception):  Document $! and $@.  Provide
+	  recommendations for creating exceptions for a library.
+
+Wed Oct 19 11:25:46 2011  Eric Hodel  <drbrain@segment7.net>
+
+	* error.c (Init_Exception):  Add hierarchy of Exception subclasses.
+	  Based on patch by Sylvain Daubert.  [Ruby 1.9 - Bug #5438]
+
+Wed Oct 19 11:04:47 2011  Eric Hodel  <drbrain@segment7.net>
+
+	* enum.c: Reformat block args to a single standard, { |args| ... }.
+	  Patch by b t.  [Ruby 1.9 - Bug #5393]
+
+Wed Oct 19 12:11:26 2011  Martin Bosslet  <Martin.Bosslet@googlemail.com>
+
+	* ext/openssl/ossl_ssl.c: Remove set, but unused variables.
+	  ext/openssl/ossl_pkey.c: ditto
+
+	* ext/openssl/ossl_pkey_dh.c: Make functions passed to
+	  rb_thread_blocking_region return VALUE instead of void.
+	  ext/openssl/ossl_pkey_dsa.c: ditto
+	  ext/openssl/ossl_pkey_rsa.c: ditto
+
+Tue Oct 18 23:28:53 2011  Nobuyoshi Nakada  <nobu@ruby-lang.org>
+
+	* hash.c (identhash): share with type_numhash.
+
+	* st.c (st_hashtype_num): rename from type_numhash.
+
+Tue Oct 18 23:07:30 2011  Nobuyoshi Nakada  <nobu@ruby-lang.org>
+
+	* vm_core.h (ruby_current_thread): probeprofiler has been removed
+	  long ago.
+
+Tue Oct 18 23:05:49 2011  Nobuyoshi Nakada  <nobu@ruby-lang.org>
+
+	* ext/ripper/eventids2.c (ripper_init_eventids2): separate
+	  initializations of IDs and objects.
+
+	* ext/ripper/tools/generate.rb (generate_eventids1): ditto.
+
+	* parse.y (Init_ripper, InitVM_ripper): fix inversed roles.
+
 Sun Oct 16 19:46:16 2011  Nobuyoshi Nakada  <nobu@ruby-lang.org>
 
 	* ext/bigdecimal/bigdecimal.gemspec (files): fixed typo, and

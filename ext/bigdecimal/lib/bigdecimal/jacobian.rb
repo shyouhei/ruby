@@ -53,6 +53,7 @@ module Jacobian
     until ok>0 do
       s = f.zero
       deriv = []
+      nRetry += 1
       if(nRetry>100) then
         raise "Singular Jacobian matrix. No change at x[" + i.to_s + "]"
       end

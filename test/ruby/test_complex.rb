@@ -16,6 +16,7 @@ class Complex_Test < Test::Unit::TestCase
   def test_rationalize
     assert_equal(1.quo(3), Complex(1/3.0, 0).rationalize, '[ruby-core:38885]')
     assert_equal(1.quo(5), Complex(0.2, 0).rationalize, '[ruby-core:38885]')
+    assert_equal(5.quo(2), Complex(2.5, 0).rationalize(0), '[ruby-core:40667]')
   end
 
   def test_compsub
@@ -1019,7 +1020,7 @@ class Complex_Test < Test::Unit::TestCase
     end
     assert_equal(Complex(0.5,1.0), Complex(1,2).quo(2))
 
-    unless $".grep(/(\A|\/)complex/).empty?
+    unless $".grep(/(?:\A|(?<!add)\/)complex/).empty?
       assert_equal(Complex(0,2), Math.sqrt(-4.0))
 #      assert_equal(true, Math.sqrt(-4.0).inexact?)
       assert_equal(Complex(0,2), Math.sqrt(-4))

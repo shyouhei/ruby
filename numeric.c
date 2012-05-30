@@ -66,16 +66,16 @@
 
 #ifdef HAVE_INFINITY
 #elif !defined(WORDS_BIGENDIAN) /* BYTE_ORDER == LITTLE_ENDIAN */
-const unsigned char rb_infinity[] = "\x00\x00\x80\x7f";
+const union bytesequence4_or_float rb_infinity = {{0x00, 0x00, 0x80, 0x7f}};
 #else
-const unsigned char rb_infinity[] = "\x7f\x80\x00\x00";
+const union bytesequence4_or_float rb_infinity = {{0x7f, 0x80, 0x00, 0x00}};
 #endif
 
 #ifdef HAVE_NAN
 #elif !defined(WORDS_BIGENDIAN) /* BYTE_ORDER == LITTLE_ENDIAN */
-const unsigned char rb_nan[] = "\x00\x00\xc0\x7f";
+const union bytesequence4_or_float rb_nan = {{0x00, 0x00, 0xc0, 0x7f}};
 #else
-const unsigned char rb_nan[] = "\x7f\xc0\x00\x00";
+const union bytesequence4_or_float rb_nan = {{0x7f, 0xc0, 0x00, 0x00}};
 #endif
 
 #ifndef HAVE_ROUND
@@ -260,7 +260,8 @@ num_sadded(VALUE x, VALUE name)
 	     "can't define singleton method \"%s\" for %s",
 	     rb_id2name(mid),
 	     rb_obj_classname(x));
-    return Qnil;		/* not reached */
+
+    UNREACHABLE;
 }
 
 /* :nodoc: */
@@ -269,7 +270,8 @@ num_init_copy(VALUE x, VALUE y)
 {
     /* Numerics are immutable values, which should not be copied */
     rb_raise(rb_eTypeError, "can't copy %s", rb_obj_classname(x));
-    return Qnil;		/* not reached */
+
+    UNREACHABLE;
 }
 
 /*
@@ -814,16 +816,18 @@ flodivmod(double x, double y, double *divp, double *modp)
     double div, mod;
 
     if (y == 0.0) rb_num_zerodiv();
+    if((x == 0.0) || (isinf(y) && !isinf(x)))
+        mod = x;
+    else {
 #ifdef HAVE_FMOD
-    mod = fmod(x, y);
+	mod = fmod(x, y);
 #else
-    {
 	double z;
 
 	modf(x/y, &z);
 	mod = x - z * y;
-    }
 #endif
+    }
     if (isinf(x) && !isinf(y) && !isnan(y))
 	div = x;
     else
@@ -834,6 +838,19 @@ flodivmod(double x, double y, double *divp, double *modp)
     }
     if (modp) *modp = mod;
     if (divp) *divp = div;
+}
+
+/*
+ * Returns the modulo of division of x by y.
+ * An error will be raised if y == 0.
+ */
+
+double
+ruby_float_mod(double x, double y)
+{
+    double mod;
+    flodivmod(x, y, 0, &mod);
+    return mod;
 }
 
 
@@ -851,7 +868,7 @@ flodivmod(double x, double y, double *divp, double *modp)
 static VALUE
 flo_mod(VALUE x, VALUE y)
 {
-    double fy, mod;
+    double fy;
 
     switch (TYPE(y)) {
       case T_FIXNUM:
@@ -866,8 +883,7 @@ flo_mod(VALUE x, VALUE y)
       default:
 	return rb_num_coerce_bin(x, y, '%');
     }
-    flodivmod(RFLOAT_VALUE(x), fy, 0, &mod);
-    return DBL2NUM(mod);
+    return DBL2NUM(ruby_float_mod(RFLOAT_VALUE(x), fy));
 }
 
 static VALUE
@@ -1690,10 +1706,21 @@ ruby_float_step(VALUE from, VALUE to, VALUE step, int excl)
 	}
 	else {
 	    if (err>0.5) err=0.5;
-	    n = floor(n + err);
-	    if (!excl || ((long)n)*unit+beg < end) n++;
-	    for (i=0; i<n; i++) {
-		rb_yield(DBL2NUM(i*unit+beg));
+	    if (excl) {
+		if (n<=0) return TRUE;
+		if (n<1)
+		    n = 0;
+		else
+		    n = floor(n - err);
+	    }
+	    else {
+		if (n<0) return TRUE;
+		n = floor(n + err);
+	    }
+	    for (i=0; i<=n; i++) {
+		double d = i*unit+beg;
+		if (unit >= 0 ? end < d : d < end) d = end;
+		rb_yield(DBL2NUM(d));
 	    }
 	}
 	return TRUE;
@@ -1742,13 +1769,9 @@ num_step(int argc, VALUE *argv, VALUE from)
 	step = INT2FIX(1);
     }
     else {
-	if (argc == 2) {
-	    to = argv[0];
-	    step = argv[1];
-	}
-	else {
-	    rb_raise(rb_eArgError, "wrong number of arguments (%d for 1..2)", argc);
-	}
+	rb_check_arity(argc, 1, 2);
+	to = argv[0];
+	step = argv[1];
 	if (rb_equal(step, INT2FIX(0))) {
 	    rb_raise(rb_eArgError, "step can't be 0");
 	}
@@ -1888,7 +1911,7 @@ check_uint(VALUE num, VALUE sign)
 
     if (RTEST(sign)) {
 	/* minus */
-	if ((num & mask) != mask || (num & ~mask) <= INT_MAX + 1UL)
+	if ((num & mask) != mask || (num & ~mask) <= INT_MAX)
 #define VALUE_MSBMASK   ((VALUE)1 << ((sizeof(VALUE) * CHAR_BIT) - 1))
 	    rb_raise(rb_eRangeError, "integer %"PRIdVALUE " too small to convert to `unsigned int'", num|VALUE_MSBMASK);
     }
@@ -1953,6 +1976,80 @@ rb_fix2int(VALUE val)
 }
 #endif
 
+void
+rb_out_of_short(SIGNED_VALUE num)
+{
+    rb_raise(rb_eRangeError, "integer %"PRIdVALUE " too %s to convert to `short'",
+	     num, num < 0 ? "small" : "big");
+}
+
+static void
+check_short(SIGNED_VALUE num)
+{
+    if ((SIGNED_VALUE)(short)num != num) {
+	rb_out_of_short(num);
+    }
+}
+
+static void
+check_ushort(VALUE num, VALUE sign)
+{
+    static const VALUE mask = ~(VALUE)USHRT_MAX;
+
+    if (RTEST(sign)) {
+	/* minus */
+	if ((num & mask) != mask || (num & ~mask) <= SHRT_MAX)
+#define VALUE_MSBMASK   ((VALUE)1 << ((sizeof(VALUE) * CHAR_BIT) - 1))
+	    rb_raise(rb_eRangeError, "integer %"PRIdVALUE " too small to convert to `unsigned short'", num|VALUE_MSBMASK);
+    }
+    else {
+	/* plus */
+	if ((num & mask) != 0)
+	    rb_raise(rb_eRangeError, "integer %"PRIuVALUE " too big to convert to `unsigned short'", num);
+    }
+}
+
+short
+rb_num2short(VALUE val)
+{
+    long num = rb_num2long(val);
+
+    check_short(num);
+    return num;
+}
+
+short
+rb_fix2short(VALUE val)
+{
+    long num = FIXNUM_P(val)?FIX2LONG(val):rb_num2long(val);
+
+    check_short(num);
+    return num;
+}
+
+unsigned short
+rb_num2ushort(VALUE val)
+{
+    VALUE num = rb_num2ulong(val);
+
+    check_ushort(num, rb_funcall(val, '<', 1, INT2FIX(0)));
+    return (unsigned long)num;
+}
+
+unsigned short
+rb_fix2ushort(VALUE val)
+{
+    unsigned long num;
+
+    if (!FIXNUM_P(val)) {
+	return rb_num2ushort(val);
+    }
+    num = FIX2ULONG(val);
+
+    check_ushort(num, rb_funcall(val, '<', 1, INT2FIX(0)));
+    return num;
+}
+
 VALUE
 rb_num2fix(VALUE val)
 {
@@ -2004,17 +2101,19 @@ rb_num2ll(VALUE val)
 
       case T_STRING:
 	rb_raise(rb_eTypeError, "no implicit conversion from string");
-	return Qnil;            /* not reached */
+	break;
 
       case T_TRUE:
       case T_FALSE:
 	rb_raise(rb_eTypeError, "no implicit conversion from boolean");
-	return Qnil;		/* not reached */
+	break;
 
       default:
-	val = rb_to_int(val);
-	return NUM2LL(val);
+	break;
     }
+
+    val = rb_to_int(val);
+    return NUM2LL(val);
 }
 
 unsigned LONG_LONG
@@ -2046,17 +2145,19 @@ rb_num2ull(VALUE val)
 
       case T_STRING:
 	rb_raise(rb_eTypeError, "no implicit conversion from string");
-	return Qnil;            /* not reached */
+	break;
 
       case T_TRUE:
       case T_FALSE:
 	rb_raise(rb_eTypeError, "no implicit conversion from boolean");
-	return Qnil;		/* not reached */
+	break;
 
       default:
-	val = rb_to_int(val);
-	return NUM2ULL(val);
+	break;
     }
+
+    val = rb_to_int(val);
+    return NUM2ULL(val);
 }
 
 #endif  /* HAVE_LONG_LONG */
@@ -2196,11 +2297,20 @@ rb_enc_uint_chr(unsigned int code, rb_encoding *enc)
 {
     int n;
     VALUE str;
-    if ((n = rb_enc_codelen(code, enc)) <= 0) {
+    switch (n = rb_enc_codelen(code, enc)) {
+      case ONIGERR_INVALID_CODE_POINT_VALUE:
+	rb_raise(rb_eRangeError, "invalid codepoint 0x%X in %s", code, rb_enc_name(enc));
+	break;
+      case ONIGERR_TOO_BIG_WIDE_CHAR_VALUE:
+      case 0:
 	rb_raise(rb_eRangeError, "%u out of char range", code);
+	break;
     }
     str = rb_enc_str_new(0, n, enc);
     rb_enc_mbcput(code, RSTRING_PTR(str), enc);
+    if (rb_enc_precise_mbclen(RSTRING_PTR(str), RSTRING_END(str), enc) != n) {
+	rb_raise(rb_eRangeError, "invalid codepoint 0x%X in %s", code, rb_enc_name(enc));
+    }
     return str;
 }
 
@@ -2251,7 +2361,7 @@ int_chr(int argc, VALUE *argv, VALUE num)
       case 1:
 	break;
       default:
-	rb_raise(rb_eArgError, "wrong number of arguments (%d for 0..1)", argc);
+	rb_check_arity(argc, 0, 1);
 	break;
     }
     enc = rb_to_encoding(argv[0]);
@@ -2639,12 +2749,7 @@ fix_mod(VALUE x, VALUE y)
 	x = rb_int2big(FIX2LONG(x));
 	return rb_big_modulo(x, y);
       case T_FLOAT:
-	{
-	    double mod;
-
-	    flodivmod((double)FIX2LONG(x), RFLOAT_VALUE(y), 0, &mod);
-	    return DBL2NUM(mod);
-	}
+	return DBL2NUM(ruby_float_mod((double)FIX2LONG(x), RFLOAT_VALUE(y)));
       default:
 	return rb_num_coerce_bin(x, y, '%');
     }

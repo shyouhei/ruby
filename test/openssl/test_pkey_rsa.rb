@@ -48,6 +48,18 @@ class OpenSSL::TestPKeyRSA < Test::Unit::TestCase
     assert_equal([], OpenSSL.errors)
   end
 
+  def test_new_exponent_default
+    assert_equal(65537, OpenSSL::PKey::RSA.new(512).e)
+  end
+
+  def test_new_with_exponent
+    1.upto(30) do |idx|
+      e = (2 ** idx) + 1
+      key = OpenSSL::PKey::RSA.new(512, e)
+      assert_equal(e, key.e)
+    end
+  end
+
   def test_new_break
     assert_nil(OpenSSL::PKey::RSA.new(1024) { break })
     assert_raise(RuntimeError) do
@@ -218,6 +230,17 @@ AwEAAQ==
     key = OpenSSL::PKey.read(pem, 'secret')
     assert(key.private?)
     #omit pem equality check, will be different due to cipher iv
+    assert_equal([], OpenSSL.errors)
+  end
+
+  def test_read_private_key_pem_pw_exception
+    pem = OpenSSL::TestUtils::TEST_KEY_RSA1024.to_pem(OpenSSL::Cipher.new('AES-128-CBC'), 'secret')
+    # it raises an ArgumentError from PEM reading. The exception raised inside are ignored for now.
+    assert_raise(ArgumentError) do
+      OpenSSL::PKey.read(pem) do
+        raise RuntimeError
+      end
+    end
     assert_equal([], OpenSSL.errors)
   end
 

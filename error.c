@@ -260,8 +260,11 @@ report_bug(const char *file, int line, const char *fmt, va_list args)
 	(ssize_t)fwrite(buf, 1, len, (out = stdout)) == (ssize_t)len) {
 
 	fputs("[BUG] ", out);
-	vfprintf(out, fmt, args);
-	fprintf(out, "\n%s\n\n", ruby_description);
+	vsnprintf(buf, 256, fmt, args);
+	fputs(buf, out);
+	snprintf(buf, 256, "\n%s\n\n", ruby_description);
+	fputs(buf, out);
+
 
 	rb_vm_bugreport();
 
@@ -285,7 +288,7 @@ rb_bug(const char *fmt, ...)
     report_bug(file, line, fmt, args);
     va_end(args);
 
-#if defined(_WIN32) && defined(RT_VER) && RT_VER >= 80
+#if defined(_WIN32) && defined(RUBY_MSVCRT_VERSION) && RUBY_MSVCRT_VERSION >= 80
     _set_abort_behavior( 0, _CALL_REPORTFAULT);
 #endif
 
@@ -378,6 +381,32 @@ static const struct types {
     {T_UNDEF,	"undef"},	/* internal use: #undef; should not happen */
 };
 
+static const char *
+builtin_type_name(VALUE x)
+{
+    const char *etype;
+
+    if (NIL_P(x)) {
+	etype = "nil";
+    }
+    else if (FIXNUM_P(x)) {
+	etype = "Fixnum";
+    }
+    else if (SYMBOL_P(x)) {
+	etype = "Symbol";
+    }
+    else if (RB_TYPE_P(x, T_TRUE)) {
+	etype = "true";
+    }
+    else if (RB_TYPE_P(x, T_FALSE)) {
+	etype = "false";
+    }
+    else {
+	etype = rb_obj_classname(x);
+    }
+    return etype;
+}
+
 void
 rb_check_type(VALUE x, int t)
 {
@@ -396,22 +425,7 @@ rb_check_type(VALUE x, int t)
 	    if (type->type == t) {
 		const char *etype;
 
-		if (NIL_P(x)) {
-		    etype = "nil";
-		}
-		else if (FIXNUM_P(x)) {
-		    etype = "Fixnum";
-		}
-		else if (SYMBOL_P(x)) {
-		    etype = "Symbol";
-		}
-		else if (rb_special_const_p(x)) {
-		    x = rb_obj_as_string(x);
-		    etype = StringValuePtr(x);
-		}
-		else {
-		    etype = rb_obj_classname(x);
-		}
+		etype = builtin_type_name(x);
 		rb_raise(rb_eTypeError, "wrong argument type %s (expected %s)",
 			 etype, type->name);
 	    }
@@ -437,7 +451,7 @@ rb_typeddata_inherited_p(const rb_data_type_t *child, const rb_data_type_t *pare
 int
 rb_typeddata_is_kind_of(VALUE obj, const rb_data_type_t *data_type)
 {
-    if (SPECIAL_CONST_P(obj) || BUILTIN_TYPE(obj) != T_DATA ||
+    if (!RB_TYPE_P(obj, T_DATA) ||
 	!RTYPEDDATA_P(obj) || !rb_typeddata_inherited_p(RTYPEDDATA_TYPE(obj), data_type)) {
 	return 0;
     }
@@ -450,8 +464,9 @@ rb_check_typeddata(VALUE obj, const rb_data_type_t *data_type)
     const char *etype;
     static const char mesg[] = "wrong argument type %s (expected %s)";
 
-    if (SPECIAL_CONST_P(obj) || BUILTIN_TYPE(obj) != T_DATA) {
-	Check_Type(obj, T_DATA);
+    if (!RB_TYPE_P(obj, T_DATA)) {
+	etype = builtin_type_name(obj);
+	rb_raise(rb_eTypeError, mesg, etype, data_type->wrap_struct_name);
     }
     if (!RTYPEDDATA_P(obj)) {
 	etype = rb_obj_classname(obj);
@@ -601,7 +616,7 @@ exc_message(VALUE exc)
  * call-seq:
  *   exception.inspect   -> string
  *
- * Return this exception's class name an message
+ * Return this exception's class name and message
  */
 
 static VALUE
@@ -658,9 +673,17 @@ static VALUE
 exc_backtrace(VALUE exc)
 {
     ID bt;
+    VALUE obj;
 
     CONST_ID(bt, "bt");
-    return rb_attr_get(exc, bt);
+    obj = rb_attr_get(exc, bt);
+
+    if (rb_backtrace_p(obj)) {
+	obj = rb_backtrace_to_str_ary(obj);
+	/* rb_iv_set(exc, "bt", obj); */
+    }
+
+    return obj;
 }
 
 VALUE
@@ -670,14 +693,13 @@ rb_check_backtrace(VALUE bt)
     static const char err[] = "backtrace must be Array of String";
 
     if (!NIL_P(bt)) {
-	int t = TYPE(bt);
-
-	if (t == T_STRING) return rb_ary_new3(1, bt);
-	if (t != T_ARRAY) {
+	if (RB_TYPE_P(bt, T_STRING)) return rb_ary_new3(1, bt);
+	if (rb_backtrace_p(bt)) return bt;
+	if (!RB_TYPE_P(bt, T_ARRAY)) {
 	    rb_raise(rb_eTypeError, err);
 	}
 	for (i=0;i<RARRAY_LEN(bt);i++) {
-	    if (TYPE(RARRAY_PTR(bt)[i]) != T_STRING) {
+	    if (!RB_TYPE_P(RARRAY_PTR(bt)[i], T_STRING)) {
 		rb_raise(rb_eTypeError, err);
 	    }
 	}
@@ -687,11 +709,11 @@ rb_check_backtrace(VALUE bt)
 
 /*
  *  call-seq:
- *     exc.set_backtrace(array)   ->  array
+ *     exc.set_backtrace(backtrace)   ->  array
  *
- *  Sets the backtrace information associated with <i>exc</i>. The
- *  argument must be an array of <code>String</code> objects in the
- *  format described in <code>Exception#backtrace</code>.
+ *  Sets the backtrace information associated with +exc+. The +backtrace+ must
+ *  be an array of String objects or a single String in the format described
+ *  in Exception#backtrace.
  *
  */
 
@@ -699,6 +721,20 @@ static VALUE
 exc_set_backtrace(VALUE exc, VALUE bt)
 {
     return rb_iv_set(exc, "bt", rb_check_backtrace(bt));
+}
+
+VALUE
+rb_exc_set_backtrace(VALUE exc, VALUE bt)
+{
+    return exc_set_backtrace(exc, bt);
+}
+
+static VALUE
+try_convert_to_exception(VALUE obj)
+{
+    ID id_exception;
+    CONST_ID(id_exception, "exception");
+    return rb_check_funcall(obj, id_exception, 0, 0);
 }
 
 /*
@@ -720,10 +756,17 @@ exc_equal(VALUE exc, VALUE obj)
     CONST_ID(id_mesg, "mesg");
 
     if (rb_obj_class(exc) != rb_obj_class(obj)) {
+	int status = 0;
 	ID id_message, id_backtrace;
 	CONST_ID(id_message, "message");
 	CONST_ID(id_backtrace, "backtrace");
 
+	obj = rb_protect(try_convert_to_exception, obj, &status);
+	if (status || obj == Qundef) {
+	    rb_set_errinfo(Qnil);
+	    return Qfalse;
+	}
+	if (rb_obj_class(exc) != rb_obj_class(obj)) return Qfalse;
 	mesg = rb_check_funcall(obj, id_message, 0, 0);
 	if (mesg == Qundef) return Qfalse;
 	backtrace = rb_check_funcall(obj, id_backtrace, 0, 0);
@@ -743,18 +786,52 @@ exc_equal(VALUE exc, VALUE obj)
 
 /*
  * call-seq:
- *   SystemExit.new(status=0)   -> system_exit
+ *   SystemExit.new              -> system_exit
+ *   SystemExit.new(status)      -> system_exit
+ *   SystemExit.new(status, msg) -> system_exit
+ *   SystemExit.new(msg)         -> system_exit
  *
- * Create a new +SystemExit+ exception with the given status.
+ * Create a new +SystemExit+ exception with the given status and message.
+ * Status is true, false, or an integer.
+ * If status is not given, true is used.
  */
 
 static VALUE
 exit_initialize(int argc, VALUE *argv, VALUE exc)
 {
-    VALUE status = INT2FIX(EXIT_SUCCESS);
-    if (argc > 0 && FIXNUM_P(argv[0])) {
-	status = *argv++;
-	--argc;
+    VALUE status;
+    if (argc > 0) {
+	status = *argv;
+
+	switch (status) {
+	  case Qtrue:
+	    status = INT2FIX(EXIT_SUCCESS);
+	    ++argv;
+	    --argc;
+	    break;
+	  case Qfalse:
+	    status = INT2FIX(EXIT_FAILURE);
+	    ++argv;
+	    --argc;
+	    break;
+	  default:
+	    status = rb_check_to_int(status);
+	    if (NIL_P(status)) {
+		status = INT2FIX(EXIT_SUCCESS);
+	    }
+	    else {
+#if EXIT_SUCCESS != 0
+		if (status == INT2FIX(0))
+		    status = INT2FIX(EXIT_SUCCESS);
+#endif
+		++argv;
+		--argc;
+	    }
+	    break;
+	}
+    }
+    else {
+	status = INT2FIX(EXIT_SUCCESS);
     }
     rb_call_super(argc, argv);
     rb_iv_set(exc, "status", status);
@@ -978,20 +1055,23 @@ name_err_mesg_to_str(VALUE obj)
     else {
 	const char *desc = 0;
 	VALUE d = 0, args[NAME_ERR_MESG_COUNT];
+	int state = 0;
 
 	obj = ptr[1];
-	switch (TYPE(obj)) {
-	  case T_NIL:
+	switch (obj) {
+	  case Qnil:
 	    desc = "nil";
 	    break;
-	  case T_TRUE:
+	  case Qtrue:
 	    desc = "true";
 	    break;
-	  case T_FALSE:
+	  case Qfalse:
 	    desc = "false";
 	    break;
 	  default:
-	    d = rb_protect(rb_inspect, obj, 0);
+	    d = rb_protect(rb_inspect, obj, &state);
+	    if (state)
+		rb_set_errinfo(Qnil);
 	    if (NIL_P(d) || RSTRING_LEN(d) > 65) {
 		d = rb_any_to_s(obj);
 	    }
@@ -1036,9 +1116,9 @@ nometh_err_args(VALUE self)
 void
 rb_invalid_str(const char *str, const char *type)
 {
-    volatile VALUE s = rb_str_inspect(rb_str_new2(str));
+    VALUE s = rb_str_new2(str);
 
-    rb_raise(rb_eArgError, "invalid value for %s: %s", type, RSTRING_PTR(s));
+    rb_raise(rb_eArgError, "invalid value for %s: %+"PRIsVALUE, type, s);
 }
 
 /*
@@ -1148,15 +1228,13 @@ syserr_initialize(int argc, VALUE *argv, VALUE self)
     else err = "unknown error";
     if (!NIL_P(mesg)) {
 	rb_encoding *le = rb_locale_encoding();
-	VALUE str = mesg;
+	VALUE str = StringValue(mesg);
+	rb_encoding *me = rb_enc_get(mesg);
 
-	StringValue(str);
 	mesg = rb_sprintf("%s - %.*s", err,
 			  (int)RSTRING_LEN(str), RSTRING_PTR(str));
-	if (le == rb_usascii_encoding()) {
-	    rb_encoding *me = rb_enc_get(mesg);
-	    if (le != me && rb_enc_asciicompat(me))
-		le = me;
+	if (le != me && rb_enc_asciicompat(me)) {
+	    le = me;
 	}/* else assume err is non ASCII string. */
 	OBJ_INFECT(mesg, str);
 	rb_enc_associate(mesg, le);
@@ -1626,7 +1704,10 @@ Init_Exception(void)
 
     rb_eScriptError = rb_define_class("ScriptError", rb_eException);
     rb_eSyntaxError = rb_define_class("SyntaxError", rb_eScriptError);
+
     rb_eLoadError   = rb_define_class("LoadError", rb_eScriptError);
+    rb_attr(rb_eLoadError, rb_intern("path"), 1, 0, Qfalse);
+
     rb_eNotImpError = rb_define_class("NotImplementedError", rb_eScriptError);
 
     rb_eNameError     = rb_define_class("NameError", rb_eStandardError);
@@ -1661,6 +1742,19 @@ Init_Exception(void)
 }
 
 void
+rb_enc_raise(rb_encoding *enc, VALUE exc, const char *fmt, ...)
+{
+    va_list args;
+    VALUE mesg;
+
+    va_start(args, fmt);
+    mesg = rb_enc_vsprintf(enc, fmt, args);
+    va_end(args);
+
+    rb_exc_raise(rb_exc_new3(exc, mesg));
+}
+
+void
 rb_raise(VALUE exc, const char *fmt, ...)
 {
     va_list args;
@@ -1672,6 +1766,16 @@ rb_raise(VALUE exc, const char *fmt, ...)
     rb_exc_raise(rb_exc_new3(exc, mesg));
 }
 
+NORETURN(static void raise_loaderror(VALUE path, VALUE mesg));
+
+static void
+raise_loaderror(VALUE path, VALUE mesg)
+{
+    VALUE err = rb_exc_new3(rb_eLoadError, mesg);
+    rb_ivar_set(err, rb_intern("@path"), path);
+    rb_exc_raise(err);
+}
+
 void
 rb_loaderror(const char *fmt, ...)
 {
@@ -1681,7 +1785,19 @@ rb_loaderror(const char *fmt, ...)
     va_start(args, fmt);
     mesg = rb_enc_vsprintf(rb_locale_encoding(), fmt, args);
     va_end(args);
-    rb_exc_raise(rb_exc_new3(rb_eLoadError, mesg));
+    raise_loaderror(Qnil, mesg);
+}
+
+void
+rb_loaderror_with_path(VALUE path, const char *fmt, ...)
+{
+    va_list args;
+    VALUE mesg;
+
+    va_start(args, fmt);
+    mesg = rb_enc_vsprintf(rb_locale_encoding(), fmt, args);
+    va_end(args);
+    raise_loaderror(path, mesg);
 }
 
 void
@@ -1717,11 +1833,31 @@ make_errno_exc(const char *mesg)
     return rb_syserr_new(n, mesg);
 }
 
+static VALUE
+make_errno_exc_str(VALUE mesg)
+{
+    int n = errno;
+
+    errno = 0;
+    if (!mesg) mesg = Qnil;
+    if (n == 0) {
+	const char *s = !NIL_P(mesg) ? RSTRING_PTR(mesg) : "";
+	rb_bug("rb_sys_fail_str(%s) - errno == 0", s);
+    }
+    return rb_syserr_new_str(n, mesg);
+}
+
 VALUE
 rb_syserr_new(int n, const char *mesg)
 {
     VALUE arg;
     arg = mesg ? rb_str_new2(mesg) : Qnil;
+    return rb_syserr_new_str(n, arg);
+}
+
+VALUE
+rb_syserr_new_str(int n, VALUE arg)
+{
     return rb_class_new_instance(1, &arg, get_syserr(n));
 }
 
@@ -1732,9 +1868,21 @@ rb_syserr_fail(int e, const char *mesg)
 }
 
 void
+rb_syserr_fail_str(int e, VALUE mesg)
+{
+    rb_exc_raise(rb_syserr_new_str(e, mesg));
+}
+
+void
 rb_sys_fail(const char *mesg)
 {
     rb_exc_raise(make_errno_exc(mesg));
+}
+
+void
+rb_sys_fail_str(VALUE mesg)
+{
+    rb_exc_raise(make_errno_exc_str(mesg));
 }
 
 void
@@ -1746,9 +1894,25 @@ rb_mod_sys_fail(VALUE mod, const char *mesg)
 }
 
 void
+rb_mod_sys_fail_str(VALUE mod, VALUE mesg)
+{
+    VALUE exc = make_errno_exc_str(mesg);
+    rb_extend_object(exc, mod);
+    rb_exc_raise(exc);
+}
+
+void
 rb_mod_syserr_fail(VALUE mod, int e, const char *mesg)
 {
     VALUE exc = rb_syserr_new(e, mesg);
+    rb_extend_object(exc, mod);
+    rb_exc_raise(exc);
+}
+
+void
+rb_mod_syserr_fail_str(VALUE mod, int e, VALUE mesg)
+{
+    VALUE exc = rb_syserr_new_str(e, mesg);
     rb_extend_object(exc, mod);
     rb_exc_raise(exc);
 }
@@ -1774,9 +1938,12 @@ rb_sys_warning(const char *fmt, ...)
 }
 
 void
-rb_load_fail(const char *path)
+rb_load_fail(VALUE path, const char *err)
 {
-    rb_loaderror("%s -- %s", strerror(errno), path);
+    VALUE mesg = rb_str_buf_new_cstr(err);
+    rb_str_cat2(mesg, " -- ");
+    rb_str_append(mesg, path);	/* should be ASCII compatible */
+    raise_loaderror(path, mesg);
 }
 
 void

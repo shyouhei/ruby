@@ -1,6 +1,9 @@
 require 'rexml_test_utils'
 require 'rexml/document'
-require 'zlib'
+begin
+  require 'zlib'
+rescue LoadError
+end
 
 class OrderTester < Test::Unit::TestCase
   include REXMLTestUtils
@@ -43,7 +46,7 @@ END
    end
    # Provided by Tom Talbott
    def test_more_ordering
-     doc = REXML::Document.new(Zlib::GzipReader.new(File.new(fixture_path('LostineRiver.kml.gz')), encoding: 'utf-8'))
+     doc = REXML::Document.new(Zlib::GzipReader.open(fixture_path('LostineRiver.kml.gz'), encoding: 'utf-8'))
      actual = [
         "Head south from Phinney Ave N",
         "Turn left at N 36th St",
@@ -98,5 +101,5 @@ END
        assert_equal( actual[count], n ) unless n =~ /Arrive at/
        count += 1
      }
-   end
+   end if defined?(Zlib::GzipReader)
 end

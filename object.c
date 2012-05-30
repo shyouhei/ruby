@@ -14,6 +14,7 @@
 #include "ruby/ruby.h"
 #include "ruby/st.h"
 #include "ruby/util.h"
+#include "ruby/encoding.h"
 #include <stdio.h>
 #include <errno.h>
 #include <ctype.h>
@@ -69,23 +70,30 @@ rb_eql(VALUE obj1, VALUE obj2)
  *     obj.equal?(other)   -> true or false
  *     obj.eql?(other)     -> true or false
  *
- *  Equality---At the <code>Object</code> level, <code>==</code> returns
- *  <code>true</code> only if <i>obj</i> and <i>other</i> are the
- *  same object. Typically, this method is overridden in descendant
- *  classes to provide class-specific meaning.
+ *  Equality --- At the <code>Object</code> level, <code>==</code> returns
+ *  <code>true</code> only if +obj+ and +other+ are the same object.
+ *  Typically, this method is overridden in descendant classes to provide
+ *  class-specific meaning.
  *
  *  Unlike <code>==</code>, the <code>equal?</code> method should never be
- *  overridden by subclasses: it is used to determine object identity
- *  (that is, <code>a.equal?(b)</code> iff <code>a</code> is the same
- *  object as <code>b</code>).
+ *  overridden by subclasses as it is used to determine object identity
+ *  (that is, <code>a.equal?(b)</code> if and only if <code>a</code> is the
+ *  same object as <code>b</code>):
  *
- *  The <code>eql?</code> method returns <code>true</code> if
- *  <i>obj</i> and <i>anObject</i> have the same value. Used by
- *  <code>Hash</code> to test members for equality.  For objects of
- *  class <code>Object</code>, <code>eql?</code> is synonymous with
- *  <code>==</code>. Subclasses normally continue this tradition, but
- *  there are exceptions. <code>Numeric</code> types, for example,
- *  perform type conversion across <code>==</code>, but not across
+ *    obj = "a"
+ *    other = obj.dup
+ *
+ *    a == other      #=> true
+ *    a.equal? other  #=> false
+ *    a.equal? a      #=> true
+ *
+ *  The <code>eql?</code> method returns <code>true</code> if +obj+ and
+ *  +other+ refer to the same hash key.  This is used by Hash to test members
+ *  for equality.  For objects of class <code>Object</code>, <code>eql?</code>
+ *  is synonymous with <code>==</code>.  Subclasses normally continue this
+ *  tradition by aliasing <code>eql?</code> to their overridden <code>==</code>
+ *  method, but there are exceptions.  <code>Numeric</code> types, for
+ *  example, perform type conversion across <code>==</code>, but not across
  *  <code>eql?</code>, so:
  *
  *     1 == 1.0     #=> true
@@ -100,14 +108,17 @@ rb_obj_equal(VALUE obj1, VALUE obj2)
 }
 
 /*
- * Generates a <code>Fixnum</code> hash value for this object.
- * This function must have the property that a.eql?(b) implies
- * a.hash <code>==</code> b.hash.
- * The hash value is used by class <code>Hash</code>.
- * Any hash value that exceeds the capacity of a <code>Fixnum</code> will be
- * truncated before being used.
+ * Generates a Fixnum hash value for this object.  This function must have the
+ * property that <code>a.eql?(b)<code> implies <code>a.hash == b.hash</code>.
  *
- *      "waffle".hash #=> -910576647
+ * The hash value is used along with #eql? by the Hash class to determine if
+ * two objects reference the same hash key.  Any hash value that exceeds the
+ * capacity of a Fixnum will be truncated before being used.
+ *
+ * The hash value for an object may not be identical across invocations or
+ * implementations of ruby.  If you need a stable identifier across ruby
+ * invocations and implementations you will need to generate one with a custom
+ * method.
  */
 VALUE
 rb_obj_hash(VALUE obj)
@@ -284,7 +295,7 @@ rb_obj_clone(VALUE obj)
     if (FL_TEST(singleton, FL_SINGLETON)) {
 	rb_singleton_class_attached(singleton, clone);
     }
-    RBASIC(clone)->flags = (RBASIC(obj)->flags | FL_TEST(clone, FL_TAINT) | FL_TEST(clone, FL_UNTRUSTED)) & ~(FL_FREEZE|FL_FINALIZE|FL_MARK);
+    RBASIC(clone)->flags = (RBASIC(obj)->flags | FL_TEST(clone, FL_TAINT) | FL_TEST(clone, FL_UNTRUSTED)) & ~(FL_FREEZE|FL_FINALIZE);
     init_copy(clone, obj);
     rb_funcall(clone, id_init_clone, 1, obj);
     RBASIC(clone)->flags |= RBASIC(obj)->flags & FL_FREEZE;
@@ -367,15 +378,33 @@ rb_any_to_s(VALUE obj)
     return str;
 }
 
+/*
+ * If the default external encoding is ASCII compatible, the encoding of
+ * inspected result must be compatible with it.
+ * If the default external encoding is ASCII incomapatible,
+ * the result must be ASCII only.
+ */
 VALUE
 rb_inspect(VALUE obj)
 {
-    return rb_obj_as_string(rb_funcall(obj, id_inspect, 0, 0));
+    VALUE str = rb_obj_as_string(rb_funcall(obj, id_inspect, 0, 0));
+    rb_encoding *ext = rb_default_external_encoding();
+    if (!rb_enc_asciicompat(ext)) {
+	if (!rb_enc_str_asciionly_p(str))
+	    rb_raise(rb_eEncCompatError, "inspected result must be ASCII only if default external encoding is ASCII incompatible");
+	return str;
+    }
+    if (rb_enc_get(str) != ext && !rb_enc_str_asciionly_p(str))
+	rb_raise(rb_eEncCompatError, "inspected result must be ASCII only or use the same encoding with default external");
+    return str;
 }
 
 static int
-inspect_i(ID id, VALUE value, VALUE str)
+inspect_i(st_data_t k, st_data_t v, st_data_t a)
 {
+    ID id = (ID)k;
+    VALUE value = (VALUE)v;
+    VALUE str = (VALUE)a;
     VALUE str2;
     const char *ivname;
 
@@ -419,14 +448,37 @@ inspect_obj(VALUE obj, VALUE str, int recur)
  *  call-seq:
  *     obj.inspect   -> string
  *
- *  Returns a string containing a human-readable representation of
- *  <i>obj</i>. If not overridden and no instance variables, uses the
- *  <code>to_s</code> method to generate the string.
- *  <i>obj</i>.  If not overridden, uses the <code>to_s</code> method to
- *  generate the string.
+ * Returns a string containing a human-readable representation of <i>obj</i>.
+ * By default, if the <i>obj</i> has instance variables, show the class name
+ * and instance variable details which is the list of the name and the result
+ * of <i>inspect</i> method for each instance variable.
+ * Otherwise uses the <i>to_s</i> method to generate the string.
+ * If the <i>to_s</i> method is overridden, uses it.
+ * User defined classes should override this method to make better
+ * representation of <i>obj</i>.  When overriding this method, it should
+ * return a string whose encoding is compatible with the default external
+ * encoding.
  *
  *     [ 1, 2, 3..4, 'five' ].inspect   #=> "[1, 2, 3..4, \"five\"]"
  *     Time.new.inspect                 #=> "2008-03-08 19:43:39 +0900"
+ *
+ *     class Foo
+ *     end
+ *     Foo.new.inspect                  #=> "#<Foo:0x0300c868>"
+ *
+ *     class Bar
+ *       def initialize
+ *         @bar = 1
+ *       end
+ *     end
+ *     Bar.new.inspect                  #=> "#<Bar:0x0300c868 @bar=1>"
+ *
+ *     class Baz
+ *       def to_s
+ *         "baz"
+ *       end
+ *     end
+ *     Baz.new.inspect                  #=> "baz"
  */
 
 static VALUE
@@ -464,6 +516,15 @@ rb_obj_inspect(VALUE obj)
  *
  *  Returns <code>true</code> if <i>obj</i> is an instance of the given
  *  class. See also <code>Object#kind_of?</code>.
+ *
+ *     class A;     end
+ *     class B < A; end
+ *     class C < B; end
+ *
+ *     b = B.new
+ *     b.instance_of? A   #=> false
+ *     b.instance_of? B   #=> true
+ *     b.instance_of? C   #=> false
  */
 
 VALUE
@@ -498,11 +559,13 @@ rb_obj_is_instance_of(VALUE obj, VALUE c)
  *     end
  *     class B < A; end
  *     class C < B; end
+ *
  *     b = B.new
- *     b.instance_of? A   #=> false
- *     b.instance_of? B   #=> true
- *     b.instance_of? C   #=> false
- *     b.instance_of? M   #=> false
+ *     b.is_a? A          #=> true
+ *     b.is_a? B          #=> true
+ *     b.is_a? C          #=> false
+ *     b.is_a? M          #=> true
+ *
  *     b.kind_of? A       #=> true
  *     b.kind_of? B       #=> true
  *     b.kind_of? C       #=> false
@@ -567,9 +630,9 @@ rb_obj_tap(VALUE obj)
  * Example:
  *
  *    class Foo
- *       def self.inherited(subclass)
- *          puts "New subclass: #{subclass}"
- *       end
+ *      def self.inherited(subclass)
+ *        puts "New subclass: #{subclass}"
+ *      end
  *    end
  *
  *    class Bar < Foo
@@ -992,6 +1055,23 @@ static VALUE
 nil_to_a(VALUE obj)
 {
     return rb_ary_new2(0);
+}
+
+/*
+ * Document-method: to_h
+ *
+ *  call-seq:
+ *     nil.to_h    -> {}
+ *
+ *  Always returns an empty hash.
+ *
+ *     nil.to_h   #=> {}
+ */
+
+static VALUE
+nil_to_h(VALUE obj)
+{
+    return rb_hash_new();
 }
 
 /*
@@ -2187,6 +2267,12 @@ rb_to_int(VALUE val)
     return rb_to_integer(val, "to_int");
 }
 
+VALUE
+rb_check_to_int(VALUE val)
+{
+    return rb_check_to_integer(val, "to_int");
+}
+
 static VALUE
 rb_convert_to_integer(VALUE val, int base)
 {
@@ -2414,6 +2500,8 @@ rb_Float(VALUE val)
       default:
 	return rb_convert_type(val, T_FLOAT, "Float", "to_f");
     }
+
+    UNREACHABLE;
 }
 
 /*
@@ -2536,6 +2624,41 @@ static VALUE
 rb_f_array(VALUE obj, VALUE arg)
 {
     return rb_Array(arg);
+}
+
+VALUE
+rb_Hash(VALUE val)
+{
+    VALUE tmp;
+
+    if (NIL_P(val)) return rb_hash_new();
+    tmp = rb_check_hash_type(val);
+    if (NIL_P(tmp)) {
+	if (RB_TYPE_P(val, T_ARRAY) && RARRAY_LEN(val) == 0)
+	    return rb_hash_new();
+	rb_raise(rb_eTypeError, "can't convert %s into Hash", rb_obj_classname(val));
+    }
+    return tmp;
+}
+
+/*
+ *  call-seq:
+ *     Hash(arg)    -> hash
+ *
+ *  Converts <i>arg</i> to a <code>Hash</code> by calling
+ *  <i>arg</i><code>.to_hash</code>. Returns an empty <code>Hash</code> when
+ *  <i>arg</i> is <tt>nil</tt> or <tt>[]</tt>.
+ *
+ *     Hash([])          #=> {}
+ *     Hash(nil)         #=> nil
+ *     Hash(key: :value) #=> {:key => :value}
+ *     Hash([1, 2, 3])   #=> TypeError
+ */
+
+static VALUE
+rb_f_hash(VALUE obj, VALUE arg)
+{
+    return rb_Hash(arg);
 }
 
 /*
@@ -2783,12 +2906,14 @@ Init_Object(void)
 
     rb_define_global_function("String", rb_f_string, 1);
     rb_define_global_function("Array", rb_f_array, 1);
+    rb_define_global_function("Hash", rb_f_hash, 1);
 
     rb_cNilClass = rb_define_class("NilClass", rb_cObject);
     rb_define_method(rb_cNilClass, "to_i", nil_to_i, 0);
     rb_define_method(rb_cNilClass, "to_f", nil_to_f, 0);
     rb_define_method(rb_cNilClass, "to_s", nil_to_s, 0);
     rb_define_method(rb_cNilClass, "to_a", nil_to_a, 0);
+    rb_define_method(rb_cNilClass, "to_h", nil_to_h, 0);
     rb_define_method(rb_cNilClass, "inspect", nil_inspect, 0);
     rb_define_method(rb_cNilClass, "&", false_and, 1);
     rb_define_method(rb_cNilClass, "|", false_or, 1);
@@ -2847,8 +2972,8 @@ Init_Object(void)
     rb_define_method(rb_cModule, "class_variable_get", rb_mod_cvar_get, 1);
     rb_define_method(rb_cModule, "class_variable_set", rb_mod_cvar_set, 2);
     rb_define_method(rb_cModule, "class_variable_defined?", rb_mod_cvar_defined, 1);
-    rb_define_method(rb_cModule, "public_constant", rb_mod_public_constant, -1);
-    rb_define_method(rb_cModule, "private_constant", rb_mod_private_constant, -1);
+    rb_define_method(rb_cModule, "public_constant", rb_mod_public_constant, -1); /* in variable.c */
+    rb_define_method(rb_cModule, "private_constant", rb_mod_private_constant, -1); /* in variable.c */
 
     rb_define_method(rb_cClass, "allocate", rb_obj_alloc, 0);
     rb_define_method(rb_cClass, "new", rb_class_new_instance, -1);

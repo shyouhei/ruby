@@ -187,8 +187,11 @@ rb_strftime_with_timespec(char *s, size_t maxsize, const char *format, rb_encodi
 	long y;
 	int precision, flags, colons;
 	char padding;
-	enum {LEFT, CHCASE, LOWER, UPPER, LOCALE_O, LOCALE_E};
+	enum {LEFT, CHCASE, LOWER, UPPER};
 #define BIT_OF(n) (1U<<(n))
+#ifdef MAILHEADER_EXT
+	int sign;
+#endif
 
 	/* various tables, useful in North America */
 	static const char days_l[][10] = {
@@ -219,7 +222,7 @@ rb_strftime_with_timespec(char *s, size_t maxsize, const char *format, rb_encodi
 
 	for (; *format && s < endp - 1; format++) {
 #define FLAG_FOUND() do { \
-			if (precision > 0 || flags & (BIT_OF(LOCALE_E)|BIT_OF(LOCALE_O))) \
+			if (precision > 0) \
 				goto unknown; \
 		} while (0)
 #define NEEDS(n) do if (s >= endp || (n) >= endp - s - 1) goto err; while (0)
@@ -447,36 +450,16 @@ rb_strftime_with_timespec(char *s, size_t maxsize, const char *format, rb_encodi
 
 		case 'Y':	/* year with century */
                         if (FIXNUM_P(vtm->year)) {
-                            long y = FIX2LONG(vtm->year);
-                            FMT('0', 0 <= y ? 4 : 5, "ld", y);
+				long y = FIX2LONG(vtm->year);
+				FMT('0', 0 <= y ? 4 : 5, "ld", y);
                         }
                         else {
-                            FMTV('0', 4, "d", vtm->year);
+				FMTV('0', 4, "d", vtm->year);
                         }
 			continue;
 
 #ifdef MAILHEADER_EXT
 		case 'z':	/* time zone offset east of GMT e.g. -0600 */
-                        switch (colons) {
-                          case 0: /* %z -> +hhmm */
-                            precision = precision <= 5 ? 2 : precision-3;
-                            NEEDS(precision + 3);
-                            break;
-
-                          case 1: /* %:z -> +hh:mm */
-                            precision = precision <= 6 ? 2 : precision-4;
-                            NEEDS(precision + 4);
-                            break;
-
-                          case 2: /* %::z -> +hh:mm:ss */
-                            precision = precision <= 9 ? 2 : precision-7;
-                            NEEDS(precision + 7);
-                            break;
-
-                          default:
-                            format--;
-                            goto unknown;
-                        }
 			if (gmt) {
 				off = 0;
 			}
@@ -485,20 +468,63 @@ rb_strftime_with_timespec(char *s, size_t maxsize, const char *format, rb_encodi
 			}
 			if (off < 0) {
 				off = -off;
-				*s++ = '-';
+				sign = -1;
 			} else {
-				*s++ = '+';
+				sign = +1;
 			}
-			i = snprintf(s, endp - s, (padding == ' ' ? "%*ld" : "%.*ld"), precision, off / 3600);
+                        switch (colons) {
+			case 0: /* %z -> +hhmm */
+				precision = precision <= 5 ? 2 : precision-3;
+				NEEDS(precision + 3);
+				break;
+
+			case 1: /* %:z -> +hh:mm */
+				precision = precision <= 6 ? 2 : precision-4;
+				NEEDS(precision + 4);
+				break;
+
+			case 2: /* %::z -> +hh:mm:ss */
+				precision = precision <= 9 ? 2 : precision-7;
+				NEEDS(precision + 7);
+				break;
+
+			case 3: /* %:::z -> +hh[:mm[:ss]] */
+				if (off % 3600 == 0) {
+					precision = precision <= 3 ? 2 : precision-1;
+					NEEDS(precision + 3);
+				}
+				else if (off % 60 == 0) {
+					precision = precision <= 6 ? 2 : precision-4;
+					NEEDS(precision + 4);
+				}
+				else {
+					precision = precision <= 9 ? 2 : precision-7;
+					NEEDS(precision + 9);
+				}
+				break;
+
+			default:
+				format--;
+				goto unknown;
+                        }
+			i = snprintf(s, endp - s, (padding == ' ' ? "%+*ld" : "%+.*ld"),
+				     precision + 1, sign * (off / 3600));
 			if (i < 0) goto err;
+			if (sign < 0 && off < 3600) {
+				*(padding == ' ' ? s + i - 2 : s) = '-';
+			}
 			s += i;
                         off = off % 3600;
+			if (colons == 3 && off == 0)
+				continue;
                         if (1 <= colons)
                             *s++ = ':';
 			i = snprintf(s, endp - s, "%02d", (int)(off / 60));
 			if (i < 0) goto err;
 			s += i;
                         off = off % 60;
+			if (colons == 3 && off == 0)
+				continue;
                         if (2 <= colons) {
                             *s++ = ':';
                             i = snprintf(s, endp - s, "%02d", (int)off);
@@ -601,11 +627,13 @@ rb_strftime_with_timespec(char *s, size_t maxsize, const char *format, rb_encodi
 
 		case 'E':
 			/* POSIX locale extensions, ignored for now */
-			flags |= BIT_OF(LOCALE_E);
+			if (!format[1] || !strchr("cCxXyY", format[1]))
+				goto unknown;
 			goto again;
 		case 'O':
 			/* POSIX locale extensions, ignored for now */
-			flags |= BIT_OF(LOCALE_O);
+			if (!format[1] || !strchr("deHkIlmMSuUVwWy", format[1]))
+				goto unknown;
 			goto again;
 
 		case 'V':	/* week of year according ISO 8601 */
@@ -751,8 +779,12 @@ rb_strftime_with_timespec(char *s, size_t maxsize, const char *format, rb_encodi
 			goto again;
 
 		case ':':
-			FLAG_FOUND();
-                        colons++;
+			{
+				size_t l = strspn(format, ":");
+				if (l > 3 || format[l] != 'z') goto unknown;
+				colons = (int)l;
+				format += l - 1;
+			}
 			goto again;
 
 		case '0':

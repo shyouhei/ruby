@@ -692,6 +692,7 @@ class URI::TestGeneric < Test::Unit::TestCase
 
     uri = URI.parse('http://example.com')
     assert_raise(URI::InvalidURIError) { uri.password = 'bar' }
+    assert_raise(URI::InvalidComponentError) { uri.query = "foo\nbar" }
     uri.userinfo = 'foo:bar'
     assert_equal('http://foo:bar@example.com', uri.to_s)
     assert_raise(URI::InvalidURIError) { uri.registry = 'bar' }
@@ -707,6 +708,12 @@ class URI::TestGeneric < Test::Unit::TestCase
     assert_raise(URI::InvalidURIError) { uri.query = 'bar' }
   end
 
+  def test_set_scheme
+    uri = URI.parse 'HTTP://example'
+
+    assert_equal 'http://example', uri.to_s
+  end
+
   def test_ipv6
     assert_equal("[::1]", URI("http://[::1]/bar/baz").host)
     assert_equal("::1", URI("http://[::1]/bar/baz").hostname)
@@ -715,5 +722,14 @@ class URI::TestGeneric < Test::Unit::TestCase
     assert_equal("http://foo/bar", u.to_s)
     u.hostname = "::1"
     assert_equal("http://[::1]/bar", u.to_s)
+  end
+
+  def test_build
+    URI::Generic.build(['http', nil, 'example.com', 80, nil, '/foo', nil, nil, nil])
+  end
+
+  def test_build2
+    URI::Generic.build2(path: "/foo bar/baz")
+    URI::Generic.build2(['http', nil, 'example.com', 80, nil, '/foo bar' , nil, nil, nil])
   end
 end

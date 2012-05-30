@@ -336,6 +336,21 @@ class Resolv
       @initialized = nil
     end
 
+    # Sets the resolver timeouts.  This may be a single positive number
+    # or an array of positive numbers representing timeouts in seconds.
+    # If an array is specified, a DNS request will retry and wait for
+    # each successive interval in the array until a successful response
+    # is received.  Specifying +nil+ reverts to the default timeouts:
+    # [ 5, second = 5 * 2 / nameserver_count, 2 * second, 4 * second ]
+    #
+    # Example:
+    #
+    #   dns.timeouts = 3
+    #
+    def timeouts=(values)
+      @config.timeouts = values
+    end
+
     def lazy_initialize # :nodoc:
       @mutex.synchronize {
         unless @initialized
@@ -642,16 +657,19 @@ class Resolv
       end
 
       def request(sender, tout)
-        timelimit = Time.now + tout
+        start = Time.now
+        timelimit = start + tout
         sender.send
         while true
-          now = Time.now
-          timeout = timelimit - now
+          before_select = Time.now
+          timeout = timelimit - before_select
           if timeout <= 0
             raise ResolvTimeout
           end
           select_result = IO.select(@socks, nil, nil, timeout)
           if !select_result
+            after_select = Time.now
+            next if after_select < timelimit
             raise ResolvTimeout
           end
           begin
@@ -851,6 +869,20 @@ class Resolv
         @mutex = Mutex.new
         @config_info = config_info
         @initialized = nil
+        @timeouts = nil
+      end
+
+      def timeouts=(values)
+        if values
+          values = Array(values)
+          values.each do |t|
+            Numeric === t or raise ArgumentError, "#{t.inspect} is not numeric"
+            t > 0.0 or raise ArgumentError, "timeout=#{t} must be postive"
+          end
+          @timeouts = values
+        else
+          @timeouts = nil
+        end
       end
 
       def Config.parse_resolv_conf(filename)
@@ -1013,7 +1045,7 @@ class Resolv
 
       def resolv(name)
         candidates = generate_candidates(name)
-        timeouts = generate_timeouts
+        timeouts = @timeouts || generate_timeouts
         begin
           candidates.each {|candidate|
             begin

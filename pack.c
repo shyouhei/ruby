@@ -247,7 +247,8 @@ num2i32(VALUE x)
 	return rb_big2ulong_pack(x);
     }
     rb_raise(rb_eTypeError, "can't convert %s to `integer'", rb_obj_classname(x));
-    return 0;			/* not reached */
+
+    UNREACHABLE;
 }
 
 #define MAX_INTEGER_PACK_SIZE 8
@@ -378,7 +379,7 @@ pack_pack(VALUE ary, VALUE fmt)
 #ifdef NATINT_PACK
     int natint;		/* native integer */
 #endif
-    int signed_p, integer_size, bigendian_p;
+    int integer_size, bigendian_p;
 
     StringValue(fmt);
     p = RSTRING_PTR(fmt);
@@ -648,73 +649,61 @@ pack_pack(VALUE ary, VALUE fmt)
 	    break;
 
 	  case 's':		/* signed short */
-            signed_p = 1;
             integer_size = NATINT_LEN(short, 2);
             bigendian_p = BIGENDIAN_P();
             goto pack_integer;
 
 	  case 'S':		/* unsigned short */
-            signed_p = 0;
             integer_size = NATINT_LEN(short, 2);
             bigendian_p = BIGENDIAN_P();
             goto pack_integer;
 
 	  case 'i':		/* signed int */
-            signed_p = 1;
             integer_size = (int)sizeof(int);
             bigendian_p = BIGENDIAN_P();
             goto pack_integer;
 
 	  case 'I':		/* unsigned int */
-            signed_p = 0;
             integer_size = (int)sizeof(int);
             bigendian_p = BIGENDIAN_P();
             goto pack_integer;
 
 	  case 'l':		/* signed long */
-            signed_p = 1;
             integer_size = NATINT_LEN(long, 4);
             bigendian_p = BIGENDIAN_P();
             goto pack_integer;
 
 	  case 'L':		/* unsigned long */
-            signed_p = 0;
             integer_size = NATINT_LEN(long, 4);
             bigendian_p = BIGENDIAN_P();
             goto pack_integer;
 
 	  case 'q':		/* signed quad (64bit) int */
-            signed_p = 1;
 	    integer_size = 8;
             bigendian_p = BIGENDIAN_P();
             goto pack_integer;
 
 	  case 'Q':		/* unsigned quad (64bit) int */
-            signed_p = 0;
 	    integer_size = 8;
             bigendian_p = BIGENDIAN_P();
             goto pack_integer;
 
 	  case 'n':		/* unsigned short (network byte-order)  */
-            signed_p = 0;
             integer_size = 2;
             bigendian_p = 1;
             goto pack_integer;
 
 	  case 'N':		/* unsigned long (network byte-order) */
-            signed_p = 0;
             integer_size = 4;
             bigendian_p = 1;
             goto pack_integer;
 
 	  case 'v':		/* unsigned short (VAX byte-order) */
-            signed_p = 0;
             integer_size = 2;
             bigendian_p = 0;
             goto pack_integer;
 
 	  case 'V':		/* unsigned long (VAX byte-order) */
-            signed_p = 0;
             integer_size = 4;
             bigendian_p = 0;
             goto pack_integer;
@@ -1038,6 +1027,8 @@ pack_pack(VALUE ary, VALUE fmt)
 	    break;
 
 	  default:
+	    rb_warning("unknown pack directive '%c' in '%s'",
+		type, RSTRING_PTR(fmt));
 	    break;
 	}
     }
@@ -2003,7 +1994,7 @@ pack_unpack(VALUE str, VALUE fmt)
 	  case 'M':
 	    {
 		VALUE buf = infected_str_new(0, send - s, str);
-		char *ptr = RSTRING_PTR(buf);
+		char *ptr = RSTRING_PTR(buf), *ss = s;
 		int c1, c2;
 
 		while (s < send) {
@@ -2022,8 +2013,10 @@ pack_unpack(VALUE str, VALUE fmt)
 			*ptr++ = *s;
 		    }
 		    s++;
+		    ss = s;
 		}
 		rb_str_set_len(buf, ptr - RSTRING_PTR(buf));
+		rb_str_buf_cat(buf, ss, send-ss);
 		ENCODING_CODERANGE_SET(buf, rb_ascii8bit_encindex(), ENC_CODERANGE_VALID);
 		UNPACK_PUSH(buf);
 	    }
@@ -2064,7 +2057,7 @@ pack_unpack(VALUE str, VALUE fmt)
 		    p = RARRAY_PTR(a);
 		    pend = p + RARRAY_LEN(a);
 		    while (p < pend) {
-			if (TYPE(*p) == T_STRING && RSTRING_PTR(*p) == t) {
+			if (RB_TYPE_P(*p, T_STRING) && RSTRING_PTR(*p) == t) {
 			    if (len < RSTRING_LEN(*p)) {
 				tmp = rb_tainted_str_new(t, len);
 				rb_str_associate(tmp, a);
@@ -2106,7 +2099,7 @@ pack_unpack(VALUE str, VALUE fmt)
 			p = RARRAY_PTR(a);
 			pend = p + RARRAY_LEN(a);
 			while (p < pend) {
-			    if (TYPE(*p) == T_STRING && RSTRING_PTR(*p) == t) {
+			    if (RB_TYPE_P(*p, T_STRING) && RSTRING_PTR(*p) == t) {
 				tmp = *p;
 				break;
 			    }
@@ -2153,6 +2146,8 @@ pack_unpack(VALUE str, VALUE fmt)
 	    break;
 
 	  default:
+	    rb_warning("unknown unpack directive '%c' in '%s'",
+		type, RSTRING_PTR(fmt));
 	    break;
 	}
     }
@@ -2205,6 +2200,8 @@ rb_uv_to_utf8(char buf[6], unsigned long uv)
 	return 6;
     }
     rb_raise(rb_eRangeError, "pack(U): value out of range");
+
+    UNREACHABLE;
 }
 
 static const unsigned long utf8_limits[] = {

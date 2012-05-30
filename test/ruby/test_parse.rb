@@ -742,7 +742,7 @@ x = __ENCODING__
         x = def o.foo; end
       END
     end
-    assert_equal($stderr.string.lines.to_a.size, 14)
+    assert_equal(14, $stderr.string.lines.to_a.size)
     $stderr = stderr
   end
 
@@ -824,5 +824,19 @@ x = __ENCODING__
     assert_raise(NameError) do
       c.instance_eval { remove_class_variable(:@var) }
     end
+  end
+
+  def test_method_block_location
+    bug5614 = '[ruby-core:40936]'
+    expected = nil
+    e = assert_raise(NoMethodError) do
+      1.times do
+        expected = __LINE__+1
+      end.print do
+        #
+      end
+    end
+    actual = e.backtrace.first[/\A#{Regexp.quote(__FILE__)}:(\d+):/o, 1].to_i
+    assert_equal(expected, actual, bug5614)
   end
 end

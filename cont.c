@@ -15,7 +15,7 @@
 #include "gc.h"
 #include "eval_intern.h"
 
-#if ((defined(_WIN32) && _WIN32_WINNT >= 0x0400) || (defined(HAVE_GETCONTEXT) && defined(HAVE_SETCONTEXT))) && !defined(__NetBSD__) && !defined(sun) && !defined(FIBER_USE_NATIVE)
+#if ((defined(_WIN32) && _WIN32_WINNT >= 0x0400) || (defined(HAVE_GETCONTEXT) && defined(HAVE_SETCONTEXT))) && !defined(__NetBSD__) && !defined(__sun) && !defined(FIBER_USE_NATIVE)
 #define FIBER_USE_NATIVE 1
 
 /* FIBER_USE_NATIVE enables Fiber performance improvement using system
@@ -47,8 +47,13 @@
 #define RB_PAGE_SIZE (pagesize)
 #define RB_PAGE_MASK (~(RB_PAGE_SIZE - 1))
 static long pagesize;
-#define FIBER_MACHINE_STACK_ALLOCATION_SIZE  (0x10000)
-#endif
+
+ #if SIZEOF_VOIDP==8
+  #define FIBER_MACHINE_STACK_ALLOCATION_SIZE  (0x20000)
+ #else
+  #define FIBER_MACHINE_STACK_ALLOCATION_SIZE  (0x10000)
+ #endif
+#endif /*FIBER_USE_NATIVE*/
 
 #define CAPTURE_JUST_VALID_VM_STACK 1
 
@@ -103,6 +108,12 @@ typedef struct rb_fiber_struct {
     enum fiber_status status;
     struct rb_fiber_struct *prev_fiber;
     struct rb_fiber_struct *next_fiber;
+    /* If a fiber invokes "transfer",
+     * then this fiber can't "resume" any more after that.
+     * You shouldn't mix "transfer" and "resume".
+     */
+    int transfered;
+
 #if FIBER_USE_NATIVE
 #ifdef _WIN32
     void *fib_handle;
@@ -324,6 +335,17 @@ fiber_memsize(const void *ptr)
     return size;
 }
 
+VALUE
+rb_obj_is_fiber(VALUE obj)
+{
+    if (rb_typeddata_is_kind_of(obj, &fiber_data_type)) {
+	return Qtrue;
+    }
+    else {
+	return Qfalse;
+    }
+}
+
 static void
 cont_save_machine_stack(rb_thread_t *th, rb_context_t *cont)
 {
@@ -448,7 +470,7 @@ cont_capture(volatile int *stat)
     }
     else {
 	*stat = 0;
-	return cont->self;
+	return contval;
     }
 }
 
@@ -670,10 +692,9 @@ cont_restore_1(rb_context_t *cont)
     }
 #endif
     if (cont->machine_stack_src) {
-	size_t i;
 	FLUSH_REGISTER_WINDOWS;
-	for (i = 0; i < cont->machine_stack_size; i++)
-	    cont->machine_stack_src[i] = cont->machine_stack[i];
+	MEMCPY(cont->machine_stack_src, cont->machine_stack,
+		VALUE, cont->machine_stack_size);
     }
 
 #ifdef __ia64
@@ -743,7 +764,7 @@ cont_restore_0(rb_context_t *cont, VALUE *addr_in_prev_frame)
 	    if (&space[0] > end) {
 # ifdef HAVE_ALLOCA
 		volatile VALUE *sp = ALLOCA_N(VALUE, &space[0] - end);
-		(void)sp;
+		space[0] = *sp;
 # else
 		cont_restore_0(cont, &space[0]);
 # endif
@@ -759,7 +780,7 @@ cont_restore_0(rb_context_t *cont, VALUE *addr_in_prev_frame)
 	    if (&space[STACK_PAD_SIZE] < end) {
 # ifdef HAVE_ALLOCA
 		volatile VALUE *sp = ALLOCA_N(VALUE, end - &space[STACK_PAD_SIZE]);
-		(void)sp;
+		space[0] = *sp;
 # else
 		cont_restore_0(cont, &space[STACK_PAD_SIZE-1]);
 # endif
@@ -1077,20 +1098,19 @@ return_fiber(void)
 {
     rb_fiber_t *fib;
     VALUE curr = rb_fiber_current();
+    VALUE prev;
     GetFiberPtr(curr, fib);
 
-    if (fib->prev == Qnil) {
-	rb_thread_t *th = GET_THREAD();
+    prev = fib->prev;
+    if (NIL_P(prev)) {
+	const VALUE root_fiber = GET_THREAD()->root_fiber;
 
-	if (th->root_fiber != curr) {
-	    return th->root_fiber;
-	}
-	else {
+	if (root_fiber == curr) {
 	    rb_raise(rb_eFiberError, "can't yield from root fiber");
 	}
+	return root_fiber;
     }
     else {
-	VALUE prev = fib->prev;
 	fib->prev = Qnil;
 	return prev;
     }
@@ -1254,6 +1274,13 @@ fiber_switch(VALUE fibval, int argc, VALUE *argv, int is_resume)
     GetFiberPtr(fibval, fib);
     cont = &fib->cont;
 
+    if (th->fiber == fibval) {
+	/* ignore fiber context switch
+         * because destination fiber is same as current fiber
+	 */
+	return make_passing_arg(argc, argv);
+    }
+
     if (cont->saved_thread.self != th->self) {
 	rb_raise(rb_eFiberError, "fiber called across threads");
     }
@@ -1322,6 +1349,9 @@ rb_fiber_resume(VALUE fibval, int argc, VALUE *argv)
     if (fib->prev != Qnil || fib->cont.type == ROOT_FIBER_CONTEXT) {
 	rb_raise(rb_eFiberError, "double resume");
     }
+    if (fib->transfered != 0) {
+	rb_raise(rb_eFiberError, "cannot resume transferred Fiber");
+    }
 
     return fiber_switch(fibval, argc, argv, 1);
 }
@@ -1330,6 +1360,19 @@ VALUE
 rb_fiber_yield(int argc, VALUE *argv)
 {
     return rb_fiber_transfer(return_fiber(), argc, argv);
+}
+
+void
+rb_fiber_reset_root_local_storage(VALUE thval)
+{
+    rb_thread_t *th;
+    rb_fiber_t	*fib;
+
+    GetThreadPtr(thval, th);
+    if (th->root_fiber && th->root_fiber != th->fiber) {
+	GetFiberPtr(th->root_fiber, fib);
+	th->local_storage = fib->cont.saved_thread.local_storage;
+    }
 }
 
 /*
@@ -1387,11 +1430,41 @@ rb_fiber_m_resume(int argc, VALUE *argv, VALUE fib)
  *  You cannot resume a fiber that transferred control to another one.
  *  This will cause a double resume error. You need to transfer control
  *  back to this fiber before it can yield and resume.
+ *
+ *  Example:
+ *
+ *    fiber1 = Fiber.new do
+ *      puts "In Fiber 1"
+ *      Fiber.yield
+ *    end
+ *
+ *    fiber2 = Fiber.new do
+ *      puts "In Fiber 2"
+ *      fiber1.transfer
+ *      puts "Never see this message"
+ *    end
+ *
+ *    fiber3 = Fiber.new do
+ *      puts "In Fiber 3"
+ *    end
+ *
+ *    fiber2.resume
+ *    fiber3.resume
+ *
+ *    <em>produces</em>
+ *
+ *    In fiber 2
+ *    In fiber 1
+ *    In fiber 3
+ *
  */
 static VALUE
-rb_fiber_m_transfer(int argc, VALUE *argv, VALUE fib)
+rb_fiber_m_transfer(int argc, VALUE *argv, VALUE fibval)
 {
-    return rb_fiber_transfer(fib, argc, argv);
+    rb_fiber_t *fib;
+    GetFiberPtr(fibval, fib);
+    fib->transfered = 1;
+    return rb_fiber_transfer(fibval, argc, argv);
 }
 
 /*

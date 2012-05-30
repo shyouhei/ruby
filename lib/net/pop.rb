@@ -498,12 +498,12 @@ module Net
 
     # Seconds to wait until a connection is opened.
     # If the POP3 object cannot open a connection within this time,
-    # it raises a TimeoutError exception.
+    # it raises a Net::OpenTimeout exception.
     attr_accessor :open_timeout
 
     # Seconds to wait until reading one block (by one read(1) call).
     # If the POP3 object cannot complete a read() within this time,
-    # it raises a TimeoutError exception.
+    # it raises a Net::ReadTimeout exception.
     attr_reader :read_timeout
 
     # Set the read timeout.
@@ -542,7 +542,9 @@ module Net
 
     # internal method for Net::POP3.start
     def do_start(account, password) # :nodoc:
-      s = timeout(@open_timeout) { TCPSocket.open(@address, port) }
+      s = Timeout.timeout(@open_timeout, Net::OpenTimeout) do
+        TCPSocket.open(@address, port)
+      end
       if use_ssl?
         raise 'openssl library not installed' unless defined?(OpenSSL)
         context = OpenSSL::SSL::SSLContext.new

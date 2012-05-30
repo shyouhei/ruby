@@ -233,7 +233,7 @@ VALUE rsock_make_hostent(VALUE host, struct addrinfo *addr, VALUE (*ipaddr)(stru
 int rsock_revlookup_flag(VALUE revlookup, int *norevlookup);
 
 #ifdef HAVE_SYS_UN_H
-const char* rsock_unixpath(struct sockaddr_un *sockaddr, socklen_t len);
+VALUE rsock_unixpath_str(struct sockaddr_un *sockaddr, socklen_t len);
 VALUE rsock_unixaddr(struct sockaddr_un *sockaddr, socklen_t len);
 #endif
 
@@ -282,6 +282,7 @@ VALUE rsock_bsock_sendmsg_nonblock(int argc, VALUE *argv, VALUE sock);
 #if defined(HAVE_RECVMSG)
 VALUE rsock_bsock_recvmsg(int argc, VALUE *argv, VALUE sock);
 VALUE rsock_bsock_recvmsg_nonblock(int argc, VALUE *argv, VALUE sock);
+ssize_t rsock_recvmsg(int socket, struct msghdr *message, int flags);
 #else
 #define rsock_bsock_recvmsg rb_f_notimplement
 #define rsock_bsock_recvmsg_nonblock rb_f_notimplement

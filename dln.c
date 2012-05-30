@@ -228,7 +228,7 @@ load_header(int fd, struct exec *hdrp, long disp)
 #define RELOC_TARGET_SIZE(r)		((r)->r_length)
 #endif
 
-#if defined(sun) && defined(sparc)
+#if defined(__sun) && defined(__sparc)
 /* Sparc (Sun 4) macros */
 #  undef relocation_info
 #  define relocation_info reloc_info_sparc
@@ -530,7 +530,7 @@ reloc_undef(int no, struct undef *undef, struct reloc_arg *arg)
 {
     int datum;
     char *address;
-#if defined(sun) && defined(sparc)
+#if defined(__sun) && defined(__sparc)
     unsigned int mask = 0;
 #endif
 
@@ -539,7 +539,7 @@ reloc_undef(int no, struct undef *undef, struct reloc_arg *arg)
     datum = arg->value;
 
     if (R_PCREL(&(undef->reloc))) datum -= undef->base;
-#if defined(sun) && defined(sparc)
+#if defined(__sun) && defined(__sparc)
     datum += undef->reloc.r_addend;
     datum >>= R_RIGHTSHIFT(&(undef->reloc));
     mask = (1 << R_BITSIZE(&(undef->reloc))) - 1;
@@ -763,7 +763,7 @@ load_1(int fd, long disp, const char *need_init)
 	while (rel < rel_end) {
 	    char *address = (char*)(rel->r_address + block);
 	    long datum = 0;
-#if defined(sun) && defined(sparc)
+#if defined(__sun) && defined(__sparc)
 	    unsigned int mask = 0;
 #endif
 
@@ -798,7 +798,7 @@ load_1(int fd, long disp, const char *need_init)
 	    } /* end .. is static */
 	    if (R_PCREL(rel)) datum -= block;
 
-#if defined(sun) && defined(sparc)
+#if defined(__sun) && defined(__sparc)
 	    datum += rel->r_addend;
 	    datum >>= R_RIGHTSHIFT(rel);
 	    mask = (1 << R_BITSIZE(rel)) - 1;
@@ -1214,16 +1214,18 @@ rb_w32_check_imported(HMODULE ext, HMODULE mine)
     while (desc->Name) {
 	PIMAGE_THUNK_DATA pint = (PIMAGE_THUNK_DATA)((char *)ext + desc->Characteristics);
 	PIMAGE_THUNK_DATA piat = (PIMAGE_THUNK_DATA)((char *)ext + desc->FirstThunk);
-	while (piat->u1.Function) {
-	    PIMAGE_IMPORT_BY_NAME pii = (PIMAGE_IMPORT_BY_NAME)((char *)ext + (size_t)pint->u1.AddressOfData);
+	for (; piat->u1.Function; piat++, pint++) {
 	    static const char prefix[] = "rb_";
-	    const char *name = (const char *)pii->Name;
+	    PIMAGE_IMPORT_BY_NAME pii;
+	    const char *name;
+
+	    if (IMAGE_SNAP_BY_ORDINAL(pint->u1.Ordinal)) continue;
+	    pii = (PIMAGE_IMPORT_BY_NAME)((char *)ext + (size_t)pint->u1.AddressOfData);
+	    name = (const char *)pii->Name;
 	    if (strncmp(name, prefix, sizeof(prefix) - 1) == 0) {
 		FARPROC addr = GetProcAddress(mine, name);
 		if (addr) return (FARPROC)piat->u1.Function == addr;
 	    }
-	    piat++;
-	    pint++;
 	}
 	desc++;
     }
@@ -1316,13 +1318,28 @@ dln_load(const char *file)
 # define RTLD_GLOBAL 0
 #endif
 
+#ifdef __native_client__
+	char* p, *orig;
+        if (file[0] == '.' && file[1] == '/') file+=2;
+	orig = strdup(file);
+	for (p = file; *p; ++p) {
+	    if (*p == '/') *p = '_';
+	}
+#endif
 	/* Load file */
 	if ((handle = (void*)dlopen(file, RTLD_LAZY|RTLD_GLOBAL)) == NULL) {
+#ifdef __native_client__
+            free(orig);
+#endif
 	    error = dln_strerror();
 	    goto failed;
 	}
 
 	init_fct = (void(*)())(VALUE)dlsym(handle, buf);
+#ifdef __native_client__
+	strcpy(file, orig);
+	free(orig);
+#endif
 #if defined __SYMBIAN32__
 	if (init_fct == NULL) {
 	    init_fct = (void(*)())dlsym(handle, "1"); /* Some Symbian versions do not support symbol table in DLL, ordinal numbers only */

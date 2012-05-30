@@ -119,11 +119,11 @@ sign_bits(int base, const char *p)
 #define GETNTHARG(nth) \
     (((nth) >= argc) ? (rb_raise(rb_eArgError, "too few arguments"), 0) : argv[(nth)])
 
-#define GETNAMEARG(id, name, len) ( \
+#define GETNAMEARG(id, name, len, enc) ( \
     posarg > 0 ? \
-    (rb_raise(rb_eArgError, "named%.*s after unnumbered(%d)", (len), (name), posarg), 0) : \
+    (rb_enc_raise((enc), rb_eArgError, "named%.*s after unnumbered(%d)", (len), (name), posarg), 0) : \
     posarg == -1 ? \
-    (rb_raise(rb_eArgError, "named%.*s after numbered", (len), (name)), 0) :	\
+    (rb_enc_raise((enc), rb_eArgError, "named%.*s after numbered", (len), (name)), 0) :	\
     (posarg = -2, rb_hash_lookup2(get_hash(&hash, argc, argv), (id), Qundef)))
 
 #define GETNUM(n, val) \
@@ -566,6 +566,7 @@ rb_str_format(int argc, const VALUE *argv, VALUE fmt)
 	    {
 		const char *start = p;
 		char term = (*p == '<') ? '>' : '}';
+		int len;
 
 		for (; p < end && *p != term; ) {
 		    p += rb_enc_mbclen(p, end, enc);
@@ -573,14 +574,27 @@ rb_str_format(int argc, const VALUE *argv, VALUE fmt)
 		if (p >= end) {
 		    rb_raise(rb_eArgError, "malformed name - unmatched parenthesis");
 		}
-		if (id) {
-		    rb_raise(rb_eArgError, "name%.*s after <%s>",
-			     (int)(p - start + 1), start, rb_id2name(id));
+#if SIZEOF_INT < SIZEOF_SIZE_T
+		if ((size_t)(p - start) >= INT_MAX) {
+		    const int message_limit = 20;
+		    len = (int)(rb_enc_right_char_head(start, start + message_limit, p, enc) - start);
+		    rb_enc_raise(enc, rb_eArgError,
+				 "too long name (%"PRIdSIZE" bytes) - %.*s...%c",
+				 (size_t)(p - start - 2), len, start, term);
 		}
-		id = rb_intern3(start + 1, p - start - 1, enc);
-		nextvalue = GETNAMEARG(ID2SYM(id), start, (int)(p - start + 1));
+#endif
+		len = (int)(p - start + 1); /* including parenthesis */
+		if (id) {
+		    rb_enc_raise(enc, rb_eArgError, "named%.*s after <%s>",
+				 len, start, rb_id2name(id));
+		}
+		nextvalue = GETNAMEARG((id = rb_check_id_cstr(start + 1,
+							      len - 2 /* without parenthesis */,
+							      enc),
+					ID2SYM(id)),
+				       start, len, enc);
 		if (nextvalue == Qundef) {
-		    rb_raise(rb_eKeyError, "key%.*s not found", (int)(p - start + 1), start);
+		    rb_enc_raise(enc, rb_eKeyError, "key%.*s not found", len, start);
 		}
 		if (term == '}') goto format_s;
 		p++;
@@ -1132,6 +1146,11 @@ fmt_setup(char *buf, size_t size, int c, int flags, int width, int prec)
 #define BSD__hdtoa ruby_hdtoa
 #include "vsnprintf.c"
 
+typedef struct {
+    rb_printf_buffer base;
+    volatile VALUE value;
+} rb_printf_buffer_extra;
+
 static int
 ruby__sfvwrite(register rb_printf_buffer *fp, register struct __suio *uio)
 {
@@ -1158,24 +1177,70 @@ ruby__sfvwrite(register rb_printf_buffer *fp, register struct __suio *uio)
     return 0;
 }
 
+static char *
+ruby__sfvextra(rb_printf_buffer *fp, size_t valsize, void *valp, long *sz, int sign)
+{
+    VALUE value, result = (VALUE)fp->_bf._base;
+    rb_encoding *enc;
+    char *cp;
+
+    if (valsize != sizeof(VALUE)) return 0;
+    value = *(VALUE *)valp;
+    if (RBASIC(result)->klass) {
+	rb_raise(rb_eRuntimeError, "rb_vsprintf reentered");
+    }
+    if (sign == '+') {
+	value = rb_inspect(value);
+    }
+    else {
+	value = rb_obj_as_string(value);
+    }
+    enc = rb_enc_compatible(result, value);
+    if (enc) {
+	rb_enc_associate(result, enc);
+    }
+    else {
+	enc = rb_enc_get(result);
+	value = rb_str_conv_enc_opts(value, rb_enc_get(value), enc,
+				     ECONV_UNDEF_REPLACE|ECONV_INVALID_REPLACE,
+				     Qnil);
+	*(volatile VALUE *)valp = value;
+    }
+    StringValueCStr(value);
+    RSTRING_GETMEM(value, cp, *sz);
+    ((rb_printf_buffer_extra *)fp)->value = value;
+    return cp;
+}
+
 VALUE
 rb_enc_vsprintf(rb_encoding *enc, const char *fmt, va_list ap)
 {
-    rb_printf_buffer f;
+    rb_printf_buffer_extra buffer;
+#define f buffer.base
     VALUE result;
 
     f._flags = __SWR | __SSTR;
     f._bf._size = 0;
     f._w = 120;
     result = rb_str_buf_new(f._w);
-    if (enc) rb_enc_associate(result, enc);
+    if (enc) {
+	if (rb_enc_mbminlen(enc) > 1) {
+	    /* the implementation deeply depends on plain char */
+	    rb_raise(rb_eArgError, "cannot construct wchar_t based encoding string: %s",
+		     rb_enc_name(enc));
+	}
+	rb_enc_associate(result, enc);
+    }
     f._bf._base = (unsigned char *)result;
     f._p = (unsigned char *)RSTRING_PTR(result);
     RBASIC(result)->klass = 0;
     f.vwrite = ruby__sfvwrite;
+    f.vextra = ruby__sfvextra;
+    buffer.value = 0;
     BSD_vfprintf(&f, fmt, ap);
     RBASIC(result)->klass = rb_cString;
     rb_str_resize(result, (char *)f._p - RSTRING_PTR(result));
+#undef f
 
     return result;
 }
@@ -1215,7 +1280,8 @@ rb_sprintf(const char *format, ...)
 VALUE
 rb_str_vcatf(VALUE str, const char *fmt, va_list ap)
 {
-    rb_printf_buffer f;
+    rb_printf_buffer_extra buffer;
+#define f buffer.base
     VALUE klass;
 
     StringValue(str);
@@ -1228,9 +1294,12 @@ rb_str_vcatf(VALUE str, const char *fmt, va_list ap)
     klass = RBASIC(str)->klass;
     RBASIC(str)->klass = 0;
     f.vwrite = ruby__sfvwrite;
+    f.vextra = ruby__sfvextra;
+    buffer.value = 0;
     BSD_vfprintf(&f, fmt, ap);
     RBASIC(str)->klass = klass;
     rb_str_resize(str, (char *)f._p - RSTRING_PTR(str));
+#undef f
 
     return str;
 }

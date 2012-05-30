@@ -57,9 +57,10 @@ class TC_OpenStruct < Test::Unit::TestCase
     o.a = 'a'
     assert_respond_to(o, :a)
     assert_respond_to(o, :a=)
-    o.delete_field :a
+    a = o.delete_field :a
     assert_not_respond_to(o, :a, bug)
     assert_not_respond_to(o, :a=, bug)
+    assert_equal(a, 'a')
   end
 
   def test_method_missing_handles_square_bracket_equals
@@ -72,4 +73,16 @@ class TC_OpenStruct < Test::Unit::TestCase
     assert_raise(NoMethodError) { o[:foo] }
   end
 
+  def test_to_h
+    h = {name: "John Smith", age: 70, pension: 300}
+    os = OpenStruct.new(h)
+    to_h = os.to_h
+    assert_equal(h, to_h)
+
+    to_h[:age] = 71
+    assert_equal(70, os.age)
+    assert_equal(70, h[:age])
+
+    assert_equal(h, OpenStruct.new("name" => "John Smith", "age" => 70, pension: 300).to_h)
+  end
 end

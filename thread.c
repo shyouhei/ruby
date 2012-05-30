@@ -733,7 +733,7 @@ thread_join(rb_thread_t *target_th, double delay)
 	if (FIXNUM_P(err)) {
 	    /* */
 	}
-	else if (TYPE(target_th->errinfo) == T_NODE) {
+	else if (RB_TYPE_P(target_th->errinfo, T_NODE)) {
 	    rb_exc_raise(rb_vm_make_jump_tag_but_local_jump(
 		GET_THROWOBJ_STATE(err), GET_THROWOBJ_VAL(err)));
 	}
@@ -1021,8 +1021,10 @@ rb_thread_schedule_limits(unsigned long limits_us)
 
 	if (th->running_time_us >= limits_us) {
 	    thread_debug("rb_thread_schedule/switch start\n");
+	    th->yielding = 1;
 	    RB_GC_SAVE_MACHINE_CONTEXT(th);
 	    gvl_yield(th->vm, th);
+	    th->yielding = 0;
 	    rb_thread_set_current(th);
 	    thread_debug("rb_thread_schedule/switch done\n");
 	}
@@ -1312,7 +1314,7 @@ rb_threadptr_execute_interrupts_common(rb_thread_t *th)
 	}
 
 	if (timer_interrupt) {
-	    unsigned long limits_us = 250 * 1000;
+	    unsigned long limits_us = TIME_QUANTUM_USEC;
 
 	    if (th->priority > 0)
 		limits_us <<= th->priority;
@@ -2058,9 +2060,9 @@ rb_thread_local_aref(VALUE thread, ID id)
  *  call-seq:
  *      thr[sym]   -> obj or nil
  *
- *  Attribute Reference---Returns the value of a thread-local variable, using
- *  either a symbol or a string name. If the specified variable does not exist,
- *  returns <code>nil</code>.
+ *  Attribute Reference---Returns the value of a fiber-local variable (current thread's root fiber
+ *  if not explicitely inside a Fiber), using either a symbol or a string name.
+ *  If the specified variable does not exist, returns <code>nil</code>.
  *
  *     [
  *       Thread.new { Thread.current["name"] = "A" },
@@ -2111,7 +2113,7 @@ rb_thread_local_aset(VALUE thread, ID id, VALUE val)
  *  call-seq:
  *      thr[sym] = obj   -> obj
  *
- *  Attribute Assignment---Sets or creates the value of a thread-local variable,
+ *  Attribute Assignment---Sets or creates the value of a fiber-local variable,
  *  using either a symbol or a string. See also <code>Thread#[]</code>.
  */
 
@@ -2126,7 +2128,7 @@ rb_thread_aset(VALUE self, VALUE id, VALUE val)
  *     thr.key?(sym)   -> true or false
  *
  *  Returns <code>true</code> if the given string (or symbol) exists as a
- *  thread-local variable.
+ *  fiber-local variable.
  *
  *     me = Thread.current
  *     me[:oliver] = "a"
@@ -2179,7 +2181,7 @@ rb_thread_alone(void)
  *  call-seq:
  *     thr.keys   -> array
  *
- *  Returns an an array of the names of the thread-local variables (as Symbols).
+ *  Returns an an array of the names of the fiber-local variables (as Symbols).
  *
  *     thr = Thread.new do
  *       Thread.current[:cat] = 'meow'
@@ -2418,6 +2420,11 @@ rb_fd_dup(rb_fdset_t *dst, const rb_fdset_t *src)
     memcpy(dst->fdset, src->fdset, size);
 }
 
+#ifdef __native_client__
+int select(int nfds, fd_set *readfds, fd_set *writefds,
+           fd_set *exceptfds, struct timeval *timeout);
+#endif
+
 int
 rb_fd_select(int n, rb_fdset_t *readfds, rb_fdset_t *writefds, rb_fdset_t *exceptfds, struct timeval *timeout)
 {
@@ -2471,7 +2478,7 @@ rb_fd_rcopy(fd_set *dst, rb_fdset_t *src)
 
     /* we assume src is the result of select() with dst, so dst should be
      * larger or equal than src. */
-    if (max > FD_SETSIZE || max > dst->fd_count) {
+    if (max > FD_SETSIZE || (UINT)max > dst->fd_count) {
 	rb_raise(rb_eArgError, "too large fdsets");
     }
 
@@ -2570,7 +2577,7 @@ do_select(int n, rb_fdset_t *read, rb_fdset_t *write, rb_fdset_t *except,
 	    if (timeout) {
 		double d = limit - timeofday();
 
-		wait_rest.tv_sec = (unsigned int)d;
+		wait_rest.tv_sec = (time_t)d;
 		wait_rest.tv_usec = (int)((d-(double)wait_rest.tv_sec)*1e6);
 		if (wait_rest.tv_sec < 0)  wait_rest.tv_sec = 0;
 		if (wait_rest.tv_usec < 0) wait_rest.tv_usec = 0;
@@ -2702,7 +2709,7 @@ rb_thread_fd_select(int max, rb_fdset_t * read, rb_fdset_t * write, rb_fdset_t *
  * one we know of that supports using poll() in all places select()
  * would work.
  */
-#if defined(HAVE_POLL) && defined(linux)
+#if defined(HAVE_POLL) && defined(__linux__)
 #  define USE_POLL
 #endif
 
@@ -2933,7 +2940,9 @@ timer_thread_function(void *arg)
     rb_vm_t *vm = GET_VM(); /* TODO: fix me for Multi-VM */
 
     /* for time slice */
-    RUBY_VM_SET_TIMER_INTERRUPT(vm->running_thread);
+    if (!vm->running_thread->yielding) {
+	RUBY_VM_SET_TIMER_INTERRUPT(vm->running_thread);
+    }
 
     /* check signal */
     rb_threadptr_check_signal(vm->main_thread);
@@ -3523,7 +3532,6 @@ static const char *
 rb_mutex_unlock_th(rb_mutex_t *mutex, rb_thread_t volatile *th)
 {
     const char *err = NULL;
-    rb_mutex_t *th_mutex;
 
     native_mutex_lock(&mutex->lock);
 
@@ -3542,21 +3550,11 @@ rb_mutex_unlock_th(rb_mutex_t *mutex, rb_thread_t volatile *th)
     native_mutex_unlock(&mutex->lock);
 
     if (!err) {
-	th_mutex = th->keeping_mutexes;
-	if (th_mutex == mutex) {
-	    th->keeping_mutexes = mutex->next_mutex;
+	rb_mutex_t *volatile *th_mutex = &th->keeping_mutexes;
+	while (*th_mutex != mutex) {
+	    th_mutex = &(*th_mutex)->next_mutex;
 	}
-	else {
-	    while (1) {
-		rb_mutex_t *tmp_mutex;
-		tmp_mutex = th_mutex->next_mutex;
-		if (tmp_mutex == mutex) {
-		    th_mutex->next_mutex = tmp_mutex->next_mutex;
-		    break;
-		}
-		th_mutex = tmp_mutex;
-	    }
-	}
+	*th_mutex = mutex->next_mutex;
 	mutex->next_mutex = NULL;
     }
 
@@ -3685,6 +3683,21 @@ barrier_alloc(VALUE klass)
 }
 
 #define GetBarrierPtr(obj) ((VALUE)rb_check_typeddata((obj), &barrier_data_type))
+#define BARRIER_WAITING_MASK (FL_USER0|FL_USER1|FL_USER2|FL_USER3|FL_USER4|FL_USER5|FL_USER6|FL_USER7|FL_USER8|FL_USER9|FL_USER10|FL_USER11|FL_USER12|FL_USER13|FL_USER14|FL_USER15|FL_USER16|FL_USER17|FL_USER18|FL_USER19)
+#define BARRIER_WAITING_SHIFT (FL_USHIFT)
+#define rb_barrier_waiting(b) (int)((RBASIC(b)->flags&BARRIER_WAITING_MASK)>>BARRIER_WAITING_SHIFT)
+#define rb_barrier_waiting_inc(b) do { \
+    int w = rb_barrier_waiting(b); \
+    w++; \
+    RBASIC(b)->flags &= ~BARRIER_WAITING_MASK; \
+    RBASIC(b)->flags |= ((VALUE)w << BARRIER_WAITING_SHIFT);	\
+} while (0)
+#define rb_barrier_waiting_dec(b) do { \
+    int w = rb_barrier_waiting(b); \
+    w--; \
+    RBASIC(b)->flags &= ~BARRIER_WAITING_MASK; \
+    RBASIC(b)->flags |= ((VALUE)w << BARRIER_WAITING_SHIFT); \
+} while (0)
 
 VALUE
 rb_barrier_new(void)
@@ -3694,6 +3707,14 @@ rb_barrier_new(void)
     return barrier;
 }
 
+/*
+ * Wait a barrier.
+ *
+ * Returns
+ *  true:  acquired the barrier
+ *  false: the barrier was destroyed and no other threads waiting
+ *  nil:   the barrier was destroyed but still in use
+ */
 VALUE
 rb_barrier_wait(VALUE self)
 {
@@ -3702,25 +3723,36 @@ rb_barrier_wait(VALUE self)
 
     if (!mutex) return Qfalse;
     GetMutexPtr(mutex, m);
-    if (m->th == GET_THREAD()) return Qfalse;
+    if (m->th == GET_THREAD()) return Qnil;
+    rb_barrier_waiting_inc(self);
     rb_mutex_lock(mutex);
+    rb_barrier_waiting_dec(self);
     if (DATA_PTR(self)) return Qtrue;
     rb_mutex_unlock(mutex);
-    return Qfalse;
+    return rb_barrier_waiting(self) > 0 ? Qnil : Qfalse;
 }
 
+/*
+ * Release a barrrier, and return true if it has waiting threads.
+ */
 VALUE
 rb_barrier_release(VALUE self)
 {
-    return rb_mutex_unlock(GetBarrierPtr(self));
+    VALUE mutex = GetBarrierPtr(self);
+    rb_mutex_unlock(mutex);
+    return rb_barrier_waiting(self) > 0 ? Qtrue : Qfalse;
 }
 
+/*
+ * Release and destroy a barrrier, and return true if it has waiting threads.
+ */
 VALUE
 rb_barrier_destroy(VALUE self)
 {
     VALUE mutex = GetBarrierPtr(self);
     DATA_PTR(self) = 0;
-    return rb_mutex_unlock(mutex);
+    rb_mutex_unlock(mutex);
+    return rb_barrier_waiting(self) > 0 ? Qtrue : Qfalse;
 }
 
 /* variables for recursive traversals */
@@ -4708,7 +4740,7 @@ rb_check_deadlock(rb_vm_t *vm)
     if (!found) {
 	VALUE argv[2];
 	argv[0] = rb_eFatal;
-	argv[1] = rb_str_new2("deadlock detected");
+	argv[1] = rb_str_new2("No live threads left. Deadlock?");
 #ifdef DEBUG_DEADLOCK_CHECK
 	printf("%d %d %p %p\n", vm->living_threads->num_entries, vm->sleeper, GET_THREAD(), vm->main_thread);
 	st_foreach(vm->living_threads, debug_i, (st_data_t)0);
@@ -4754,4 +4786,3 @@ rb_reset_coverages(void)
     GET_VM()->coverages = Qfalse;
     rb_remove_event_hook(update_coverage);
 }
-

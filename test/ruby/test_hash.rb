@@ -77,7 +77,7 @@ class TestHash < Test::Unit::TestCase
   # From rubicon
 
   def setup
-    @cls = Hash
+    @cls ||= Hash
     @h = @cls[
       1 => 'one', 2 => 'two', 3 => 'three',
       self => 'self', true => 'true', nil => 'nil',
@@ -390,27 +390,27 @@ class TestHash < Test::Unit::TestCase
   end
 
   def test_key2?
-    assert(!@cls[].key?(1))
-    assert(!@cls[].key?(nil))
-    assert(@h.key?(nil))
-    assert(@h.key?(1))
-    assert(!@h.key?('gumby'))
+    assert_not_send([@cls[], :key?, 1])
+    assert_not_send([@cls[], :key?, nil])
+    assert_send([@h, :key?, nil])
+    assert_send([@h, :key?, 1])
+    assert_not_send([@h, :key?, 'gumby'])
   end
 
   def test_value?
-    assert(!@cls[].value?(1))
-    assert(!@cls[].value?(nil))
-    assert(@h.value?('one'))
-    assert(@h.value?(nil))
-    assert(!@h.value?('gumby'))
+    assert_not_send([@cls[], :value?, 1])
+    assert_not_send([@cls[], :value?, nil])
+    assert_send([@h, :value?, 'one'])
+    assert_send([@h, :value?, nil])
+    assert_not_send([@h, :value?, 'gumby'])
   end
 
   def test_include?
-    assert(!@cls[].include?(1))
-    assert(!@cls[].include?(nil))
-    assert(@h.include?(nil))
-    assert(@h.include?(1))
-    assert(!@h.include?('gumby'))
+    assert_not_send([@cls[], :include?, 1])
+    assert_not_send([@cls[], :include?, nil])
+    assert_send([@h, :include?, nil])
+    assert_send([@h, :include?, 1])
+    assert_not_send([@h, :include?, 'gumby'])
   end
 
   def test_key
@@ -457,11 +457,11 @@ class TestHash < Test::Unit::TestCase
   end
 
   def test_key?
-    assert(!@cls[].key?(1))
-    assert(!@cls[].key?(nil))
-    assert(@h.key?(nil))
-    assert(@h.key?(1))
-    assert(!@h.key?('gumby'))
+    assert_not_send([@cls[], :key?, 1])
+    assert_not_send([@cls[], :key?, nil])
+    assert_send([@h, :key?, nil])
+    assert_send([@h, :key?, 1])
+    assert_not_send([@h, :key?, 'gumby'])
   end
 
   def test_keys
@@ -480,11 +480,11 @@ class TestHash < Test::Unit::TestCase
   end
 
   def test_member?
-    assert(!@cls[].member?(1))
-    assert(!@cls[].member?(nil))
-    assert(@h.member?(nil))
-    assert(@h.member?(1))
-    assert(!@h.member?('gumby'))
+    assert_not_send([@cls[], :member?, 1])
+    assert_not_send([@cls[], :member?, nil])
+    assert_send([@h, :member?, nil])
+    assert_send([@h, :member?, 1])
+    assert_not_send([@h, :member?, 'gumby'])
   end
 
   def test_rehash
@@ -555,7 +555,7 @@ class TestHash < Test::Unit::TestCase
 
     @h.length.times {
       k, v = h.shift
-      assert(@h.key?(k))
+      assert_send([@h, :key?, k])
       assert_equal(@h[k], v)
     }
 
@@ -631,6 +631,20 @@ class TestHash < Test::Unit::TestCase
   def test_to_hash
     h = @h.to_hash
     assert_equal(@h, h)
+    assert_instance_of(@cls, h)
+  end
+
+  def test_to_h
+    h = @h.to_h
+    assert_equal(@h, h)
+    assert_instance_of(Hash, h)
+  end
+
+  def test_nil_to_h
+    h = nil.to_h
+    assert_equal({}, h)
+    assert_nil(h.default)
+    assert_nil(h.default_proc)
   end
 
   def test_to_s
@@ -662,11 +676,11 @@ class TestHash < Test::Unit::TestCase
   end
 
   def test_value2?
-    assert(!@cls[].value?(1))
-    assert(!@cls[].value?(nil))
-    assert(@h.value?(nil))
-    assert(@h.value?('one'))
-    assert(!@h.value?('gumby'))
+    assert_not_send([@cls[], :value?, 1])
+    assert_not_send([@cls[], :value?, nil])
+    assert_send([@h, :value?, nil])
+    assert_send([@h, :value?, 'one'])
+    assert_not_send([@h, :value?, 'gumby'])
   end
 
   def test_values
@@ -718,6 +732,10 @@ class TestHash < Test::Unit::TestCase
   def test_default_proc
     h = Hash.new {|hh, k| hh + k + "baz" }
     assert_equal("foobarbaz", h.default_proc.call("foo", "bar"))
+    assert_nil(h.default_proc = nil)
+    assert_nil(h.default_proc)
+    h.default_proc = ->(h, k){ true }
+    assert(h[:nope])
     h = {}
     assert_nil(h.default_proc)
   end
@@ -737,6 +755,14 @@ class TestHash < Test::Unit::TestCase
 
     h = {1=>2}
     h.each { assert_equal([1, 2], h.shift) }
+  end
+
+  def test_shift_none
+    h = Hash.new {|hh, k| "foo"}
+    def h.default(k = nil)
+      super.upcase
+    end
+    assert_equal("FOO", h.shift)
   end
 
   def test_reject_bang2
@@ -798,13 +824,13 @@ class TestHash < Test::Unit::TestCase
   end
 
   def test_eql
-    assert(!({}.eql?(0)))
+    assert_not_send([{}, :eql?, 0])
     o = Object.new
     def o.to_hash; {}; end
     def o.eql?(x); true; end
-    assert({}.eql?(o))
+    assert_send([{}, :eql?, o])
     def o.eql?(x); false; end
-    assert(!({}.eql?(o)))
+    assert_not_send([{}, :eql?, o])
   end
 
   def test_hash2
@@ -918,6 +944,16 @@ class TestHash < Test::Unit::TestCase
     feature4262 = '[ruby-core:34334]'
     [{1=>2}, {123=>"abc"}].each do |h|
       assert_not_equal(h.hash, h.invert.hash, feature4262)
+    end
+  end
+
+  class TestSubHash < TestHash
+    class SubHash < Hash
+    end
+
+    def setup
+      @cls = SubHash
+      super
     end
   end
 end

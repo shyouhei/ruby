@@ -278,6 +278,13 @@ class TestTime < Test::Unit::TestCase
     assert_equal(29700, t2.utc_offset, bug)
   end
 
+  def test_marshal_to_s
+    t1 = Time.new(2011,11,8, 0,42,25, 9*3600)
+    t2 = Time.at(Marshal.load(Marshal.dump(t1)))
+    assert_equal("2011-11-08 00:42:25 +0900", t2.to_s,
+      "[ruby-dev:44827] [Bug #5586]")
+  end
+
   # Sat Jan 01 00:00:00 UTC 2000
   T2000 = Time.at(946684800).gmtime
 
@@ -542,7 +549,9 @@ class TestTime < Test::Unit::TestCase
 
     t = Time.mktime(2000, 1, 1)
     assert_equal("Sat", t.strftime("%a"))
+  end
 
+  def test_strftime_subsec
     t = Time.at(946684800, 123456.789)
     assert_equal("123", t.strftime("%3N"))
     assert_equal("123456", t.strftime("%6N"))
@@ -552,12 +561,16 @@ class TestTime < Test::Unit::TestCase
     assert_equal("000", t.strftime("%3S"))
     assert_equal("946684800", t.strftime("%s"))
     assert_equal("946684800", t.utc.strftime("%s"))
+  end
 
+  def test_strftime_zone
     t = Time.mktime(2001, 10, 1)
     assert_equal("2001-10-01", t.strftime("%F"))
     assert_equal(Encoding::UTF_8, t.strftime("\u3042%Z").encoding)
     assert_equal(true, t.strftime("\u3042%Z").valid_encoding?)
+  end
 
+  def test_strftime_flags
     t = Time.mktime(2001, 10, 1, 2, 0, 0)
     assert_equal("01", t.strftime("%d"))
     assert_equal("01", t.strftime("%0d"))
@@ -598,7 +611,14 @@ class TestTime < Test::Unit::TestCase
     assert_equal(" 2", t.strftime("%l"))
     assert_equal("02", t.strftime("%0l"))
     assert_equal(" 2", t.strftime("%_l"))
+  end
 
+  def test_strftime_invalid_flags
+    t = Time.mktime(2001, 10, 1, 2, 0, 0)
+    assert_equal("%4^p", t.strftime("%4^p"), 'prec after flag')
+  end
+
+  def test_strftime_year
     t = Time.utc(1,1,4)
     assert_equal("0001", t.strftime("%Y"))
     assert_equal("0001", t.strftime("%G"))
@@ -610,12 +630,16 @@ class TestTime < Test::Unit::TestCase
     t = Time.utc(-1,1,4)
     assert_equal("-0001", t.strftime("%Y"))
     assert_equal("-0001", t.strftime("%G"))
+  end
 
+  def test_strftime_weeknum
     # [ruby-dev:37155]
     t = Time.mktime(1970, 1, 18)
     assert_equal("0", t.strftime("%w"))
     assert_equal("7", t.strftime("%u"))
+  end
 
+  def test_strftime_ctrlchar
     # [ruby-dev:37160]
     assert_equal("\t", T2000.strftime("%t"))
     assert_equal("\t", T2000.strftime("%0t"))
@@ -627,7 +651,9 @@ class TestTime < Test::Unit::TestCase
     assert_equal("\n", T2000.strftime("%1n"))
     assert_equal("  \n", T2000.strftime("%3n"))
     assert_equal("00\n", T2000.strftime("%03n"))
+  end
 
+  def test_strftime_weekflags
     # [ruby-dev:37162]
     assert_equal("SAT", T2000.strftime("%#a"))
     assert_equal("SATURDAY", T2000.strftime("%#A"))
@@ -635,7 +661,9 @@ class TestTime < Test::Unit::TestCase
     assert_equal("JANUARY", T2000.strftime("%#B"))
     assert_equal("JAN", T2000.strftime("%#h"))
     assert_equal("FRIDAY", Time.local(2008,1,4).strftime("%#A"))
+  end
 
+  def test_strftime_rational
     t = Time.utc(2000,3,14, 6,53,"58.979323846".to_r) # Pi Day
     assert_equal("03/14/2000  6:53:58.97932384600000000000000000000",
                  t.strftime("%m/%d/%Y %l:%M:%S.%29N"))
@@ -655,12 +683,85 @@ class TestTime < Test::Unit::TestCase
                  t.strftime("%m/%d/%Y %l:%M:%S.%9N"))
     assert_equal("03/14/1592  6:53:58.97932384",
                  t.strftime("%m/%d/%Y %l:%M:%S.%8N"))
+  end
 
+  def test_strftime_far_future
     # [ruby-core:33985]
     assert_equal("3000000000", Time.at(3000000000).strftime('%s'))
+  end
 
+  def test_strftime_too_wide
     bug4457 = '[ruby-dev:43285]'
     assert_raise(Errno::ERANGE, bug4457) {Time.now.strftime('%8192z')}
+  end
+
+  def test_strfimte_zoneoffset
+    t = T2000.getlocal("+09:00:00")
+    assert_equal("+0900", t.strftime("%z"))
+    assert_equal("+09:00", t.strftime("%:z"))
+    assert_equal("+09:00:00", t.strftime("%::z"))
+    assert_equal("+09", t.strftime("%:::z"))
+
+    t = T2000.getlocal("+09:00:01")
+    assert_equal("+0900", t.strftime("%z"))
+    assert_equal("+09:00", t.strftime("%:z"))
+    assert_equal("+09:00:01", t.strftime("%::z"))
+    assert_equal("+09:00:01", t.strftime("%:::z"))
+  end
+
+  def test_strftime_padding
+    bug4458 = '[ruby-dev:43287]'
+    t = T2000.getlocal("+09:00")
+    assert_equal("+0900", t.strftime("%z"))
+    assert_equal("+09:00", t.strftime("%:z"))
+    assert_equal("      +900", t.strftime("%_10z"), bug4458)
+    assert_equal("+000000900", t.strftime("%10z"), bug4458)
+    assert_equal("     +9:00", t.strftime("%_10:z"), bug4458)
+    assert_equal("+000009:00", t.strftime("%10:z"), bug4458)
+    assert_equal("  +9:00:00", t.strftime("%_10::z"), bug4458)
+    assert_equal("+009:00:00", t.strftime("%10::z"), bug4458)
+    assert_equal("+000000009", t.strftime("%10:::z"))
+    t = T2000.getlocal("-05:00")
+    assert_equal("-0500", t.strftime("%z"))
+    assert_equal("-05:00", t.strftime("%:z"))
+    assert_equal("      -500", t.strftime("%_10z"), bug4458)
+    assert_equal("-000000500", t.strftime("%10z"), bug4458)
+    assert_equal("     -5:00", t.strftime("%_10:z"), bug4458)
+    assert_equal("-000005:00", t.strftime("%10:z"), bug4458)
+    assert_equal("  -5:00:00", t.strftime("%_10::z"), bug4458)
+    assert_equal("-005:00:00", t.strftime("%10::z"), bug4458)
+    assert_equal("-000000005", t.strftime("%10:::z"))
+
+    bug6323 = '[ruby-core:44447]'
+    t = T2000.getlocal("+00:36")
+    assert_equal("      +036", t.strftime("%_10z"), bug6323)
+    assert_equal("+000000036", t.strftime("%10z"), bug6323)
+    assert_equal("     +0:36", t.strftime("%_10:z"), bug6323)
+    assert_equal("+000000:36", t.strftime("%10:z"), bug6323)
+    assert_equal("  +0:36:00", t.strftime("%_10::z"), bug6323)
+    assert_equal("+000:36:00", t.strftime("%10::z"), bug6323)
+    assert_equal("+000000:36", t.strftime("%10:::z"))
+    t = T2000.getlocal("-00:55")
+    assert_equal("      -055", t.strftime("%_10z"), bug6323)
+    assert_equal("-000000055", t.strftime("%10z"), bug6323)
+    assert_equal("     -0:55", t.strftime("%_10:z"), bug6323)
+    assert_equal("-000000:55", t.strftime("%10:z"), bug6323)
+    assert_equal("  -0:55:00", t.strftime("%_10::z"), bug6323)
+    assert_equal("-000:55:00", t.strftime("%10::z"), bug6323)
+    assert_equal("-000000:55", t.strftime("%10:::z"))
+  end
+
+  def test_strftime_invalid_modifier
+    t = T2000.getlocal("+09:00")
+    assert_equal("%:y", t.strftime("%:y"), 'invalid conversion after : modifier')
+    assert_equal("%:0z", t.strftime("%:0z"), 'flag after : modifier')
+    assert_equal("%:10z", t.strftime("%:10z"), 'prec after : modifier')
+    assert_equal("%Ob", t.strftime("%Ob"), 'invalid conversion after locale modifier')
+    assert_equal("%Eb", t.strftime("%Eb"), 'invalid conversion after locale modifier')
+    assert_equal("%O0y", t.strftime("%O0y"), 'flag after locale modifier')
+    assert_equal("%E0y", t.strftime("%E0y"), 'flag after locale modifier')
+    assert_equal("%O10y", t.strftime("%O10y"), 'prec after locale modifier')
+    assert_equal("%E10y", t.strftime("%E10y"), 'prec after locale modifier')
   end
 
   def test_delegate
@@ -736,5 +837,12 @@ class TestTime < Test::Unit::TestCase
       end.call
     end
     assert_equal("Insecure: can't modify #{tc}", error.message, bug5036)
+  end
+
+  def test_sec_str
+    bug6193 = '[ruby-core:43569]'
+    t = nil
+    assert_nothing_raised(bug6193) {t = Time.new(2012, 1, 2, 3, 4, "5")}
+    assert_equal(Time.new(2012, 1, 2, 3, 4, 5), t, bug6193)
   end
 end

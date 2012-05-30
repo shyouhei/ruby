@@ -16,13 +16,14 @@ $stderr.reopen($stdout)
 error = ''
 
 srcdir = File.expand_path('..', File.dirname(__FILE__))
-`#{ruby} #{srcdir}/sample/test.rb`.each_line do |line|
+`#{ruby} #{srcdir}/sample/test.rb #{ARGV.join(' ')}`.each_line do |line|
   if line =~ /^end of test/
     print "\ntest succeeded\n"
     exit true
   end
   error << line if %r:^(sample/test.rb|not): =~ line
 end
+puts
 print error
 print "test failed\n"
 exit false

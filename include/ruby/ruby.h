@@ -36,6 +36,9 @@ extern "C" {
 #ifndef NOINLINE
 # define NOINLINE(x) x
 #endif
+#ifndef UNREACHABLE
+# define UNREACHABLE		/* unreachable */
+#endif
 
 #ifdef __GNUC__
 #define PRINTF_ARGS(decl, string_index, first_to_check) \
@@ -98,7 +101,7 @@ typedef unsigned LONG_LONG ID;
 # define SIZEOF_VALUE SIZEOF_LONG_LONG
 # define PRI_VALUE_PREFIX PRI_LL_PREFIX
 #else
-# error ---->> ruby requires sizeof(void*) == sizeof(long) to be compiled. <<----
+# error ---->> ruby requires sizeof(void*) == sizeof(long) or sizeof(LONG_LONG) to be compiled. <<----
 #endif
 
 typedef char ruby_check_sizeof_int[SIZEOF_INT == sizeof(int) ? 1 : -1];
@@ -117,18 +120,18 @@ typedef char ruby_check_sizeof_voidp[SIZEOF_VOIDP == sizeof(void*) ? 1 : -1];
 
 #if defined PRIdPTR && !defined PRI_VALUE_PREFIX
 #define PRIdVALUE PRIdPTR
-#define PRIiVALUE PRIiPTR
 #define PRIoVALUE PRIoPTR
 #define PRIuVALUE PRIuPTR
 #define PRIxVALUE PRIxPTR
 #define PRIXVALUE PRIXPTR
+#define PRIsVALUE PRIiPTR
 #else
 #define PRIdVALUE PRI_VALUE_PREFIX"d"
-#define PRIiVALUE PRI_VALUE_PREFIX"i"
 #define PRIoVALUE PRI_VALUE_PREFIX"o"
 #define PRIuVALUE PRI_VALUE_PREFIX"u"
 #define PRIxVALUE PRI_VALUE_PREFIX"x"
 #define PRIXVALUE PRI_VALUE_PREFIX"X"
+#define PRIsVALUE PRI_VALUE_PREFIX"i"
 #endif
 #ifndef PRI_VALUE_PREFIX
 # define PRI_VALUE_PREFIX ""
@@ -258,6 +261,22 @@ VALUE rb_ull2inum(unsigned LONG_LONG);
 # define SSIZET2NUM(v) INT2NUM(v)
 #endif
 
+#ifndef SIZE_MAX
+# if SIZEOF_SIZE_T > SIZEOF_LONG && defined(HAVE_LONG_LONG)
+#   define SIZE_MAX ULLONG_MAX
+#   define SIZE_MIN ULLONG_MIN
+# elif SIZEOF_SIZE_T == SIZEOF_LONG
+#   define SIZE_MAX ULONG_MAX
+#   define SIZE_MIN ULONG_MIN
+# elif SIZEOF_SIZE_T == SIZEOF_INT
+#   define SIZE_MAX UINT_MAX
+#   define SIZE_MIN UINT_MIN
+# else
+#   define SIZE_MAX USHRT_MAX
+#   define SIZE_MIN USHRT_MIN
+# endif
+#endif
+
 #ifndef SSIZE_MAX
 # if SIZEOF_SIZE_T > SIZEOF_LONG && defined(HAVE_LONG_LONG)
 #   define SSIZE_MAX LLONG_MAX
@@ -279,15 +298,16 @@ NORETURN(void rb_out_of_int(SIGNED_VALUE num));
 #endif
 
 #if SIZEOF_INT < SIZEOF_LONG
-#define rb_long2int_internal(n, i) \
-    int (i) = (int)(n); \
-    if ((long)(i) != (n)) rb_out_of_int(n)
-#ifdef __GNUC__
-#define rb_long2int(n) __extension__ ({long i2l_n = (n); rb_long2int_internal(i2l_n, i2l_i); i2l_i;})
-#else
 static inline int
-rb_long2int(long n) {rb_long2int_internal(n, i); return i;}
-#endif
+rb_long2int_inline(long n)
+{
+    int i = (int)n;
+    if ((long)i != n)
+	rb_out_of_int(n);
+
+    return i;
+}
+#define rb_long2int(n) rb_long2int_inline(n)
 #else
 #define rb_long2int(n) ((int)(n))
 #endif
@@ -319,7 +339,7 @@ rb_long2int(long n) {rb_long2int_internal(n, i); return i;}
 
 #define FIX2LONG(x) (long)RSHIFT((SIGNED_VALUE)(x),1)
 #define FIX2ULONG(x) ((((VALUE)(x))>>1)&LONG_MAX)
-#define FIXNUM_P(f) (((SIGNED_VALUE)(f))&FIXNUM_FLAG)
+#define FIXNUM_P(f) (((int)(SIGNED_VALUE)(f))&FIXNUM_FLAG)
 #define POSFIXABLE(f) ((f) < FIXNUM_MAX+1)
 #define NEGFIXABLE(f) ((f) >= FIXNUM_MIN)
 #define FIXABLE(f) (POSFIXABLE(f) && NEGFIXABLE(f))
@@ -485,59 +505,72 @@ void rb_set_errinfo(VALUE);
 
 SIGNED_VALUE rb_num2long(VALUE);
 VALUE rb_num2ulong(VALUE);
-#define NUM2LONG_internal(x) ((long)(FIXNUM_P(x) ? FIX2LONG(x) : rb_num2long(x)))
-#ifdef __GNUC__
-#define NUM2LONG(x) \
-    __extension__ ({VALUE num2long_x = (x); NUM2LONG_internal(num2long_x);})
-#else
 static inline long
-NUM2LONG(VALUE x)
+rb_num2long_inline(VALUE x)
 {
-    return NUM2LONG_internal(x);
+    if (FIXNUM_P(x))
+	return FIX2LONG(x);
+    else
+	return (long)rb_num2long(x);
 }
-#endif
-#define NUM2ULONG(x) rb_num2ulong((VALUE)(x))
+#define NUM2LONG(x) rb_num2long_inline(x)
+#define NUM2ULONG(x) rb_num2ulong(x)
 #if SIZEOF_INT < SIZEOF_LONG
 long rb_num2int(VALUE);
 long rb_fix2int(VALUE);
 #define FIX2INT(x) ((int)rb_fix2int((VALUE)(x)))
-#define NUM2INT_internal(x) (FIXNUM_P(x) ? FIX2INT(x) : (int)rb_num2int(x))
-#ifdef __GNUC__
-#define NUM2INT(x) \
-    __extension__ ({VALUE num2int_x = (x); NUM2INT_internal(num2int_x);})
-#else
+
 static inline int
-NUM2INT(VALUE x)
+rb_num2int_inline(VALUE x)
 {
-    return NUM2INT_internal(x);
+    if (FIXNUM_P(x))
+	return FIX2INT(x);
+    else
+	return (int)rb_num2int(x);
 }
-#endif
+#define NUM2INT(x) rb_num2int_inline(x)
+
 unsigned long rb_num2uint(VALUE);
 #define NUM2UINT(x) ((unsigned int)rb_num2uint(x))
 unsigned long rb_fix2uint(VALUE);
 #define FIX2UINT(x) ((unsigned int)rb_fix2uint(x))
-#else
+#else /* SIZEOF_INT < SIZEOF_LONG */
 #define NUM2INT(x) ((int)NUM2LONG(x))
 #define NUM2UINT(x) ((unsigned int)NUM2ULONG(x))
 #define FIX2INT(x) ((int)FIX2LONG(x))
 #define FIX2UINT(x) ((unsigned int)FIX2ULONG(x))
-#endif
+#endif /* SIZEOF_INT < SIZEOF_LONG */
+
+short rb_num2short(VALUE);
+unsigned short rb_num2ushort(VALUE);
+short rb_fix2short(VALUE);
+unsigned short rb_fix2ushort(VALUE);
+#define FIX2SHORT(x) (rb_fix2short((VALUE)(x)))
+static inline short
+rb_num2short_inline(VALUE x)
+{
+    if (FIXNUM_P(x))
+	return FIX2SHORT(x);
+    else
+	return rb_num2short(x);
+}
+
+#define NUM2SHORT(x) rb_num2short_inline(x)
+#define NUM2USHORT(x) rb_num2ushort(x)
 
 #ifdef HAVE_LONG_LONG
 LONG_LONG rb_num2ll(VALUE);
 unsigned LONG_LONG rb_num2ull(VALUE);
-# define NUM2LL_internal(x) (FIXNUM_P(x) ? FIX2LONG(x) : rb_num2ll(x))
-# ifdef __GNUC__
-#   define NUM2LL(x) \
-    __extension__ ({VALUE num2ll_x = (x); NUM2LL_internal(num2ll_x);})
-# else
 static inline LONG_LONG
-NUM2LL(VALUE x)
+rb_num2ll_inline(VALUE x)
 {
-    return NUM2LL_internal(x);
+    if (FIXNUM_P(x))
+	return FIX2LONG(x);
+    else
+	return rb_num2ll(x);
 }
-# endif
-# define NUM2ULL(x) rb_num2ull((VALUE)(x))
+# define NUM2LL(x) rb_num2ll_inline(x)
+# define NUM2ULL(x) rb_num2ull(x)
 #endif
 
 #if defined(HAVE_LONG_LONG) && SIZEOF_OFF_T > SIZEOF_LONG
@@ -903,8 +936,8 @@ struct RBignum {
 #define RCOMPLEX(obj) (R_CAST(RComplex)(obj))
 
 #define FL_SINGLETON FL_USER0
-#define FL_MARK      (((VALUE)1)<<5)
-#define FL_RESERVED  (((VALUE)1)<<6) /* will be used in the future GC */
+#define FL_RESERVED1 (((VALUE)1)<<5)
+#define FL_RESERVED2 (((VALUE)1)<<6) /* will be used in the future GC */
 #define FL_FINALIZE  (((VALUE)1)<<7)
 #define FL_TAINT     (((VALUE)1)<<8)
 #define FL_UNTRUSTED (((VALUE)1)<<9)
@@ -957,62 +990,57 @@ struct RBignum {
 # define INT2NUM(v) INT2FIX((int)(v))
 # define UINT2NUM(v) LONG2FIX((unsigned int)(v))
 #else
-# define INT2NUM_internal(v) (FIXABLE(v) ? INT2FIX(v) : rb_int2big(v))
-# ifdef __GNUC__
-#   define INT2NUM(v) __extension__ ({int int2num_v = (v); INT2NUM_internal(int2num_v);})
-# else
 static inline VALUE
-INT2NUM(int v)
+rb_int2num_inline(int v)
 {
-    return INT2NUM_internal(v);
+    if (FIXABLE(v))
+	return INT2FIX(v);
+    else
+	return rb_int2big(v);
 }
-# endif
+#define INT2NUM(x) rb_int2num_inline(x)
 
-# define UINT2NUM_internal(v) (POSFIXABLE(v) ? LONG2FIX(v) : rb_uint2big(v))
-# ifdef __GNUC__
-#   define UINT2NUM(v) __extension__ ({unsigned int uint2num_v = (v); UINT2NUM_internal(uint2num_v);})
-# else
 static inline VALUE
-UINT2NUM(unsigned int v)
+rb_uint2num_inline(unsigned int v)
 {
-    return UINT2NUM_internal(v);
+    if (POSFIXABLE(v))
+	return LONG2FIX(v);
+    else
+	return rb_uint2big(v);
 }
-# endif
+#define UINT2NUM(x) rb_uint2num_inline(x)
 #endif
 
-#define LONG2NUM_internal(v) (FIXABLE(v) ? LONG2FIX(v) : rb_int2big(v))
-#ifdef __GNUC__
-# define LONG2NUM(v) __extension__ ({long long2num_v = (v); LONG2NUM_internal(long2num_v);})
-#else
 static inline VALUE
-LONG2NUM(long v)
+rb_long2num_inline(long v)
 {
-    return LONG2NUM_internal(v);
+    if (FIXABLE(v))
+	return LONG2FIX(v);
+    else
+	return rb_int2big(v);
 }
-#endif
+#define LONG2NUM(x) rb_long2num_inline(x)
 
-#define ULONG2NUM_internal(v) (POSFIXABLE(v) ? LONG2FIX(v) : rb_uint2big(v))
-#ifdef __GNUC__
-# define ULONG2NUM(v) __extension__ ({unsigned long ulong2num_v = (v); ULONG2NUM_internal(ulong2num_v);})
-#else
 static inline VALUE
-ULONG2NUM(unsigned long v)
+rb_ulong2num_inline(unsigned long v)
 {
-    return ULONG2NUM_internal(v);
+    if (POSFIXABLE(v))
+	return LONG2FIX(v);
+    else
+	return rb_uint2big(v);
 }
-#endif
+#define ULONG2NUM(x) rb_ulong2num_inline(x)
 
-#define NUM2CHR_internal(x) (((TYPE(x) == T_STRING)&&(RSTRING_LEN(x)>=1))?\
-                     RSTRING_PTR(x)[0]:(char)(NUM2INT(x)&0xff))
-#ifdef __GNUC__
-# define NUM2CHR(x) __extension__ ({VALUE num2chr_x = (x); NUM2CHR_internal(num2chr_x);})
-#else
 static inline char
-NUM2CHR(VALUE x)
+rb_num2char_inline(VALUE x)
 {
-    return NUM2CHR_internal(x);
+    if ((TYPE(x) == T_STRING) && (RSTRING_LEN(x)>=1))
+	return RSTRING_PTR(x)[0];
+    else
+	return (char)(NUM2INT(x) & 0xff);
 }
-#endif
+#define NUM2CHR(x) rb_num2char_inline(x)
+
 #define CHR2FIX(x) INT2FIX((long)((x)&0xff))
 
 #define ALLOC_N(type,n) ((type*)xmalloc2((n),sizeof(type)))
@@ -1158,13 +1186,19 @@ PRINTF_ARGS(NORETURN(void rb_fatal(const char*, ...)), 1, 2);
 PRINTF_ARGS(NORETURN(void rb_bug(const char*, ...)), 1, 2);
 NORETURN(void rb_bug_errno(const char*, int));
 NORETURN(void rb_sys_fail(const char*));
+NORETURN(void rb_sys_fail_str(VALUE));
 NORETURN(void rb_mod_sys_fail(VALUE, const char*));
+NORETURN(void rb_mod_sys_fail_str(VALUE, VALUE));
 NORETURN(void rb_iter_break(void));
+NORETURN(void rb_iter_break_value(VALUE));
 NORETURN(void rb_exit(int));
 NORETURN(void rb_notimplement(void));
 VALUE rb_syserr_new(int, const char *);
+VALUE rb_syserr_new_str(int n, VALUE arg);
 NORETURN(void rb_syserr_fail(int, const char*));
+NORETURN(void rb_syserr_fail_str(int, VALUE));
 NORETURN(void rb_mod_syserr_fail(VALUE, int, const char*));
+NORETURN(void rb_mod_syserr_fail_str(VALUE, int, VALUE));
 
 /* reports if `-W' specified */
 PRINTF_ARGS(void rb_warning(const char*, ...), 1, 2);
@@ -1393,7 +1427,7 @@ int ruby_native_thread_p(void);
 #define RUBY_EVENT_COVERAGE 0x40000
 
 typedef unsigned int rb_event_flag_t;
-typedef void (*rb_event_hook_func_t)(rb_event_flag_t, VALUE data, VALUE, ID, VALUE klass);
+typedef void (*rb_event_hook_func_t)(rb_event_flag_t evflag, VALUE data, VALUE self, ID mid, VALUE klass);
 
 typedef struct rb_event_hook_struct {
     rb_event_flag_t flag;

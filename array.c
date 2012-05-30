@@ -755,6 +755,19 @@ rb_ary_push_1(VALUE ary, VALUE item)
     return ary;
 }
 
+VALUE
+rb_ary_cat(VALUE ary, const VALUE *ptr, long len)
+{
+    long oldlen;
+
+    rb_ary_modify(ary);
+    oldlen = RARRAY_LEN(ary);
+    ary_resize_capa(ary, oldlen + len);
+    MEMCPY(RARRAY_PTR(ary) + oldlen, ptr, VALUE, len);
+    ARY_SET_LEN(ary, oldlen + len);
+    return ary;
+}
+
 /*
  *  call-seq:
  *     ary.push(obj, ... )   -> ary
@@ -771,11 +784,7 @@ rb_ary_push_1(VALUE ary, VALUE item)
 static VALUE
 rb_ary_push_m(int argc, VALUE *argv, VALUE ary)
 {
-    rb_ary_modify(ary);
-    while (argc--) {
-	rb_ary_push_1(ary, *argv++);
-    }
-    return ary;
+    return rb_ary_cat(ary, argv, argc);
 }
 
 VALUE
@@ -1434,9 +1443,7 @@ rb_ary_aset(int argc, VALUE *argv, VALUE ary)
 	rb_ary_splice(ary, beg, len, argv[2]);
 	return argv[2];
     }
-    if (argc != 2) {
-	rb_raise(rb_eArgError, "wrong number of arguments (%d for 2)", argc);
-    }
+    rb_check_arity(argc, 2, 2);
     rb_ary_modify_check(ary);
     if (FIXNUM_P(argv[0])) {
 	offset = FIX2LONG(argv[0]);
@@ -1471,9 +1478,7 @@ rb_ary_insert(int argc, VALUE *argv, VALUE ary)
 {
     long pos;
 
-    if (argc < 1) {
-	rb_raise(rb_eArgError, "wrong number of arguments (at least 1)");
-    }
+    rb_check_arity(argc, 1, UNLIMITED_ARGUMENTS);
     rb_ary_modify_check(ary);
     if (argc == 1) return ary;
     pos = NUM2LONG(argv[0]);
@@ -2376,7 +2381,7 @@ rb_ary_select(VALUE ary)
 
 /*
  *  call-seq:
- *     ary.select! {|item| block } -> new_ary or nil
+ *     ary.select! {|item| block } -> ary or nil
  *     ary.select!                 -> an_enumerator
  *
  *  Invokes the block passing in successive elements from
@@ -2643,6 +2648,8 @@ ary_reject_bang(VALUE ary)
  *  Equivalent to Array#delete_if, deleting elements from
  *  +self+ for which the block evaluates to true, but returns
  *  <code>nil</code> if no changes were made.
+ *  The array is changed instantly every time the block is called and
+ *  not after the iteration is over.
  *  See also Enumerable#reject and Array#delete_if.
  *
  *  If no block is given, an enumerator is returned instead.
@@ -2687,6 +2694,8 @@ rb_ary_reject(VALUE ary)
  *
  *  Deletes every element of +self+ for which +block+ evaluates
  *  to true.
+ *  The array is changed instantly every time the block is called and
+ *  not after the iteration is over.
  *  See also Array#reject!
  *
  *  If no block is given, an enumerator is returned instead.
@@ -3889,9 +3898,7 @@ rb_ary_shuffle_bang(int argc, VALUE *argv, VALUE ary)
     if (OPTHASH_GIVEN_P(opts)) {
 	randgen = rb_hash_lookup2(opts, sym_random, randgen);
     }
-    if (argc > 0) {
-	rb_raise(rb_eArgError, "wrong number of arguments (%d for 0)", argc);
-    }
+    rb_check_arity(argc, 0, 0);
     rb_ary_modify(ary);
     i = RARRAY_LEN(ary);
     ptr = RARRAY_PTR(ary);
@@ -3949,6 +3956,10 @@ rb_ary_shuffle(int argc, VALUE *argv, VALUE ary)
  *  <code>nil</code> and the second form returns an empty array.
  *
  *  If +rng+ is given, it will be used as the random number generator.
+ *
+ *     a = [ 1, 2, 3, 4, 5, 6, 7, 8, 9, 10 ]
+ *     a.sample         #=> 7
+ *     a.sample(4)      #=> [6, 4, 2, 5]
  */
 
 
@@ -4467,7 +4478,7 @@ rb_ary_repeated_combination(VALUE ary, VALUE num)
  *     ary.product(other_ary, ...)                -> new_ary
  *     ary.product(other_ary, ...) { |p| block }  -> ary
  *
- *  Returns an array of all combinations of elements from all arrays,
+ *  Returns an array of all combinations of elements from all arrays.
  *  The length of the returned array is the product of the length
  *  of +self+ and the argument arrays.
  *  If given a block, #product will yield all combinations

@@ -202,7 +202,7 @@ module WEBrick
       if @header['connection'] == "close"
          @keep_alive = false
       elsif keep_alive?
-        if chunked? || @header['content-length']
+        if chunked? || @header['content-length'] || @status == 304 || @status == 204 || HTTPStatus.info?(@status)
           @header['connection'] = "Keep-Alive"
         else
           msg = "Could not determine content-length of response body. Set content-length of the response or set Response#chunked = true"
@@ -330,13 +330,18 @@ module WEBrick
         if @request_method == "HEAD"
           # do nothing
         elsif chunked?
-          while buf = @body.read(@buffer_size)
-            next if buf.empty?
-            data = ""
-            data << format("%x", buf.bytesize) << CRLF
-            data << buf << CRLF
-            _write_data(socket, data)
-            @sent_size += buf.bytesize
+          begin
+            buf  = ''
+            data = ''
+            while true
+              @body.readpartial( @buffer_size, buf ) # there is no need to clear buf?
+              data << format("%x", buf.bytesize) << CRLF
+              data << buf << CRLF
+              _write_data(socket, data)
+              data.clear
+              @sent_size += buf.bytesize
+            end
+          rescue EOFError # do nothing
           end
           _write_data(socket, "0#{CRLF}#{CRLF}")
         else

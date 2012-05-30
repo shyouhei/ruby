@@ -284,6 +284,9 @@ listed below:
   rb_ary_shift(VALUE ary)
   rb_ary_unshift(VALUE ary, VALUE val)
 
+  rb_ary_cat(VALUE ary, const VALUE *ptr, long len)
+
+    Appends len elements of objects from ptr to the array.
 
 2. Extending Ruby with C
 
@@ -449,12 +452,14 @@ argument by using
 
   rb_to_id(VALUE symbol)
   rb_check_id(volatile VALUE *name)
+  rb_check_id_cstr(const char *name, long len, rb_encoding *enc)
 
 These functions try to convert the argument to a String if it was not
-a Symbol nor a String.  The latter function stores the converted
+a Symbol nor a String.  The second function stores the converted
 result into *name, and returns 0 if the string is not a known symbol.
 After this function returned a non-zero value, *name is always a
 Symbol or a String, otherwise it is a String if the result is 0.
+The third function takes NUL-terminated C string, not Ruby VALUE.
 
 You can convert C ID to Ruby Symbol by using
 
@@ -750,9 +755,23 @@ need to put
 at the top of the file.  You can use the functions below to check
 various conditions.
 
-  have_library(lib, func): check whether library containing function exists.
-  have_func(func, header): check whether function exists
-  have_header(header): check whether header file exists
+  have_macro(macro[, headers[, opt]]): check whether macro is defined
+  have_library(lib[, func[, headers[, opt]]]): check whether library containing function exists
+  find_library(lib[, func, *paths]): find library from paths
+  have_func(func[, headers[, opt]): check whether function exists
+  have_var(var[, headers[, opt]]): check whether variable exists
+  have_header(header[, preheaders[, opt]]): check whether header file exists
+  find_header(header, *paths): find header from paths
+  have_framework(fw): check whether framework exists (for MacOS X)
+  have_struct_member(type, member[, headers]): check whether struct has member
+  have_type(type[, headers[, opt]]): check whether type exists
+  find_type(type, opt, *headers): check whether type exists in headers
+  have_const(const[, headers[, opt]]): check whether constant is defined
+  check_sizeof(type[, headers[, opts]]): check size of type
+  check_signedness(type[, headers[, opts]]): check signedness of type
+  convertible_int(type[, headers[, opts]]): find convertible integer type
+  find_executable(bin[, path]): find excutable file path
+  create_header(header): generate configured header
   create_makefile(target): generate Makefile
 
 The value of the variables below will affect the Makefile.
@@ -1248,12 +1267,25 @@ Calls the function func with arg as the argument.  If no exception
 occured during func, it returns the result of func and *state is zero.
 Otherwise, it returns Qnil and sets *state to nonzero.  If state is
 NULL, it is not set in both cases.
+You have to clear the error info with rb_set_errinfo(Qnil) when
+ignoring the caught exception.
 
  void rb_jump_tag(int state)
 
 Continues the exception caught by rb_protect() and rb_eval_string_protect().
 state must be the returned value from those functions.  This function
 never return to the caller.
+
+ void rb_iter_break()
+
+Exits from the current innermost block.  This function never return to
+the caller.
+
+ void rb_iter_break_value(VALUE value)
+
+Exits from the current innermost block with the value.  The block will
+return the given argument value.  This function never return to the
+caller.
 
 ** Exceptions and Errors
 
@@ -1379,12 +1411,12 @@ Appendix C. Functions Available in extconf.rb
 
 These functions are available in extconf.rb:
 
- have_macro(macro, headers)
+ have_macro(macro, headers, opt)
 
 Checks whether macro is defined with header.  Returns true if the macro
 is defined.
 
- have_library(lib, func)
+ have_library(lib, func, opt)
 
 Checks whether the library exists, containing the specified function.
 Returns true if the library exists.
@@ -1394,19 +1426,23 @@ Returns true if the library exists.
 Checks whether a library which contains the specified function exists in
 path.  Returns true if the library exists.
 
- have_func(func, header)
+ have_func(func, headers, opt)
 
 Checks whether func exists with header.  Returns true if the function
 exists.  To check functions in an additional library, you need to
 check that library first using have_library().
+The func shall be either mere function name or function name with
+arguments.
+Example:
+    have_func("LONG2NUM(0)")
 
- have_var(var, header)
+ have_var(var, header, opt)
 
 Checks whether var exists with header.  Returns true if the variable
 exists.  To check variables in an additional library, you need to
 check that library first using have_library().
 
- have_header(header)
+ have_header(header, preheaders, opt)
 
 Checks whether header exists.  Returns true if the header file exists.
 
@@ -1415,12 +1451,12 @@ Checks whether header exists.  Returns true if the header file exists.
 Checks whether header exists in path.  Returns true if the header file
 exists.
 
- have_struct_member(type, member, header)
+ have_struct_member(type, member, headers, opt)
 
 Checks whether type has member with header.  Returns true if the type
 is defined and has the member.
 
- have_type(type, header, opt)
+ have_type(type, headers, opt)
 
 Checks whether type is defined with header.  Returns true if the type
 is defined.

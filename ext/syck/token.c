@@ -1489,8 +1489,8 @@ yy109:
 
 Plain:
     {
-        int qidx = 0;
-        int qcapa = 100;
+        ptrdiff_t qidx = 0;
+        ptrdiff_t qcapa = 100;
         char *qstr = S_ALLOC_N( char, qcapa );
         SyckLevel *plvl;
         int parentIndent;
@@ -2361,7 +2361,7 @@ ScalarBlock:
             {
                 nlDoWhat = NL_KEEP;
             }
-            else if ( isdigit( *yyt ) )
+            else if ( isdigit( (unsigned char)*yyt ) )
             {
                 forceIndent = rb_long2int(strtol( yyt, NULL, 10 ));
             }

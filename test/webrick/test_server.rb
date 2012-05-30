@@ -23,6 +23,31 @@ class TestWEBrickServer < Test::Unit::TestCase
     }
   end
 
+  def test_start_exception
+    stopped = 0
+    config = {
+      :StopCallback => Proc.new{ stopped += 1 },
+    }
+
+    e = assert_raises(SignalException) do
+      TestWEBrick.start_server(Echo, config) { |server, addr, port, log|
+        listener = server.listeners.first
+
+        def listener.accept
+          raise SignalException, 'SIGTERM' # simulate signal in main thread
+        end
+
+        Thread.pass while server.status != :Running
+
+        TCPSocket.open(addr, port) { |sock| sock << "foo\n" }
+
+        Thread.pass until server.status == :Stop
+      }
+    end
+
+    assert_equal(stopped, 1)
+  end
+
   def test_callbacks
     accepted = started = stopped = 0
     config = {

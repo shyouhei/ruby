@@ -42,6 +42,7 @@ struct vtm; /* defined by timev.h */
 /* array.c */
 VALUE rb_ary_last(int, VALUE *, VALUE);
 void rb_ary_set_len(VALUE, long);
+VALUE rb_ary_cat(VALUE, const VALUE *, long);
 
 /* bignum.c */
 VALUE rb_big_fdiv(VALUE x, VALUE y);
@@ -61,6 +62,10 @@ int rb_local_defined(ID);
 int rb_parse_in_eval(void);
 int rb_parse_in_main(void);
 VALUE rb_insns_name_array(void);
+
+/* cont.c */
+VALUE rb_obj_is_fiber(VALUE);
+void rb_fiber_reset_root_local_storage(VALUE);
 
 /* debug.c */
 PRINTF_ARGS(void ruby_debug_printf(const char*, ...), 1, 2);
@@ -89,10 +94,13 @@ void rb_call_end_proc(VALUE data);
 /* file.c */
 VALUE rb_home_dir(const char *user, VALUE result);
 VALUE rb_realpath_internal(VALUE basedir, VALUE path, int strict);
+void rb_file_const(const char*, VALUE);
+int rb_file_load_ok(const char *);
 void Init_File(void);
 
 /* gc.c */
 void Init_heap(void);
+void *ruby_mimmalloc(size_t size);
 
 /* inits.c */
 void rb_call_inits(void);
@@ -109,6 +117,7 @@ VALUE rb_iseq_clone(VALUE iseqval, VALUE newcbase);
 
 /* load.c */
 VALUE rb_get_load_path(void);
+NORETURN(void rb_load_fail(VALUE, const char*));
 
 /* math.c */
 VALUE rb_math_atan2(VALUE, VALUE);
@@ -127,6 +136,7 @@ void Init_newline(void);
 /* numeric.c */
 int rb_num_to_uint(VALUE val, unsigned int *ret);
 int ruby_float_step(VALUE from, VALUE to, VALUE step, int excl);
+double ruby_float_mod(double x, double y);
 
 /* object.c */
 VALUE rb_obj_equal(VALUE obj1, VALUE obj2);
@@ -145,6 +155,7 @@ int rb_is_junk_name(VALUE name);
 
 /* proc.c */
 VALUE rb_proc_location(VALUE self);
+st_index_t rb_hash_proc(st_index_t hash, VALUE proc);
 
 /* rational.c */
 VALUE rb_lcm(VALUE x, VALUE y);
@@ -196,6 +207,9 @@ void rb_vm_inc_const_missing_count(void);
 void rb_thread_mark(void *th);
 const void **rb_vm_get_insns_address_table(void);
 VALUE rb_sourcefilename(void);
+int rb_backtrace_p(VALUE obj);
+VALUE rb_backtrace_to_str_ary(VALUE obj);
+VALUE rb_vm_backtrace_object();
 
 /* vm_dump.c */
 void rb_vm_bugreport(void);
@@ -206,6 +220,7 @@ VALUE rb_current_realfilepath(void);
 
 /* vm_method.c */
 void Init_eval_method(void);
+int rb_method_defined_by(VALUE obj, ID mid, VALUE (*cfunc)(ANYARGS));
 
 /* miniprelude.c, prelude.c */
 void Init_prelude(void);
@@ -227,6 +242,9 @@ void *rb_thread_call_with_gvl(void *(*func)(void *), void *data1);
 VALUE rb_thread_call_without_gvl(
     rb_blocking_function_t *func, void *data1,
     rb_unblock_function_t *ubf, void *data2);
+
+/* io.c */
+void rb_maygvl_fd_fix_cloexec(int fd);
 
 #if defined __GNUC__ && __GNUC__ >= 4
 #pragma GCC visibility pop

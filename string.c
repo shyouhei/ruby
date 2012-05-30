@@ -483,6 +483,7 @@ rb_str_conv_enc_opts(VALUE str, rb_encoding *from, rb_encoding *to, int ecflags,
     unsigned char *dp;
 
     if (!to) return str;
+    if (!from) from = rb_enc_get(str);
     if (from == to) return str;
     if ((rb_enc_asciicompat(to) && ENC_CODERANGE(str) == ENC_CODERANGE_7BIT) ||
 	to == rb_ascii8bit_encoding()) {
@@ -725,6 +726,7 @@ static VALUE
 str_new_empty(VALUE str)
 {
     VALUE v = rb_str_new5(str, 0, 0);
+    rb_enc_copy(v, str);
     OBJ_INFECT(v, str);
     return v;
 }
@@ -1328,11 +1330,19 @@ rb_str_modify_expand(VALUE str, long expand)
     if (expand < 0) {
 	rb_raise(rb_eArgError, "negative expanding string size");
     }
-    if (!str_independent(str) ||
-	(expand > 0 &&
-	 (!STR_EMBED_P(str) ||
-	  RSTRING_LEN(str) + expand > RSTRING_EMBED_LEN_MAX))) {
+    if (!str_independent(str)) {
 	str_make_independent_expand(str, expand);
+    }
+    else if (expand > 0) {
+	long len = RSTRING_LEN(str);
+	long capa = len + expand;
+	if (!STR_EMBED_P(str)) {
+	    REALLOC_N(RSTRING(str)->as.heap.ptr, char, capa+1);
+	    RSTRING(str)->as.heap.aux.capa = capa;
+	}
+	else if (capa > RSTRING_EMBED_LEN_MAX) {
+	    str_make_independent_expand(str, expand);
+	}
     }
     ENC_CODERANGE_CLEAR(str);
 }
@@ -1398,6 +1408,15 @@ rb_str_associated(VALUE str)
 	return RSTRING(str)->as.heap.aux.shared;
     }
     return Qfalse;
+}
+
+void
+rb_must_asciicompat(VALUE str)
+{
+    rb_encoding *enc = rb_enc_get(str);
+    if (!rb_enc_asciicompat(enc)) {
+	rb_raise(rb_eEncCompatError, "ASCII incompatible encoding: %s", rb_enc_name(enc));
+    }
 }
 
 VALUE
@@ -1483,6 +1502,7 @@ str_nth_len(const char *p, const char *e, long *nthp, rb_encoding *enc)
             if (ISASCII(*p)) {
                 p2 = search_nonascii(p, e2);
                 if (!p2) {
+		    nth -= e2 - p;
 		    *nthp = nth;
                     return (char *)e2;
                 }
@@ -2073,10 +2093,11 @@ rb_str_append(VALUE str, VALUE str2)
 VALUE
 rb_str_concat(VALUE str1, VALUE str2)
 {
-    unsigned int lc;
+    unsigned int code;
+    rb_encoding *enc = STR_ENC_GET(str1);
 
     if (FIXNUM_P(str2) || RB_TYPE_P(str2, T_BIGNUM)) {
-	if (rb_num_to_uint(str2, &lc) == 0) {
+	if (rb_num_to_uint(str2, &code) == 0) {
 	}
 	else if (FIXNUM_P(str2)) {
 	    rb_raise(rb_eRangeError, "%ld out of char range", FIX2LONG(str2));
@@ -2088,22 +2109,47 @@ rb_str_concat(VALUE str1, VALUE str2)
     else {
 	return rb_str_append(str1, str2);
     }
-    {
-	rb_encoding *enc = STR_ENC_GET(str1);
+
+    if (enc == rb_usascii_encoding()) {
+	/* US-ASCII automatically extended to ASCII-8BIT */
+	char buf[1];
+	buf[0] = (char)code;
+	if (code > 0xFF) {
+	    rb_raise(rb_eRangeError, "%u out of char range", code);
+	}
+	rb_str_cat(str1, buf, 1);
+	if (code > 127) {
+	    rb_enc_associate(str1, rb_ascii8bit_encoding());
+	    ENC_CODERANGE_SET(str1, ENC_CODERANGE_VALID);
+	}
+    }
+    else {
 	long pos = RSTRING_LEN(str1);
 	int cr = ENC_CODERANGE(str1);
 	int len;
+	char *buf;
 
-	if ((len = rb_enc_codelen(lc, enc)) <= 0) {
-	    rb_raise(rb_eRangeError, "%u invalid char", lc);
+	switch (len = rb_enc_codelen(code, enc)) {
+	  case ONIGERR_INVALID_CODE_POINT_VALUE:
+	    rb_raise(rb_eRangeError, "invalid codepoint 0x%X in %s", code, rb_enc_name(enc));
+	    break;
+	  case ONIGERR_TOO_BIG_WIDE_CHAR_VALUE:
+	  case 0:
+	    rb_raise(rb_eRangeError, "%u out of char range", code);
+	    break;
+	}
+	buf = ALLOCA_N(char, len + 1);
+	rb_enc_mbcput(code, buf, enc);
+	if (rb_enc_precise_mbclen(buf, buf + len + 1, enc) != len) {
+	    rb_raise(rb_eRangeError, "invalid codepoint 0x%X in %s", code, rb_enc_name(enc));
 	}
 	rb_str_resize(str1, pos+len);
-	rb_enc_mbcput(lc, RSTRING_PTR(str1)+pos, enc);
-	if (cr == ENC_CODERANGE_7BIT && lc > 127)
+	strncpy(RSTRING_PTR(str1) + pos, buf, len);
+	if (cr == ENC_CODERANGE_7BIT && code > 127)
 	    cr = ENC_CODERANGE_VALID;
 	ENC_CODERANGE_SET(str1, cr);
-	return str1;
     }
+    return str1;
 }
 
 /*
@@ -2112,9 +2158,9 @@ rb_str_concat(VALUE str1, VALUE str2)
  *
  *  Prepend---Prepend the given string to <i>str</i>.
  *
- *  a = "world"
- *  a.prepend("hello ") #=> "hello world"
- *  a                   #=> "hello world"
+ *     a = "world"
+ *     a.prepend("hello ") #=> "hello world"
+ *     a                   #=> "hello world"
  */
 
 static VALUE
@@ -2692,7 +2738,7 @@ rb_str_match_m(int argc, VALUE *argv, VALUE str)
 {
     VALUE re, result;
     if (argc < 1)
-       rb_raise(rb_eArgError, "wrong number of arguments (%d for 1..2)", argc);
+	rb_check_arity(argc, 1, 2);
     re = argv[0];
     argv[0] = str;
     result = rb_funcall2(get_pat(re, 0), rb_intern("match"), argc, argv);
@@ -3140,7 +3186,8 @@ rb_str_aref(VALUE str, VALUE indx)
 	idx = NUM2LONG(indx);
 	goto num_index;
     }
-    return Qnil;		/* not reached */
+
+    UNREACHABLE;
 }
 
 
@@ -3163,12 +3210,11 @@ rb_str_aref(VALUE str, VALUE indx)
  *  Element Reference---If passed a single <code>Fixnum</code>, returns a
  *  substring of one character at that position. If passed two <code>Fixnum</code>
  *  objects, returns a substring starting at the offset given by the first, and
- *  a length given by the second. If given a range, a substring containing
- *  characters at offsets given by the range is returned. In all three cases, if
- *  an offset is negative, it is counted from the end of <i>str</i>. Returns
- *  <code>nil</code> if the initial offset falls outside the string, the length
- *  is negative, or the beginning of the range is greater than the end of the
- *  string.
+ *  with a length given by the second. If passed a range, its beginning and end
+ *  are interpreted as offsets delimiting the substring to be returned. In all
+ *  three cases, if an offset is negative, it is counted from the end of <i>str</i>.
+ *  Returns <code>nil</code> if the initial offset falls outside the string or
+ *  the length is negative.
  *
  *  If a <code>Regexp</code> is supplied, the matching portion of <i>str</i> is
  *  returned. If a numeric or name parameter follows the regular expression, that
@@ -3179,12 +3225,13 @@ rb_str_aref(VALUE str, VALUE indx)
  *
  *     a = "hello there"
  *     a[1]                   #=> "e"
- *     a[1,3]                 #=> "ell"
- *     a[1..3]                #=> "ell"
- *     a[-3,2]                #=> "er"
+ *     a[2, 3]                #=> "llo"
+ *     a[2..3]                #=> "ll"
+ *     a[-3, 2]               #=> "er"
+ *     a[7..-2]               #=> "her"
  *     a[-4..-2]              #=> "her"
- *     a[12..-1]              #=> nil
  *     a[-2..-4]              #=> ""
+ *     a[12..-1]              #=> nil
  *     a[/[aeiou](.)\1/]      #=> "ell"
  *     a[/[aeiou](.)\1/, 0]   #=> "ell"
  *     a[/[aeiou](.)\1/, 1]   #=> "l"
@@ -3197,14 +3244,12 @@ static VALUE
 rb_str_aref_m(int argc, VALUE *argv, VALUE str)
 {
     if (argc == 2) {
-	if (TYPE(argv[0]) == T_REGEXP) {
+	if (RB_TYPE_P(argv[0], T_REGEXP)) {
 	    return rb_str_subpat(str, argv[0], argv[1]);
 	}
 	return rb_str_substr(str, NUM2LONG(argv[0]), NUM2LONG(argv[1]));
     }
-    if (argc != 1) {
-	rb_raise(rb_eArgError, "wrong number of arguments (%d for 1..2)", argc);
-    }
+    rb_check_arity(argc, 1, 2);
     return rb_str_aref(str, argv[0]);
 }
 
@@ -3424,7 +3469,7 @@ static VALUE
 rb_str_aset_m(int argc, VALUE *argv, VALUE str)
 {
     if (argc == 3) {
-	if (TYPE(argv[0]) == T_REGEXP) {
+	if (RB_TYPE_P(argv[0], T_REGEXP)) {
 	    rb_str_subpat_set(str, argv[0], argv[1], argv[2]);
 	}
 	else {
@@ -3432,9 +3477,7 @@ rb_str_aset_m(int argc, VALUE *argv, VALUE str)
 	}
 	return argv[2];
     }
-    if (argc != 2) {
-	rb_raise(rb_eArgError, "wrong number of arguments (%d for 2..3)", argc);
-    }
+    rb_check_arity(argc, 2, 3);
     return rb_str_aset(str, argv[0], argv[1]);
 }
 
@@ -3497,9 +3540,7 @@ rb_str_slice_bang(int argc, VALUE *argv, VALUE str)
     VALUE buf[3];
     int i;
 
-    if (argc < 1 || 2 < argc) {
-	rb_raise(rb_eArgError, "wrong number of arguments (%d for 1..2)", argc);
-    }
+    rb_check_arity(argc, 1, 2);
     for (i=0; i<argc; i++) {
 	buf[i] = argv[i];
     }
@@ -3558,11 +3599,13 @@ rb_str_sub_bang(int argc, VALUE *argv, VALUE str)
     int tainted = 0;
     int untrusted = 0;
     long plen;
+    int min_arity = rb_block_given_p() ? 1 : 2;
 
-    if (argc == 1 && rb_block_given_p()) {
+    rb_check_arity(argc, min_arity, 2);
+    if (argc == 1) {
 	iter = 1;
     }
-    else if (argc == 2) {
+    else {
 	repl = argv[1];
 	hash = rb_check_convert_type(argv[1], T_HASH, "Hash", "to_hash");
 	if (NIL_P(hash)) {
@@ -3570,9 +3613,6 @@ rb_str_sub_bang(int argc, VALUE *argv, VALUE str)
 	}
 	if (OBJ_TAINTED(repl)) tainted = 1;
 	if (OBJ_UNTRUSTED(repl)) untrusted = 1;
-    }
-    else {
-	rb_raise(rb_eArgError, "wrong number of arguments (%d for 1..2)", argc);
     }
 
     pat = get_pat(argv[0], 1);
@@ -3726,7 +3766,7 @@ str_gsub(int argc, VALUE *argv, VALUE str, int bang)
 	if (OBJ_TAINTED(repl)) tainted = 1;
 	break;
       default:
-	rb_raise(rb_eArgError, "wrong number of arguments (%d for 1..2)", argc);
+	rb_check_arity(argc, 1, 2);
     }
 
     pat = get_pat(argv[0], 1);
@@ -4053,7 +4093,8 @@ str_byte_aref(VALUE str, VALUE indx)
 	idx = NUM2LONG(indx);
 	goto num_index;
     }
-    return Qnil;		/* not reached */
+
+    UNREACHABLE;
 }
 
 /*
@@ -4076,7 +4117,7 @@ str_byte_aref(VALUE str, VALUE indx)
  *     "hello".byteslice(-1)    #=> "o"
  *     "hello".byteslice(1, 2)  #=> "el"
  *     "\x80\u3042".byteslice(1, 3) #=> "\u3042"
- *     "\x03\u3042\xff".byteslice(1..3) #=> "\u3942"
+ *     "\x03\u3042\xff".byteslice(1..3) #=> "\u3042"
  */
 
 static VALUE
@@ -4085,9 +4126,7 @@ rb_str_byteslice(int argc, VALUE *argv, VALUE str)
     if (argc == 2) {
 	return str_byte_substr(str, NUM2LONG(argv[0]), NUM2LONG(argv[1]));
     }
-    if (argc != 1) {
-	rb_raise(rb_eArgError, "wrong number of arguments (%d for 1..2)", argc);
-    }
+    rb_check_arity(argc, 1, 2);
     return str_byte_aref(str, argv[0]);
 }
 
@@ -4928,14 +4967,15 @@ trnext(struct tr *t, rb_encoding *enc)
 
     for (;;) {
 	if (!t->gen) {
+nextpart:
 	    if (t->p == t->pend) return -1;
-	    if (t->p < t->pend - 1 && *t->p == '\\') {
-		t->p++;
+	    if (rb_enc_ascget(t->p, t->pend, &n, enc) == '\\' && t->p + n < t->pend) {
+		t->p += n;
 	    }
 	    t->now = rb_enc_codepoint_len(t->p, t->pend, &n, enc);
 	    t->p += n;
-	    if (t->p < t->pend - 1 && *t->p == '-') {
-		t->p++;
+	    if (rb_enc_ascget(t->p, t->pend, &n, enc) == '-' && t->p + n < t->pend) {
+		t->p += n;
 		if (t->p < t->pend) {
 		    unsigned int c = rb_enc_codepoint_len(t->p, t->pend, &n, enc);
 		    t->p += n;
@@ -4956,12 +4996,20 @@ trnext(struct tr *t, rb_encoding *enc)
 	    }
 	    return t->now;
 	}
-	else if (++t->now < t->max) {
-	    return t->now;
-	}
 	else {
-	    t->gen = 0;
-	    return t->max;
+	    while (ONIGENC_CODE_TO_MBCLEN(enc, ++t->now) <= 0) {
+		if (t->now == t->max) {
+		    t->gen = 0;
+		    goto nextpart;
+		}
+	    }
+	    if (t->now < t->max) {
+		return t->now;
+	    }
+	    else {
+		t->gen = 0;
+		return t->max;
+	    }
 	}
     }
 }
@@ -5233,20 +5281,35 @@ rb_str_tr_bang(VALUE str, VALUE src, VALUE repl)
  *  call-seq:
  *     str.tr(from_str, to_str)   => new_str
  *
- *  Returns a copy of <i>str</i> with the characters in <i>from_str</i> 
- *  replaced by the corresponding characters in <i>to_str</i>. If 
- *  <i>to_str</i> is shorter than <i>from_str</i>, it is padded with its last
- *  character in order to maintain the correspondence.
+ *  Returns a copy of +str+ with the characters in +from_str+ replaced by the
+ *  corresponding characters in +to_str+.  If +to_str+ is shorter than
+ *  +from_str+, it is padded with its last character in order to maintain the
+ *  correspondence.
  *
  *     "hello".tr('el', 'ip')      #=> "hippo"
  *     "hello".tr('aeiou', '*')    #=> "h*ll*"
- * 
- *  Both strings may use the c1-c2 notation to denote ranges of characters,
- *  and <i>from_str</i> may start with a <code>^</code>, which denotes all
- *  characters except those listed.
+ *     "hello".tr('aeiou', 'AA*')  #=> "hAll*"
+ *
+ *  Both strings may use the <code>c1-c2</code> notation to denote ranges of
+ *  characters, and +from_str+ may start with a <code>^</code>, which denotes
+ *  all characters except those listed.
  *
  *     "hello".tr('a-y', 'b-z')    #=> "ifmmp"
  *     "hello".tr('^aeiou', '*')   #=> "*e**o"
+ *
+ *  The backslash character <code>\</code> can be used to escape
+ *  <code>^</code> or <code>-</code> and is otherwise ignored unless it
+ *  appears at the end of a range or the end of the +from_str+ or +to_str+:
+ *
+ *     "hello^world".tr("\\^aeiou", "*") #=> "h*ll**w*rld"
+ *     "hello-world".tr("a\\-eo", "*")   #=> "h*ll**w*rld"
+ *
+ *     "hello\r\nworld".tr("\r", "")   #=> "hello\nworld"
+ *     "hello\r\nworld".tr("\\r", "")  #=> "hello\r\nwold"
+ *     "hello\r\nworld".tr("\\\r", "") #=> "hello\nworld"
+ *
+ *     "X['\\b']".tr("X\\", "")   #=> "['b']"
+ *     "X['\\b']".tr("X-\\]", "") #=> "'b'"
  */
 
 static VALUE
@@ -5296,24 +5359,28 @@ tr_setup_table(VALUE str, char stable[TR_TABLE_SIZE], int first,
 	else {
 	    VALUE key = UINT2NUM(c);
 
-	    if (!table) {
-		table = rb_hash_new();
+	    if (!table && (first || *tablep || stable[256])) {
 		if (cflag) {
 		    ptable = *ctablep;
+		    table = ptable ? ptable : rb_hash_new();
 		    *ctablep = table;
 		}
 		else {
+		    table = rb_hash_new();
 		    ptable = *tablep;
 		    *tablep = table;
 		}
 	    }
-	    if (!ptable || !NIL_P(rb_hash_aref(ptable, key))) {
+	    if (table && (!ptable || (cflag ^ !NIL_P(rb_hash_aref(ptable, key))))) {
 		rb_hash_aset(table, key, Qtrue);
 	    }
 	}
     }
     for (i=0; i<256; i++) {
 	stable[i] = stable[i] && buf[i];
+    }
+    if (!table && !cflag) {
+	*tablep = 0;
     }
 }
 
@@ -5359,9 +5426,7 @@ rb_str_delete_bang(int argc, VALUE *argv, VALUE str)
     int i, ascompat, cr;
 
     if (RSTRING_LEN(str) == 0 || !RSTRING_PTR(str)) return Qnil;
-    if (argc < 1) {
-	rb_raise(rb_eArgError, "wrong number of arguments (at least 1)");
-    }
+    rb_check_arity(argc, 1, UNLIMITED_ARGUMENTS);
     for (i=0; i<argc; i++) {
 	VALUE s = argv[i];
 
@@ -5583,16 +5648,27 @@ rb_str_tr_s(VALUE str, VALUE src, VALUE repl)
  *  call-seq:
  *     str.count([other_str]+)   -> fixnum
  *
- *  Each <i>other_str</i> parameter defines a set of characters to count.  The
- *  intersection of these sets defines the characters to count in
- *  <i>str</i>. Any <i>other_str</i> that starts with a caret (^) is
- *  negated. The sequence c1--c2 means all characters between c1 and c2.
+ *  Each +other_str+ parameter defines a set of characters to count.  The
+ *  intersection of these sets defines the characters to count in +str+.  Any
+ *  +other_str+ that starts with a caret <code>^</code> is negated.  The
+ *  sequence <code>c1-c2</code> means all characters between c1 and c2.  The
+ *  backslash character <code>\</code> can be used to escape <code>^</code> or
+ *  <code>-</code> and is otherwise ignored unless it appears at the end of a
+ *  sequence or the end of a +other_str+.
  *
  *     a = "hello world"
- *     a.count "lo"            #=> 5
- *     a.count "lo", "o"       #=> 2
- *     a.count "hello", "^l"   #=> 4
- *     a.count "ej-m"          #=> 4
+ *     a.count "lo"                   #=> 5
+ *     a.count "lo", "o"              #=> 2
+ *     a.count "hello", "^l"          #=> 4
+ *     a.count "ej-m"                 #=> 4
+ *
+ *     "hello^world".count "\\^aeiou" #=> 4
+ *     "hello-world".count "a\\-eo"   #=> 4
+ *
+ *     c = "hello world\\r\\n"
+ *     c.count "\\"                   #=> 2
+ *     c.count "\\A"                  #=> 0
+ *     c.count "X-\\w"                #=> 3
  */
 
 static VALUE
@@ -5605,9 +5681,7 @@ rb_str_count(int argc, VALUE *argv, VALUE str)
     int i;
     int ascompat;
 
-    if (argc < 1) {
-	rb_raise(rb_eArgError, "wrong number of arguments (at least 1)");
-    }
+    rb_check_arity(argc, 1, UNLIMITED_ARGUMENTS);
     for (i=0; i<argc; i++) {
 	VALUE tstr = argv[i];
 	unsigned char c;
@@ -5705,6 +5779,9 @@ static const char isspacetable[256] = {
  *  limit to the number of fields returned, and trailing null fields are not
  *  suppressed.
  *
+ *  When the input +str+ is empty an empty Array is returned as the string is
+ *  considered to have no fields to split.
+ *
  *     " now's  the time".split        #=> ["now's", "the", "time"]
  *     " now's  the time".split(' ')   #=> ["now's", "the", "time"]
  *     " now's  the time".split(/ /)   #=> ["", "now's", "", "the", "time"]
@@ -5717,6 +5794,8 @@ static const char isspacetable[256] = {
  *     "1,2,,3,4,,".split(',')         #=> ["1", "2", "", "3", "4"]
  *     "1,2,,3,4,,".split(',', 4)      #=> ["1", "2", "", "3,4,,"]
  *     "1,2,,3,4,,".split(',', -4)     #=> ["1", "2", "", "3", "4", "", ""]
+ *
+ *     "".split(',', -1)               #=> []
  */
 
 static VALUE
@@ -6699,11 +6778,6 @@ rb_str_scan(VALUE str, VALUE pat)
 static VALUE
 rb_str_hex(VALUE str)
 {
-    rb_encoding *enc = rb_enc_get(str);
-
-    if (!rb_enc_asciicompat(enc)) {
-	rb_raise(rb_eEncCompatError, "ASCII incompatible encoding: %s", rb_enc_name(enc));
-    }
     return rb_str_to_inum(str, 16, FALSE);
 }
 
@@ -6725,23 +6799,25 @@ rb_str_hex(VALUE str)
 static VALUE
 rb_str_oct(VALUE str)
 {
-    rb_encoding *enc = rb_enc_get(str);
-
-    if (!rb_enc_asciicompat(enc)) {
-	rb_raise(rb_eEncCompatError, "ASCII incompatible encoding: %s", rb_enc_name(enc));
-    }
     return rb_str_to_inum(str, -8, FALSE);
 }
 
 
 /*
  *  call-seq:
- *     str.crypt(other_str)   -> new_str
+ *     str.crypt(salt_str)   -> new_str
  *
- *  Applies a one-way cryptographic hash to <i>str</i> by invoking the standard
- *  library function <code>crypt</code>. The argument is the salt string, which
- *  should be two characters long, each character drawn from
- *  <code>[a-zA-Z0-9./]</code>.
+ *  Applies a one-way cryptographic hash to <i>str</i> by invoking the
+ *  standard library function <code>crypt(3)</code> with the given
+ *  salt string.  While the format and the result are system and
+ *  implementation dependent, using a salt matching the regular
+ *  expression <code>\A[a-zA-Z0-9./]{2}</code> should be valid and
+ *  safe on any platform, in which only the first two characters are
+ *  significant.
+ *
+ *  This method is for use in system specific scripts, so if you want
+ *  a cross-platform hash function consider using Digest or OpenSSL
+ *  instead.
  */
 
 static VALUE
@@ -7163,8 +7239,8 @@ rb_str_start_with(int argc, VALUE *argv, VALUE str)
     int i;
 
     for (i=0; i<argc; i++) {
-	VALUE tmp = rb_check_string_type(argv[i]);
-	if (NIL_P(tmp)) continue;
+	VALUE tmp = argv[i];
+	StringValue(tmp);
 	rb_enc_check(str, tmp);
 	if (RSTRING_LEN(str) < RSTRING_LEN(tmp)) continue;
 	if (memcmp(RSTRING_PTR(str), RSTRING_PTR(tmp), RSTRING_LEN(tmp)) == 0)
@@ -7188,8 +7264,8 @@ rb_str_end_with(int argc, VALUE *argv, VALUE str)
     rb_encoding *enc;
 
     for (i=0; i<argc; i++) {
-	VALUE tmp = rb_check_string_type(argv[i]);
-	if (NIL_P(tmp)) continue;
+	VALUE tmp = argv[i];
+	StringValue(tmp);
 	enc = rb_enc_check(str, tmp);
 	if (RSTRING_LEN(str) < RSTRING_LEN(tmp)) continue;
 	p = RSTRING_PTR(str);
@@ -7699,7 +7775,8 @@ rb_to_id(VALUE name)
       case T_SYMBOL:
 	return SYM2ID(name);
     }
-    return Qnil; /* not reached */
+
+    UNREACHABLE;
 }
 
 /*

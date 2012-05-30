@@ -525,13 +525,12 @@ class SortedSet < Set
       module_eval {
         # a hack to shut up warning
         alias old_init initialize
-        remove_method :old_init
       }
       begin
         require 'rbtree'
 
         module_eval %{
-          def initialize(*args, &block)
+          def initialize(*args)
             @hash = RBTree.new
             super
           end
@@ -544,7 +543,7 @@ class SortedSet < Set
         }
       rescue LoadError
         module_eval %{
-          def initialize(*args, &block)
+          def initialize(*args)
             @keys = nil
             super
           end
@@ -605,6 +604,10 @@ class SortedSet < Set
           end
         }
       end
+      module_eval {
+        # a hack to shut up warning
+        remove_method :old_init
+      }
 
       @@setup = true
     end

@@ -3,10 +3,14 @@
 
 require 'test/unit'
 require File.join(File.dirname(__FILE__), 'setup_variant')
-require 'json/add/core.rb'
+require 'json/add/core'
+require 'json/add/complex'
+require 'json/add/rational'
+require 'json/add/bigdecimal'
+require 'json/add/ostruct'
 require 'date'
 
-class TC_JSONAddition < Test::Unit::TestCase
+class TestJSONAddition < Test::Unit::TestCase
   include JSON
 
   class A
@@ -60,7 +64,7 @@ class TC_JSONAddition < Test::Unit::TestCase
 
     def to_json(*args)
       {
-        'json_class'  => 'TC_JSONAddition::Nix',
+        'json_class'  => 'TestJSONAddition::Nix',
       }.to_json(*args)
     end
   end
@@ -84,7 +88,7 @@ class TC_JSONAddition < Test::Unit::TestCase
     a_hash = JSON.parse(json, :create_additions => false)
     assert_kind_of Hash, a_hash
     assert_equal(
-      {"args"=>[666], "json_class"=>"TC_JSONAddition::A"}.sort_by { |k,| k },
+      {"args"=>[666], "json_class"=>"TestJSONAddition::A"}.sort_by { |k,| k },
       a_hash.sort_by { |k,| k }
     )
   end
@@ -93,7 +97,7 @@ class TC_JSONAddition < Test::Unit::TestCase
     b = B.new
     assert !B.json_creatable?
     json = generate(b)
-    assert_equal({ "json_class"=>"TC_JSONAddition::B" }, JSON.parse(json))
+    assert_equal({ "json_class"=>"TestJSONAddition::B" }, JSON.parse(json))
   end
 
   def test_extended_json_fail2
@@ -126,7 +130,7 @@ class TC_JSONAddition < Test::Unit::TestCase
 
   def test_core
     t = Time.now
-    assert_equal t.inspect, JSON(JSON(t)).inspect
+    assert_equal t, JSON(JSON(t))
     d = Date.today
     assert_equal d, JSON(JSON(d))
     d = DateTime.civil(2007, 6, 14, 14, 57, 10, Rational(1, 12), 2299161)
@@ -163,5 +167,22 @@ class TC_JSONAddition < Test::Unit::TestCase
     assert_equal d, JSON.parse(d.to_json)
     d = DateTime.civil(2008, 6, 17, 11, 48, 32, Rational(12,24))
     assert_equal d, JSON.parse(d.to_json)
+  end
+
+  def test_rational_complex
+    assert_equal Rational(2, 9), JSON(JSON(Rational(2, 9)))
+    assert_equal Complex(2, 9), JSON(JSON(Complex(2, 9)))
+  end
+
+  def test_bigdecimal
+    assert_equal BigDecimal('3.141', 23), JSON(JSON(BigDecimal('3.141', 23)))
+    assert_equal BigDecimal('3.141', 666), JSON(JSON(BigDecimal('3.141', 666)))
+  end
+
+  def test_ostruct
+    o = OpenStruct.new
+    # XXX this won't work; o.foo = { :bar => true }
+    o.foo = { 'bar' => true }
+    assert_equal o, JSON(JSON(o))
   end
 end

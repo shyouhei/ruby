@@ -126,6 +126,7 @@ extern DWORD rb_w32_osid(void);
 #undef fputchar
 #undef utime
 #undef lseek
+#undef stat
 #undef fstat
 #define getc(_stream)		rb_w32_getc(_stream)
 #define getchar()		rb_w32_getc(stdin)
@@ -149,6 +150,7 @@ extern DWORD rb_w32_osid(void);
 #define getppid()		rb_w32_getppid()
 #define sleep(x)		rb_w32_Sleep((x)*1000)
 #define Sleep(msec)		(void)rb_w32_Sleep(msec)
+#define fstati64(fd,st) 	rb_w32_fstati64(fd,st)
 #ifdef __BORLANDC__
 #define creat(p, m)		_creat(p, m)
 #define eof()			_eof()
@@ -157,7 +159,6 @@ extern DWORD rb_w32_osid(void);
 #define tell(h)			_tell(h)
 #define _open			_sopen
 #define sopen			_sopen
-#define _fstati64(fd,st)	rb_w32_fstati64(fd,st)
 #undef fopen
 #define fopen(p, m)		rb_w32_fopen(p, m)
 #undef fdopen
@@ -184,7 +185,7 @@ extern DWORD rb_w32_osid(void);
 #if SIZEOF_OFF_T == 8
 #define off_t __int64
 #define stat stati64
-#define fstat(fd,st)		_fstati64(fd,st)
+#define fstat(fd,st)		fstati64(fd,st)
 #if defined(__BORLANDC__)
 #define stati64(path, st) rb_w32_stati64(path, st)
 #elif !defined(_MSC_VER) || RT_VER < 80
@@ -195,7 +196,6 @@ extern DWORD rb_w32_osid(void);
 #else
 #define stati64 _stat64
 #define _stat64(path, st) rb_w32_stati64(path, st)
-#define _fstati64 _fstat64
 #endif
 #else
 #define stat(path,st)		rb_w32_stat(path,st)
@@ -267,13 +267,14 @@ extern struct servent  *WSAAPI rb_w32_getservbyname(const char *, const char *);
 extern struct servent  *WSAAPI rb_w32_getservbyport(int, const char *);
 extern int    rb_w32_socketpair(int, int, int, int *);
 extern char * rb_w32_getcwd(char *, int);
+extern char * rb_w32_ugetenv(const char *);
 extern char * rb_w32_getenv(const char *);
 extern int    rb_w32_rename(const char *, const char *);
 extern int    rb_w32_urename(const char *, const char *);
 extern char **rb_w32_get_environ(void);
 extern void   rb_w32_free_environ(char **);
 extern int    rb_w32_map_errno(DWORD);
-extern char * WSAAPI rb_w32_inet_ntop(int,void *,char *,size_t);
+extern char * WSAAPI rb_w32_inet_ntop(int,const void *,char *,size_t);
 extern DWORD  rb_w32_osver(void);
 
 extern int chown(const char *, int, int);
@@ -284,6 +285,7 @@ extern int gettimeofday(struct timeval *, struct timezone *);
 extern rb_pid_t waitpid (rb_pid_t, int *, int);
 extern rb_pid_t rb_w32_spawn(int, const char *, const char*);
 extern rb_pid_t rb_w32_aspawn(int, const char *, char *const *);
+extern rb_pid_t rb_w32_aspawn_flags(int, const char *, char *const *, DWORD);
 extern int kill(int, int);
 extern int fcntl(int, int, ...);
 extern rb_pid_t rb_w32_getpid(void);
@@ -303,9 +305,10 @@ extern int rb_w32_stati64(const char *, struct stati64 *);
 extern int rb_w32_ustati64(const char *, struct stati64 *);
 extern int rb_w32_access(const char *, int);
 extern int rb_w32_uaccess(const char *, int);
+extern char rb_w32_fd_is_text(int);
+extern int rb_w32_fstati64(int, struct stati64 *);
 
 #ifdef __BORLANDC__
-extern int rb_w32_fstati64(int, struct stati64 *);
 extern off_t _lseeki64(int, off_t, int);
 extern FILE *rb_w32_fopen(const char *, const char *);
 extern FILE *rb_w32_fdopen(int, const char *);
@@ -569,11 +572,31 @@ extern char *rb_w32_strerror(int);
 # define EREMOTE		WSAEREMOTE
 #endif
 
-#define F_SETFL 1
+#define F_DUPFD 0
+//#define F_GETFD 1
+//#define F_SETFD 2
+//#define F_GETFL 3
+#define F_SETFL 4
+//#define FD_CLOEXEC 1 /* F_GETFD, F_SETFD */
 #define O_NONBLOCK 1
 
 #undef FD_SET
-#define FD_SET(f, s)		rb_w32_fdset(f, s)
+#define FD_SET(fd, set)	do {\
+    unsigned int i;\
+    SOCKET s = _get_osfhandle(fd);\
+\
+    for (i = 0; i < (set)->fd_count; i++) {\
+        if ((set)->fd_array[i] == s) {\
+            break;\
+        }\
+    }\
+    if (i == (set)->fd_count) {\
+        if ((set)->fd_count < FD_SETSIZE) {\
+            (set)->fd_array[i] = s;\
+            (set)->fd_count++;\
+        }\
+    }\
+} while(0)
 
 #undef FD_CLR
 #define FD_CLR(f, s)		rb_w32_fdclr(f, s)
@@ -682,8 +705,10 @@ struct tms {
 
 int rb_w32_times(struct tms *);
 
+struct tm *gmtime_r(const time_t *, struct tm *);
+struct tm *localtime_r(const time_t *, struct tm *);
+
 /* thread stuff */
-HANDLE GetCurrentThreadHandle(void);
 int  rb_w32_sleep(unsigned long msec);
 int  rb_w32_putc(int, FILE*);
 int  rb_w32_getc(FILE*);

@@ -196,7 +196,7 @@ ancillary_s_unix_rights(int argc, VALUE *argv, VALUE klass)
 
     for (i = 0 ; i < argc; i++) {
         VALUE obj = argv[i];
-        if (TYPE(obj) != T_FILE) {
+        if (!RB_TYPE_P(obj, T_FILE)) {
             rb_raise(rb_eTypeError, "IO expected");
         }
         rb_ary_push(ary, obj);
@@ -1358,11 +1358,22 @@ struct recvmsg_args_struct {
     int flags;
 };
 
+ssize_t
+rsock_recvmsg(int socket, struct msghdr *message, int flags)
+{
+#ifdef MSG_CMSG_CLOEXEC
+    /* MSG_CMSG_CLOEXEC is available since Linux 2.6.23.  Linux 2.6.18 silently ignore it. */
+    flags |= MSG_CMSG_CLOEXEC;
+#endif
+    return recvmsg(socket, message, flags);
+}
+
 static VALUE
 nogvl_recvmsg_func(void *ptr)
 {
     struct recvmsg_args_struct *args = ptr;
-    return recvmsg(args->fd, args->msg, args->flags);
+    int flags = args->flags;
+    return rsock_recvmsg(args->fd, args->msg, flags);
 }
 
 static ssize_t
@@ -1380,11 +1391,11 @@ static void
 discard_cmsg(struct cmsghdr *cmh, char *msg_end, int msg_peek_p)
 {
 # if !defined(FD_PASSING_WORK_WITH_RECVMSG_MSG_PEEK)
-    /* 
+    /*
      * FreeBSD 8.2.0, NetBSD 5 and MacOS X Snow Leopard doesn't
      * allocate fds by recvmsg with MSG_PEEK.
      * [ruby-dev:44189]
-     * http://redmine.ruby-lang.org/issues/5075
+     * http://bugs.ruby-lang.org/issues/5075
      *
      * Linux 2.6.38 allocate fds by recvmsg with MSG_PEEK.
      */
@@ -1396,7 +1407,7 @@ discard_cmsg(struct cmsghdr *cmh, char *msg_end, int msg_peek_p)
         int *end = (int *)((char *)cmh + cmh->cmsg_len);
         while ((char *)fdp + sizeof(int) <= (char *)end &&
                (char *)fdp + sizeof(int) <= msg_end) {
-            rb_update_max_fd(*fdp);
+            rb_fd_fix_cloexec(*fdp);
             close(*fdp);
             fdp++;
         }
@@ -1439,7 +1450,7 @@ make_io_for_unix_rights(VALUE ctl, struct cmsghdr *cmh, char *msg_end)
             VALUE io;
             if (fstat(fd, &stbuf) == -1)
                 rb_raise(rb_eSocket, "invalid fd in SCM_RIGHTS");
-            rb_update_max_fd(fd);
+            rb_fd_fix_cloexec(fd);
             if (S_ISSOCK(stbuf.st_mode))
                 io = rsock_init_sock(rb_obj_alloc(rb_cSocket), fd);
             else
@@ -1485,7 +1496,7 @@ bsock_recvmsg_internal(int argc, VALUE *argv, VALUE sock, int nonblock)
     rb_secure(4);
 
     vopts = Qnil;
-    if (0 < argc && TYPE(argv[argc-1]) == T_HASH)
+    if (0 < argc && RB_TYPE_P(argv[argc-1], T_HASH))
         vopts = argv[--argc];
 
     rb_scan_args(argc, argv, "03", &vmaxdatlen, &vflags, &vmaxctllen);

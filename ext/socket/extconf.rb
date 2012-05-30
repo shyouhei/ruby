@@ -6,7 +6,6 @@ case RUBY_PLATFORM
 when /(ms|bcc)win(32|64)|mingw/
   test_func = "WSACleanup"
   have_library("ws2_32", "WSACleanup")
-  $defs << "-DHAVE_SOCKETPAIR"
 when /cygwin/
   test_func = "socket"
 when /beos/
@@ -44,9 +43,10 @@ if enable_config("ipv6", default_ipv6)
 #include <sys/socket.h>
 #endif
 int
-main()
+main(void)
 {
   socket(AF_INET6, SOCK_STREAM, 0);
+  return 0;
 }
 EOF
     $defs << "-DENABLE_IPV6" << "-DINET6"
@@ -56,7 +56,7 @@ end
 
 if ipv6
   if $mingw
-    $CPPFLAGS << " -D_WIN32_WINNT=0x501"
+    $CPPFLAGS << " -D_WIN32_WINNT=0x501" unless $CPPFLAGS.include?("_WIN32_WINNT")
   end
   ipv6lib = nil
   class << (fmt = "unknown")
@@ -264,7 +264,7 @@ getaddr_info_ok = (enable_config("wide-getaddrinfo") && :wide) ||
 #endif
 
 int
-main()
+main(void)
 {
   int passive, gaierr, inet4 = 0, inet6 = 0;
   struct addrinfo hints, *ai, *aitop;
@@ -348,12 +348,12 @@ main()
 
   if (aitop)
     freeaddrinfo(aitop);
-  exit(EXIT_SUCCESS);
+  return EXIT_SUCCESS;
 
  bad:
   if (aitop)
     freeaddrinfo(aitop);
-  exit(EXIT_FAILURE);
+  return EXIT_FAILURE;
 }
 EOF
 if ipv6 and not getaddr_info_ok
@@ -397,6 +397,8 @@ EOF
   end
 end
 
+have_func("accept4")
+
 $objs = [
   "init.#{$OBJEXT}",
   "constants.#{$OBJEXT}",
@@ -428,9 +430,10 @@ if getaddr_info_ok == :wide or
   $defs << "-DGETADDRINFO_EMU"
 end
 
-have_func("inet_ntop") or have_func("inet_ntoa")
-have_func("inet_pton") or have_func("inet_aton")
-have_func("getservbyport")
+have_func('inet_ntop(0, (const void *)0, (char *)0, 0)') or
+  have_func("inet_ntoa(*(struct in_addr *)NULL)")
+have_func('inet_pton(0, "", (void *)0)') or have_func('inet_aton("", (struct in_addr *)0)')
+have_func('getservbyport(0, "")')
 have_header("arpa/nameser.h")
 have_header("resolv.h")
 
@@ -450,11 +453,11 @@ end
 have_header("sys/un.h")
 have_header("sys/uio.h")
 have_type("struct in_pktinfo", headers) {|src|
-  src.sub(%r'^/\*top\*/', '\1'"\n#if defined(IPPROTO_IP) && defined(IP_PKTINFO)") <<
+  src.sub(%r'^/\*top\*/', '\&'"\n#if defined(IPPROTO_IP) && defined(IP_PKTINFO)") <<
   "#else\n" << "#error\n" << ">>>>>> no in_pktinfo <<<<<<\n" << "#endif\n"
 } and have_struct_member("struct in_pktinfo", "ipi_spec_dst", headers)
 have_type("struct in6_pktinfo", headers) {|src|
-  src.sub(%r'^/\*top\*/', '\1'"\n#if defined(IPPROTO_IPV6) && defined(IPV6_PKTINFO)") <<
+  src.sub(%r'^/\*top\*/', '\&'"\n#if defined(IPPROTO_IPV6) && defined(IPV6_PKTINFO)") <<
   "#else\n" << "#error\n" << ">>>>>> no in6_pktinfo <<<<<<\n" << "#endif\n"
 }
 
@@ -480,8 +483,11 @@ $distcleanfiles << "constants.h" << "constdefs.*"
 if have_func(test_func)
   have_func("hsterror")
   have_func("getipnodebyname") or have_func("gethostbyname2")
-  have_func("socketpair") unless $defs.include?("-DHAVE_SOCKETPAIR")
-  unless have_func("gethostname")
+  if !have_func("socketpair(0, 0, 0, 0)") and have_func("rb_w32_socketpair(0, 0, 0, 0)")
+    $defs << "-Dsocketpair(a,b,c,d)=rb_w32_socketpair((a),(b),(c),(d))"
+    $defs << "-DHAVE_SOCKETPAIR"
+  end
+  unless have_func("gethostname((char *)0, 0)")
     have_func("uname")
   end
   if enable_config("socks", ENV["SOCKS_SERVER"])

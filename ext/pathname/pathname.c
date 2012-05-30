@@ -1,4 +1,5 @@
 #include "ruby.h"
+#include "ruby/encoding.h"
 
 static VALUE rb_cPathname;
 static ID id_at_path, id_to_path;
@@ -8,7 +9,7 @@ get_strpath(VALUE obj)
 {
     VALUE strpath;
     strpath = rb_ivar_get(obj, id_at_path);
-    if (TYPE(strpath) != T_STRING)
+    if (!RB_TYPE_P(strpath, T_STRING))
         rb_raise(rb_eTypeError, "unexpected @path");
     return strpath;
 }
@@ -27,7 +28,7 @@ static VALUE
 path_initialize(VALUE self, VALUE arg)
 {
     VALUE str;
-    if (TYPE(arg) == T_STRING) {
+    if (RB_TYPE_P(arg, T_STRING)) {
         str = arg;
     }
     else {
@@ -184,15 +185,15 @@ path_sub_ext(VALUE self, VALUE repl)
 
     StringValue(repl);
     p = RSTRING_PTR(str);
-    ext = ruby_find_extname(p, &extlen);
+    extlen = RSTRING_LEN(str);
+    ext = ruby_enc_find_extname(p, &extlen, rb_enc_get(str));
     if (ext == NULL) {
         ext = p + RSTRING_LEN(str);
     }
     else if (extlen <= 1) {
         ext += extlen;
     }
-    str2 = rb_str_dup(str);
-    rb_str_resize(str2, ext-p);
+    str2 = rb_str_subseq(str, 0, ext-p);
     rb_str_append(str2, repl);
     OBJ_INFECT(str2, str);
     return rb_class_new_instance(1, &str2, rb_obj_class(self));
@@ -861,8 +862,27 @@ path_s_getwd(VALUE klass)
  * Return the entries (files and subdirectories) in the directory, each as a
  * Pathname object.
  *
+ * The result contains just a filename which has no directory.
+ *
  * The result may contain the current directory #<Pathname:.> and the parent
  * directory #<Pathname:..>.
+ *
+ * If you don't want #<Pathname:.> and #<Pathname:..> and
+ * want directory, consider Pathname#children.
+ *
+ *   pp Pathname.new('/usr/local').entries
+ *   #=> [#<Pathname:share>,
+ *   #    #<Pathname:lib>,
+ *   #    #<Pathname:..>,
+ *   #    #<Pathname:include>,
+ *   #    #<Pathname:etc>,
+ *   #    #<Pathname:bin>,
+ *   #    #<Pathname:man>,
+ *   #    #<Pathname:games>,
+ *   #    #<Pathname:.>,
+ *   #    #<Pathname:sbin>,
+ *   #    #<Pathname:src>]
+ *
  */
 static VALUE
 path_entries(VALUE self)

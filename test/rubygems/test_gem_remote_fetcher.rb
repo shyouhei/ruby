@@ -1,6 +1,10 @@
 require 'rubygems/test_case'
 require 'ostruct'
 require 'webrick'
+begin
+  require 'webrick/https'
+rescue LoadError
+end
 require 'rubygems/remote_fetcher'
 require 'rubygems/format'
 
@@ -72,6 +76,8 @@ gems:
   # don't let parallel runners collide
   PROXY_PORT = process_based_port + 100 + $1.to_i * 100 + $2.to_i * 10 + $3.to_i
   SERVER_PORT = process_based_port + 200 + $1.to_i * 100 + $2.to_i * 10 + $3.to_i
+
+  DIR = File.expand_path(File.dirname(__FILE__))
 
   def setup
     super
@@ -740,6 +746,53 @@ gems:
     end
   end
 
+  def test_ssl_connection
+    ssl_server = self.class.start_ssl_server
+    temp_ca_cert = File.join(DIR, 'ca_cert.pem')
+    with_configured_fetcher(":ssl_ca_cert: #{temp_ca_cert}") do |fetcher|
+      fetcher.fetch_path("https://localhost:#{ssl_server.config[:Port]}/yaml")
+    end
+  end if defined?(OpenSSL::PKey)
+
+  def test_do_not_allow_insecure_ssl_connection_by_default
+    ssl_server = self.class.start_ssl_server
+    with_configured_fetcher do |fetcher|
+      assert_raises Gem::RemoteFetcher::FetchError do
+        fetcher.fetch_path("https://localhost:#{ssl_server.config[:Port]}/yaml")
+      end
+    end
+  end if defined?(OpenSSL::PKey)
+
+  def test_ssl_connection_allow_verify_none
+    ssl_server = self.class.start_ssl_server
+    with_configured_fetcher(":ssl_verify_mode: 0") do |fetcher|
+      fetcher.fetch_path("https://localhost:#{ssl_server.config[:Port]}/yaml")
+    end
+  end if defined?(OpenSSL::PKey)
+
+  def test_do_not_follow_insecure_redirect
+    ssl_server = self.class.start_ssl_server
+    temp_ca_cert = File.join(DIR, 'ca_cert.pem'),
+    with_configured_fetcher(":ssl_ca_cert: #{temp_ca_cert}") do |fetcher|
+      assert_raises Gem::RemoteFetcher::FetchError do
+        fetcher.fetch_path("https://localhost:#{ssl_server.config[:Port]}/insecure_redirect?to=#{@server_uri}")
+      end
+    end
+  end if defined?(OpenSSL::PKey)
+
+  def with_configured_fetcher(config_str = nil, &block)
+    if config_str
+      temp_conf = File.join @tempdir, '.gemrc'
+      File.open temp_conf, 'w' do |fp|
+        fp.puts config_str
+      end
+      Gem.configuration = Gem::ConfigFile.new %W[--config-file #{temp_conf}]
+    end
+    yield Gem::RemoteFetcher.new
+  ensure
+    Gem.configuration = nil
+  end
+
   def util_stub_connection_for hash
     def @fetcher.connection= conn
       @conn = conn
@@ -765,11 +818,11 @@ gems:
   end
 
   def assert_data_from_server(data)
-    assert_block("Data is not from server") { data =~ /0\.4\.11/ }
+    assert_match(/0\.4\.11/, data, "Data is not from server")
   end
 
   def assert_data_from_proxy(data)
-    assert_block("Data is not from proxy") { data =~ /0\.4\.2/ }
+    assert_match(/0\.4\.2/, data, "Data is not from proxy")
   end
 
   class Conn
@@ -801,6 +854,49 @@ gems:
       @enable_yaml = true
       @enable_zip = false
     end
+
+    DIR = File.expand_path(File.dirname(__FILE__))
+    DH_PARAM = defined?(OpenSSL::PKey) ? OpenSSL::PKey::DH.new(128) : nil
+
+    def start_ssl_server(config = {})
+      null_logger = NilLog.new
+      server = WEBrick::HTTPServer.new({
+        :Port => 0,
+        :Logger => null_logger,
+        :AccessLog => [],
+        :SSLEnable => true,
+        :SSLCACertificateFile => File.join(DIR, 'ca_cert.pem'),
+        :SSLCertificate => cert('ssl_cert.pem'),
+        :SSLPrivateKey => key('ssl_key.pem'),
+        :SSLVerifyClient => nil,
+        :SSLCertName => nil
+      }.merge(config))
+      server.mount_proc("/yaml") { |req, res|
+        res.body = "--- true\n"
+      }
+      server.mount_proc("/insecure_redirect") { |req, res|
+        res.set_redirect(WEBrick::HTTPStatus::MovedPermanently, req.query['to'])
+      }
+      server.ssl_context.tmp_dh_callback = proc { DH_PARAM }
+      t = Thread.new do
+        begin
+          server.start
+        rescue Exception => ex
+          abort ex.message
+          puts "ERROR during server thread: #{ex.message}"
+        end
+      end
+      while server.status != :Running
+        sleep 0.1
+        unless t.alive?
+          t.join
+          raise
+        end
+      end
+      server
+    end if DH_PARAM
+
+
 
     private
 
@@ -843,6 +939,14 @@ gems:
         end
       end
       sleep 0.2                 # Give the servers time to startup
+    end
+
+    def cert(filename)
+      OpenSSL::X509::Certificate.new(File.read(File.join(DIR, filename)))
+    end
+
+    def key(filename)
+      OpenSSL::PKey::RSA.new(File.read(File.join(DIR, filename)))
     end
   end
 

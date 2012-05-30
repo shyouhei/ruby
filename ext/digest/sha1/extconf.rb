@@ -9,9 +9,11 @@ $INCFLAGS << " -I$(srcdir)/.."
 $objs = [ "sha1init.#{$OBJEXT}" ]
 
 dir_config("openssl")
+pkg_config("openssl")
+require_relative '../../openssl/deprecation'
 
 if !with_config("bundled-sha1") &&
-    have_library("crypto") && have_header("openssl/sha.h")
+    have_library("crypto") && OpenSSL.check_func("SHA1_Transform", "openssl/sha.h")
   $objs << "sha1ossl.#{$OBJEXT}"
 else
   $objs << "sha1.#{$OBJEXT}"

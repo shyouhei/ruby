@@ -349,6 +349,14 @@ rb_int2inum(SIGNED_VALUE n)
  * for each 0 <= i < num_longs.
  * So buf is little endian at whole on a little endian machine.
  * But buf is mixed endian on a big endian machine.
+ *
+ * The buf represents negative integers as two's complement.
+ * So, the most significant bit of the most significant word,
+ * (buf[num_longs-1]>>(SIZEOF_LONG*CHAR_BIT-1)),
+ * is the sign bit: 1 means negative and 0 means zero or positive.
+ *
+ * If given size of buf (num_longs) is not enough to represent val,
+ * higier words (including a sign bit) are ignored.
  */
 void
 rb_big_pack(VALUE val, unsigned long *buf, long num_longs)
@@ -391,7 +399,7 @@ rb_big_pack(VALUE val, unsigned long *buf, long num_longs)
     }
 }
 
-/* See rb_big_pack comment for endianness of buf. */
+/* See rb_big_pack comment for endianness and sign of buf. */
 VALUE
 rb_big_unpack(unsigned long *buf, long num_longs)
 {
@@ -767,6 +775,7 @@ rb_str_to_inum(VALUE str, int base, int badcheck)
     VALUE ret;
 
     StringValue(str);
+    rb_must_asciicompat(str);
     if (badcheck) {
 	s = StringValueCStr(str);
     }
@@ -1210,10 +1219,11 @@ rb_big2ulong(VALUE x)
     VALUE num = big2ulong(x, "unsigned long", TRUE);
 
     if (!RBIGNUM_SIGN(x)) {
-	if ((long)num < 0) {
+	unsigned long v = (unsigned long)(-(long)num);
+
+	if (v <= LONG_MAX)
 	    rb_raise(rb_eRangeError, "bignum out of range of unsigned long");
-	}
-	return (VALUE)(-(SIGNED_VALUE)num);
+	return (VALUE)v;
     }
     return num;
 }
@@ -1256,8 +1266,14 @@ rb_big2ull(VALUE x)
 {
     unsigned LONG_LONG num = big2ull(x, "unsigned long long");
 
-    if (!RBIGNUM_SIGN(x))
-	return (VALUE)(-(SIGNED_VALUE)num);
+    if (!RBIGNUM_SIGN(x)) {
+	LONG_LONG v = -(LONG_LONG)num;
+
+	/* FIXNUM_MIN-1 .. LLONG_MIN mapped into 0xbfffffffffffffff .. LONG_MAX+1 */
+	if ((unsigned LONG_LONG)v <= LLONG_MAX)
+	    rb_raise(rb_eRangeError, "bignum out of range of unsigned long long");
+	return v;
+    }
     return num;
 }
 
@@ -2774,12 +2790,13 @@ rb_big_divide(VALUE x, VALUE y, ID op)
 
       case T_FLOAT:
 	{
-	    double div = rb_big2dbl(x) / RFLOAT_VALUE(y);
 	    if (op == '/') {
-		return DBL2NUM(div);
+		return DBL2NUM(rb_big2dbl(x) / RFLOAT_VALUE(y));
 	    }
 	    else {
-		return rb_dbl2big(div);
+		double dy = RFLOAT_VALUE(y);
+		if (dy == 0.0) rb_num_zerodiv();
+		return rb_dbl2big(rb_big2dbl(x) / dy);
 	    }
 	}
 
@@ -2959,32 +2976,31 @@ big_fdiv(VALUE x, VALUE y)
     switch (TYPE(y)) {
       case T_FIXNUM:
 	y = rb_int2big(FIX2LONG(y));
-      case T_BIGNUM: {
+      case T_BIGNUM:
 	bigtrunc(y);
 	l = RBIGNUM_LEN(y) - 1;
 	ey = l * BITSPERDIG;
 	ey += bdigbitsize(BDIGITS(y)[l]);
 	ey -= DBL_BIGDIG * BITSPERDIG;
 	if (ey) y = big_shift(y, ey);
-      bignum:
-	bigdivrem(x, y, &z, 0);
-	l = ex - ey;
-#if SIZEOF_LONG > SIZEOF_INT
-	{
-	    /* Visual C++ can't be here */
-	    if (l > INT_MAX) return DBL2NUM(INFINITY);
-	    if (l < INT_MIN) return DBL2NUM(0.0);
-	}
-#endif
-	return DBL2NUM(ldexp(big2dbl(z), (int)l));
-      }
+	break;
       case T_FLOAT:
 	y = dbl2big(ldexp(frexp(RFLOAT_VALUE(y), &i), DBL_MANT_DIG));
 	ey = i - DBL_MANT_DIG;
-	goto bignum;
+	break;
+      default:
+	rb_bug("big_fdiv");
     }
-    rb_bug("big_fdiv");
-    /* NOTREACHED */
+    bigdivrem(x, y, &z, 0);
+    l = ex - ey;
+#if SIZEOF_LONG > SIZEOF_INT
+    {
+	/* Visual C++ can't be here */
+	if (l > INT_MAX) return DBL2NUM(INFINITY);
+	if (l < INT_MIN) return DBL2NUM(0.0);
+    }
+#endif
+    return DBL2NUM(ldexp(big2dbl(z), (int)l));
 }
 
 /*
@@ -3079,10 +3095,11 @@ rb_big_pow(VALUE x, VALUE y)
 	else {
 	    VALUE z = 0;
 	    SIGNED_VALUE mask;
-	    const long BIGLEN_LIMIT = 1024*1024 / SIZEOF_BDIGITS;
+	    const long xlen = RBIGNUM_LEN(x) - 1;
+	    const long xbits = ffs(RBIGNUM_DIGITS(x)[xlen]) + SIZEOF_BDIGITS*BITSPERDIG*xlen;
+	    const long BIGLEN_LIMIT = BITSPERDIG*1024*1024;
 
-	    if ((RBIGNUM_LEN(x) > BIGLEN_LIMIT) ||
-		(RBIGNUM_LEN(x) > BIGLEN_LIMIT / yy)) {
+	    if ((xbits > BIGLEN_LIMIT) || (xbits * yy > BIGLEN_LIMIT)) {
 		rb_warn("in a**b, b may be too big");
 		d = (double)yy;
 		break;
@@ -3534,9 +3551,10 @@ big_rshift(VALUE x, unsigned long shift)
 	    return INT2FIX(-1);
     }
     if (!RBIGNUM_SIGN(x)) {
-	save_x = x = rb_big_clone(x);
+	x = rb_big_clone(x);
 	get2comp(x);
     }
+    save_x = x;
     xds = BDIGITS(x);
     i = RBIGNUM_LEN(x); j = i - s1;
     if (j == 0) {
@@ -3556,6 +3574,7 @@ big_rshift(VALUE x, unsigned long shift)
     if (!RBIGNUM_SIGN(x)) {
 	get2comp(z);
     }
+    RB_GC_GUARD(save_x);
     return z;
 }
 
@@ -3644,17 +3663,13 @@ static VALUE
 rb_big_coerce(VALUE x, VALUE y)
 {
     if (FIXNUM_P(y)) {
-	return rb_assoc_new(rb_int2big(FIX2LONG(y)), x);
+	y = rb_int2big(FIX2LONG(y));
     }
-    else if (RB_TYPE_P(y, T_BIGNUM)) {
-       return rb_assoc_new(y, x);
-    }
-    else {
+    else if (!RB_TYPE_P(y, T_BIGNUM)) {
 	rb_raise(rb_eTypeError, "can't coerce %s to Bignum",
 		 rb_obj_classname(y));
     }
-    /* not reached */
-    return Qnil;
+    return rb_assoc_new(y, x);
 }
 
 /*

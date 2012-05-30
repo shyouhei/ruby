@@ -92,6 +92,10 @@
 #endif
 #endif
 
+#ifdef __native_client__
+#undef OPT_DIRECT_THREADED_CODE
+#endif
+
 /* call threaded code */
 #if    OPT_CALL_THREADED_CODE
 #if    OPT_DIRECT_THREADED_CODE
@@ -146,6 +150,14 @@ struct iseq_inline_cache_entry {
 #define GetISeqPtr(obj, ptr) \
   GetCoreDataFromValue((obj), rb_iseq_t, (ptr))
 
+typedef struct rb_location_struct {
+    VALUE filename;
+    VALUE filepath;
+    VALUE basename;
+    VALUE name;
+    size_t line_no;
+} rb_location_t;
+
 struct rb_iseq_struct;
 
 struct rb_iseq_struct {
@@ -165,15 +177,13 @@ struct rb_iseq_struct {
 	ISEQ_TYPE_DEFINED_GUARD
     } type;              /* instruction sequence type */
 
-    VALUE name;	         /* String: iseq name */
-    VALUE filename;      /* file information where this sequence from */
-    VALUE filepath;      /* real file path or nil */
+    rb_location_t location;
+
     VALUE *iseq;         /* iseq (insn number and operands) */
     VALUE *iseq_encoded; /* encoded iseq */
     unsigned long iseq_size;
     VALUE mark_ary;	/* Array: includes operands which should be GC marked */
     VALUE coverage;     /* coverage array */
-    unsigned short line_no;
 
     /* insn info, must be freed */
     struct iseq_line_info_entry *line_info_table;
@@ -200,14 +210,14 @@ struct rb_iseq_struct {
      *
      *  argc           = M
      *  arg_rest       = M+N+1 // or -1 if no rest arg
-     *  arg_opts       = N
-     *  arg_opts_tbl   = [ (N entries) ]
+     *  arg_opts       = N+1   // or 0  if no optional arg
+     *  arg_opt_table  = [ (arg_opts entries) ]
      *  arg_post_len   = O // 0 if no post arguments
      *  arg_post_start = M+N+2
      *  arg_block      = M+N + 1 + O + 1 // -1 if no block arg
      *  arg_simple     = 0 if not simple arguments.
      *                 = 1 if no opt, rest, post, block.
-     *                 = 2 if ambiguos block parameter ({|a|}).
+     *                 = 2 if ambiguous block parameter ({|a|}).
      *  arg_size       = argument size.
      */
 
@@ -220,6 +230,10 @@ struct rb_iseq_struct {
     int arg_post_start;
     int arg_size;
     VALUE *arg_opt_table;
+    int arg_keyword;
+    int arg_keyword_check; /* if this is true, raise an ArgumentError when unknown keyword argument is passed */
+    int arg_keywords;
+    ID *arg_keyword_table;
 
     size_t stack_max; /* for stack overflow check */
 
@@ -403,6 +417,7 @@ typedef struct rb_thread_struct {
 
     /* passing state */
     int state;
+    int yielding;
 
     int waiting_fd;
 
@@ -506,7 +521,7 @@ VALUE rb_iseq_compile_with_option(VALUE src, VALUE file, VALUE filepath, VALUE l
 VALUE rb_iseq_disasm(VALUE self);
 int rb_iseq_disasm_insn(VALUE str, VALUE *iseqval, size_t pos, rb_iseq_t *iseq, VALUE child);
 const char *ruby_node_name(int node);
-int rb_iseq_first_lineno(rb_iseq_t *iseq);
+int rb_iseq_first_lineno(const rb_iseq_t *iseq);
 
 RUBY_EXTERN VALUE rb_cISeq;
 RUBY_EXTERN VALUE rb_cRubyVM;
@@ -665,7 +680,6 @@ void rb_thread_wakeup_timer_thread(void);
 int ruby_thread_has_gvl_p(void);
 VALUE rb_make_backtrace(void);
 typedef int rb_backtrace_iter_func(void *, VALUE, int, VALUE);
-int rb_backtrace_each(rb_backtrace_iter_func *iter, void *arg);
 rb_control_frame_t *rb_vm_get_ruby_level_next_cfp(rb_thread_t *th, rb_control_frame_t *cfp);
 int rb_vm_get_sourceline(const rb_control_frame_t *);
 VALUE rb_name_err_mesg_new(VALUE obj, VALUE mesg, VALUE recv, VALUE method);

@@ -241,7 +241,7 @@ def install_recursive(srcdir, dest, options = {})
     if dir
       makedirs(d)
     else
-      makedirs(File.dirname(d))
+      makedirs(d[/.*(?=\/)/m])
       if block_given?
         yield src, d, opts
       else
@@ -270,6 +270,7 @@ def with_destdir(dir)
 end
 
 def prepare(mesg, basedir, subdirs=nil)
+  return unless basedir
   case
   when !subdirs
     dirs = basedir
@@ -286,31 +287,39 @@ def prepare(mesg, basedir, subdirs=nil)
   makedirs(dirs)
 end
 
+def CONFIG.[](name, mandatory = false)
+  value = super(name)
+  if mandatory
+    raise "CONFIG['#{name}'] must be set" if !value or value.empty?
+  end
+  value
+end
+
 exeext = CONFIG["EXEEXT"]
 
-ruby_install_name = CONFIG["ruby_install_name"]
+ruby_install_name = CONFIG["ruby_install_name", true]
 rubyw_install_name = CONFIG["rubyw_install_name"]
 goruby_install_name = "go" + ruby_install_name
 
-bindir = CONFIG["bindir"]
-libdir = CONFIG["libdir"]
-archhdrdir = rubyhdrdir = CONFIG["rubyhdrdir"]
-archhdrdir += "/" + CONFIG["arch"]
-rubylibdir = CONFIG["rubylibdir"]
-archlibdir = CONFIG["archdir"]
+bindir = CONFIG["bindir", true]
+libdir = CONFIG["libdir", true]
+archhdrdir = rubyhdrdir = CONFIG["rubyhdrdir", true]
+archhdrdir += "/" + CONFIG["arch", true]
+rubylibdir = CONFIG["rubylibdir", true]
+archlibdir = CONFIG["archdir", true]
 sitelibdir = CONFIG["sitelibdir"]
 sitearchlibdir = CONFIG["sitearchdir"]
 vendorlibdir = CONFIG["vendorlibdir"]
 vendorarchlibdir = CONFIG["vendorarchdir"]
-mandir = CONFIG["mandir"]
-capidir = CONFIG["docdir"]
+mandir = CONFIG["mandir", true]
+docdir = CONFIG["docdir", true]
 configure_args = Shellwords.shellwords(CONFIG["configure_args"])
 enable_shared = CONFIG["ENABLE_SHARED"] == 'yes'
-dll = CONFIG["LIBRUBY_SO"]
-lib = CONFIG["LIBRUBY"]
-arc = CONFIG["LIBRUBY_A"]
-major = CONFIG["MAJOR"]
-minor = CONFIG["MINOR"]
+dll = CONFIG["LIBRUBY_SO", enable_shared]
+lib = CONFIG["LIBRUBY", true]
+arc = CONFIG["LIBRUBY_A", true]
+major = CONFIG["MAJOR", true]
+minor = CONFIG["MINOR", true]
 load_relative = configure_args.include?("--enable-load-relative")
 
 install?(:local, :arch, :bin, :'bin-arch') do
@@ -387,8 +396,8 @@ install?(:doc, :rdoc) do
   end
 end
 install?(:doc, :capi) do
-  prepare "capi-docs", capidir
-  install_recursive "doc/capi", capidir, :mode => $data_mode
+  prepare "capi-docs", docdir
+  install_recursive "doc/capi", docdir+"/capi", :mode => $data_mode
 end
 
 if load_relative
@@ -443,7 +452,7 @@ install?(:local, :comm, :bin, :'bin-comm') do
     trans = proc {|base| base}
   end
   install_recursive(File.join(srcdir, "bin"), bindir) do |src, cmd|
-    cmd = File.join(File.dirname(cmd), RbConfig.expand(trans[File.basename(cmd)]))
+    cmd = cmd.sub(/[^\/]*\z/m) {|n| RbConfig.expand(trans[n])}
 
     shebang = ''
     body = ''

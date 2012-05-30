@@ -197,6 +197,19 @@ class TestObject < Test::Unit::TestCase
     assert_equal([o], Array(o))
   end
 
+  def test_convert_hash
+    assert_equal({}, Hash(nil))
+    assert_equal({}, Hash([]))
+    assert_equal({key: :value}, Hash(key: :value))
+    assert_raise(TypeError) { Hash([1,2]) }
+    assert_raise(TypeError) { Hash(Object.new) }
+    o = Object.new
+    def o.to_hash; {a: 1, b: 2}; end
+    assert_equal({a: 1, b: 2}, Hash(o))
+    def o.to_hash; 9; end
+    assert_raise(TypeError) { Hash(o) }
+  end
+
   def test_to_integer
     o = Object.new
     def o.to_i; nil; end
@@ -433,8 +446,109 @@ class TestObject < Test::Unit::TestCase
     assert_equal([[:respond_to?, :to_ary, true]], called, bug5158)
   end
 
+  def test_implicit_respond_to_arity_1
+    p = Object.new
+
+    called = []
+    p.singleton_class.class_eval do
+      define_method(:respond_to?) do |a|
+        called << [:respond_to?, a]
+        false
+      end
+    end
+    [[p]].flatten
+    assert_equal([[:respond_to?, :to_ary]], called, '[bug:6000]')
+  end
+
+  def test_implicit_respond_to_arity_3
+    p = Object.new
+
+    called = []
+    p.singleton_class.class_eval do
+      define_method(:respond_to?) do |a, b, c|
+        called << [:respond_to?, a, b, c]
+        false
+      end
+    end
+
+    e = assert_raise(ArgumentError, '[bug:6000]') do
+      [[p]].flatten
+    end
+
+    assert_equal('respond_to? must accept 1 or 2 arguments (requires 3)', e.message)
+  end
+
+  def test_method_missing_passed_block
+    bug5731 = '[ruby-dev:44961]'
+
+    c = Class.new do
+      def method_missing(meth, *args) yield(meth, *args) end
+    end
+    a = c.new
+    result = nil
+    assert_nothing_raised(LocalJumpError, bug5731) do
+      a.foo {|x| result = x}
+    end
+    assert_equal(:foo, result, bug5731)
+    result = nil
+    e = a.enum_for(:foo)
+    assert_nothing_raised(LocalJumpError, bug5731) do
+      e.each {|x| result = x}
+    end
+    assert_equal(:foo, result, bug5731)
+
+    c = Class.new do
+      def respond_to_missing?(id, priv)
+        true
+      end
+      def method_missing(id, *args, &block)
+        return block.call(:foo, *args)
+      end
+    end
+    foo = c.new
+
+    result = nil
+    assert_nothing_raised(LocalJumpError, bug5731) do
+      foo.foobar {|x| result = x}
+    end
+    assert_equal(:foo, result, bug5731)
+    result = nil
+    assert_nothing_raised(LocalJumpError, bug5731) do
+      foo.enum_for(:foobar).each {|x| result = x}
+    end
+    assert_equal(:foo, result, bug5731)
+
+    result = nil
+    foobar = foo.method(:foobar)
+    foobar.call {|x| result = x}
+    assert_equal(:foo, result, bug5731)
+
+    result = nil
+    foobar = foo.method(:foobar)
+    foobar.enum_for(:call).each {|x| result = x}
+    assert_equal(:foo, result, bug5731)
+  end
+
   def test_send_with_no_arguments
     assert_raise(ArgumentError) { 1.send }
+  end
+
+  def test_send_with_block
+    x = :ng
+    1.send(:times) { x = :ok }
+    assert_equal(:ok, x)
+
+    x = :ok
+    o = Object.new
+    def o.inspect
+      yield if block_given?
+      super
+    end
+    begin
+      nil.public_send(o) { x = :ng }
+    rescue
+    end
+    assert_equal(:ok, x)
   end
 
   def test_no_superclass_method
@@ -630,6 +744,24 @@ class TestObject < Test::Unit::TestCase
     end
     assert_raise(TypeError) do
       :foo.singleton_class
+    end
+  end
+
+  def test_redef_method_missing
+    bug5473 = '[ruby-core:40287]'
+    ['ArgumentError.new("bug5473")', 'ArgumentError, "bug5473"', '"bug5473"'].each do |code|
+      out, err, status = EnvUtil.invoke_ruby([], <<-SRC, true, true)
+      class ::Object
+        def method_missing(m, *a, &b)
+          raise #{code}
+        end
+      end
+
+      p((1.foo rescue $!))
+      SRC
+      assert_send([status, :success?], bug5473)
+      assert_equal("", err, bug5473)
+      assert_equal((eval("raise #{code}") rescue $!.inspect), out.chomp, bug5473)
     end
   end
 end

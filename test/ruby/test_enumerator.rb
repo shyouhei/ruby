@@ -1,4 +1,5 @@
 require 'test/unit'
+require_relative 'envutil'
 
 class TestEnumerator < Test::Unit::TestCase
   def setup
@@ -43,7 +44,7 @@ class TestEnumerator < Test::Unit::TestCase
     }
   end
 
-  def test_nested_itaration
+  def test_nested_iteration
     def (o = Object.new).each
       yield :ok1
       yield [:ok2, :x].each.next
@@ -238,6 +239,18 @@ class TestEnumerator < Test::Unit::TestCase
     assert_equal([1,2], e.next_values)
   end
 
+  def test_each_arg
+    o = Object.new
+    def o.each(ary)
+      ary << 1
+      yield
+    end
+    ary = []
+    e = o.to_enum.each(ary)
+    e.next
+    assert_equal([1], ary)
+  end
+
   def test_feed
     o = Object.new
     def o.each(ary)
@@ -346,6 +359,12 @@ class TestEnumerator < Test::Unit::TestCase
 		e.inspect)
   end
 
+  def test_inspect_verbose
+    bug6214 = '[ruby-dev:45449]'
+    assert_warn("", bug6214) { "".bytes.inspect }
+    assert_warn("", bug6214) { [].lazy.inspect }
+  end
+
   def test_generator
     # note: Enumerator::Generator is a class just for internal
     g = Enumerator::Generator.new {|y| y << 1 << 2 << 3; :foo }
@@ -355,6 +374,13 @@ class TestEnumerator < Test::Unit::TestCase
     assert_equal([1, 2, 3], a)
     a = []
     assert_equal(:foo, g2.each {|x| a << x })
+    assert_equal([1, 2, 3], a)
+  end
+
+  def test_generator_args
+    g = Enumerator::Generator.new {|y, x| y << 1 << 2 << 3; x }
+    a = []
+    assert_equal(:bar, g.each(:bar) {|x| a << x })
     assert_equal([1, 2, 3], a)
   end
 

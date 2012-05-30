@@ -1,5 +1,3 @@
-#!/usr/bin/env ruby
-
 require 'test/unit'
 require 'pathname'
 
@@ -185,10 +183,8 @@ class TestPathname < Test::Unit::TestCase
 
   if DOSISH
     defassert(:del_trailing_separator, "a", "a\\")
-    require 'Win32API'
-    if Win32API.new('kernel32', 'GetACP', nil, 'L').call == 932
-      defassert(:del_trailing_separator, "\225\\", "\225\\\\") # SJIS
-    end
+    defassert(:del_trailing_separator, "\225\\".force_encoding("cp932"), "\225\\\\".force_encoding("cp932"))
+    defassert(:del_trailing_separator, "\225".force_encoding("cp437"), "\225\\\\".force_encoding("cp437"))
   end
 
   def test_plus
@@ -714,7 +710,9 @@ class TestPathname < Test::Unit::TestCase
   def test_binread
     with_tmpchdir('rubytest-pathname') {|dir|
       open("a", "w") {|f| f.write "abc" }
-      assert_equal("abc", Pathname("a").read)
+      str = Pathname("a").binread
+      assert_equal("abc", str)
+      assert_equal(Encoding::ASCII_8BIT, str.encoding)
     }
   end
 
@@ -1234,6 +1232,10 @@ class TestPathname < Test::Unit::TestCase
       a = []; Pathname(".").find {|v| a << v }; a.sort!
       assert_equal([Pathname("."), Pathname("a"), Pathname("b"), Pathname("d"), Pathname("d/x"), Pathname("d/y")], a)
       a = []; Pathname("d").find {|v| a << v }; a.sort!
+      assert_equal([Pathname("d"), Pathname("d/x"), Pathname("d/y")], a)
+      a = Pathname(".").find.sort
+      assert_equal([Pathname("."), Pathname("a"), Pathname("b"), Pathname("d"), Pathname("d/x"), Pathname("d/y")], a)
+      a = Pathname("d").find.sort
       assert_equal([Pathname("d"), Pathname("d/x"), Pathname("d/y")], a)
     }
   end

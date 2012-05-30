@@ -183,7 +183,7 @@ rb_feature_p(const char *feature, const char *ext, int rb, int expanded, const c
 	    fs.name = feature;
 	    fs.len = len;
 	    fs.type = type;
-	    fs.load_path = load_path ? load_path : rb_get_load_path();
+	    fs.load_path = load_path ? load_path : rb_get_expanded_load_path();
 	    fs.result = 0;
 	    st_foreach(loading_tbl, loaded_feature_path_i, (st_data_t)&fs);
 	    if ((f = fs.result) != 0) {
@@ -319,7 +319,8 @@ rb_load_internal(VALUE fname, int wrap)
     th->top_self = self;
     th->top_wrapper = wrapper;
 
-    if (!loaded) {
+    if (!loaded && !FIXNUM_P(GET_THREAD()->errinfo)) {
+	/* an error on loading don't include INT2FIX(TAG_FATAL) see r35625 */
 	rb_exc_raise(GET_THREAD()->errinfo);
     }
     if (state) {
@@ -405,7 +406,28 @@ load_lock(const char *ftptr)
 	rb_warning("loading in progress, circular require considered harmful - %s", ftptr);
 	rb_backtrace();
     }
-    return RTEST(rb_barrier_wait((VALUE)data)) ? (char *)ftptr : 0;
+    switch (rb_barrier_wait((VALUE)data)) {
+      case Qfalse:
+	data = (st_data_t)ftptr;
+	st_delete(loading_tbl, &data, 0);
+	return 0;
+      case Qnil:
+	return 0;
+    }
+    return (char *)ftptr;
+}
+
+static int
+release_barrier(st_data_t *key, st_data_t *value, st_data_t done, int existing)
+{
+    VALUE barrier = (VALUE)*value;
+    if (!existing) return ST_STOP;
+    if (done ? rb_barrier_destroy(barrier) : rb_barrier_release(barrier)) {
+	/* still in-use */
+	return ST_CONTINUE;
+    }
+    xfree((char *)*key);
+    return ST_DELETE;
 }
 
 static void
@@ -413,17 +435,9 @@ load_unlock(const char *ftptr, int done)
 {
     if (ftptr) {
 	st_data_t key = (st_data_t)ftptr;
-	st_data_t data;
 	st_table *loading_tbl = get_loading_table();
 
-	if (st_delete(loading_tbl, &key, &data)) {
-	    VALUE barrier = (VALUE)data;
-	    xfree((char *)key);
-	    if (done)
-		rb_barrier_destroy(barrier);
-	    else
-		rb_barrier_release(barrier);
-	}
+	st_update(loading_tbl, key, release_barrier, done);
     }
 }
 
@@ -457,6 +471,11 @@ load_unlock(const char *ftptr, int done)
  *
  *    require "my-library.rb"
  *    require "db-driver"
+ *
+ *  Any constants or globals within the loaded source file will be available
+ *  in the calling program's global namespace. However, local variables will
+ *  not be propagated to the loading environment.
+ *
  */
 
 VALUE
@@ -478,7 +497,7 @@ rb_f_require_relative(VALUE obj, VALUE fname)
 {
     VALUE base = rb_current_realfilepath();
     if (NIL_P(base)) {
-	rb_raise(rb_eLoadError, "cannot infer basepath");
+	rb_loaderror("cannot infer basepath");
     }
     base = rb_file_dirname(base);
     return rb_require_safe(rb_file_absolute_path(fname, base), rb_safe_level());
@@ -574,9 +593,7 @@ search_required(VALUE fname, volatile VALUE *path, int safe_level)
 static void
 load_failed(VALUE fname)
 {
-    VALUE mesg = rb_str_buf_new_cstr("cannot load such file -- ");
-    rb_str_append(mesg, fname);	/* should be ASCII compatible */
-    rb_exc_raise(rb_exc_new3(rb_eLoadError, mesg));
+    rb_load_fail(fname, "cannot load such file");
 }
 
 static VALUE
@@ -666,11 +683,12 @@ init_ext_call(VALUE arg)
 RUBY_FUNC_EXPORTED void
 ruby_init_ext(const char *name, void (*init)(void))
 {
-    if (load_lock(name)) {
+    char* const lock_key = load_lock(name);
+    if (lock_key) {
 	rb_vm_call_cfunc(rb_vm_top_self(), init_ext_call, (VALUE)init,
 			 0, rb_str_new2(name));
 	rb_provide(name);
-	load_unlock(name, 1);
+	load_unlock(lock_key, 1);
     }
 }
 

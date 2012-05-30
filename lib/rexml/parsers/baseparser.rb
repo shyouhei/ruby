@@ -114,22 +114,10 @@ module REXML
 
       def initialize( source )
         self.stream = source
+        @listeners = []
       end
 
       def add_listener( listener )
-        if !defined?(@listeners) or !@listeners
-          @listeners = []
-          instance_eval <<-EOL
-            alias :_old_pull :pull
-            def pull
-              event = _old_pull
-              @listeners.each do |listener|
-                listener.receive event
-              end
-              event
-            end
-          EOL
-        end
         @listeners << listener
       end
 
@@ -192,6 +180,14 @@ module REXML
 
       # Returns the next event.  This is a +PullEvent+ object.
       def pull
+        pull_event.tap do |event|
+          @listeners.each do |listener|
+            listener.receive event
+          end
+        end
+      end
+
+      def pull_event
         if @closed
           x, @closed = @closed, nil
           return [ :end_element, x ]
@@ -377,31 +373,31 @@ module REXML
               if md[4].size > 0
                 attrs = md[4].scan( ATTRIBUTE_PATTERN )
                 raise REXML::ParseException.new( "error parsing attributes: [#{attrs.join ', '}], excess = \"#$'\"", @source) if $' and $'.strip.size > 0
-                attrs.each { |a,b,c,d,e|
-                  if b == "xmlns"
-                    if c == "xml"
-                      if d != "http://www.w3.org/XML/1998/namespace"
+                attrs.each do |attr_name, prefix, local_part, quote, value|
+                  if prefix == "xmlns"
+                    if local_part == "xml"
+                      if value != "http://www.w3.org/XML/1998/namespace"
                         msg = "The 'xml' prefix must not be bound to any other namespace "+
                         "(http://www.w3.org/TR/REC-xml-names/#ns-decl)"
                         raise REXML::ParseException.new( msg, @source, self )
                       end
-                    elsif c == "xmlns"
+                    elsif local_part == "xmlns"
                       msg = "The 'xmlns' prefix must not be declared "+
                       "(http://www.w3.org/TR/REC-xml-names/#ns-decl)"
                       raise REXML::ParseException.new( msg, @source, self)
                     end
-                    curr_ns << c
-                  elsif b
-                    prefixes << b unless b == "xml"
+                    curr_ns << local_part
+                  elsif prefix
+                    prefixes << prefix unless prefix == "xml"
                   end
 
-                  if attributes.has_key? a
-                    msg = "Duplicate attribute #{a.inspect}"
-                    raise REXML::ParseException.new( msg, @source, self)
+                  if attributes.has_key?(attr_name)
+                    msg = "Duplicate attribute #{attr_name.inspect}"
+                    raise REXML::ParseException.new(msg, @source, self)
                   end
 
-                  attributes[a] = e
-                }
+                  attributes[attr_name] = value
+                end
               end
 
               # Verify that all of the prefixes have been defined
@@ -440,6 +436,7 @@ module REXML
         end
         return [ :dummy ]
       end
+      private :pull_event
 
       def entity( reference, entities )
         value = nil

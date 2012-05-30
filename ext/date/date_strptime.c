@@ -1,5 +1,5 @@
 /*
-  date_strptime.c: Coded by Tadayoshi Funaba 2011
+  date_strptime.c: Coded by Tadayoshi Funaba 2011,2012
 */
 
 #include "ruby.h"
@@ -58,14 +58,15 @@ static const char *extz_pats[] = {
 static int
 num_pattern_p(const char *s)
 {
-    if (isdigit(*s))
+    if (isdigit((unsigned char)*s))
 	return 1;
     if (*s == '%') {
 	s++;
 	if (*s == 'E' || *s == 'O')
 	    s++;
 	if (*s &&
-	    (strchr("CDdeFGgHIjkLlMmNQRrSsTUuVvWwXxYy", *s) || isdigit(*s)))
+	    (strchr("CDdeFGgHIjkLlMmNQRrSsTUuVvWwXxYy", *s) ||
+	     isdigit((unsigned char)*s)))
 	    return 1;
     }
     return 0;
@@ -624,7 +625,7 @@ date__strptime_internal(const char *str, size_t slen,
 	  case '\v':
 	  case '\f':
 	  case '\r':
-	    while (isspace(str[si]))
+	    while (isspace((unsigned char)str[si]))
 		si++;
 	    fi++;
 	    break;
@@ -641,15 +642,6 @@ date__strptime_internal(const char *str, size_t slen,
 	}
     }
 
-    {
-	VALUE s;
-
-	if (slen > si) {
-	    s = rb_usascii_str_new(&str[si], slen - si);
-	    set_hash("leftover", s);
-	}
-    }
-
     return si;
 }
 
@@ -657,9 +649,17 @@ VALUE
 date__strptime(const char *str, size_t slen,
 	       const char *fmt, size_t flen, VALUE hash)
 {
+    size_t si;
     VALUE cent, merid;
 
-    date__strptime_internal(str, slen, fmt, flen, hash);
+    si = date__strptime_internal(str, slen, fmt, flen, hash);
+
+    if (slen > si) {
+	VALUE s;
+
+	s = rb_usascii_str_new(&str[si], slen - si);
+	set_hash("leftover", s);
+    }
 
     if (fail_p())
 	return Qnil;

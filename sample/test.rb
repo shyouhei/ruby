@@ -4,9 +4,67 @@
 $testnum=0
 $ntest=0
 $failed = 0
+PROGRESS = Object.new
+PROGRESS.instance_eval do
+  @color = nil
+  case ARGV[0]
+  when /\A--color(?:=(?:always|(auto)|(never)))?\z/
+    @color = (!$2 unless $1)
+  end
+  @count = 0
+  @rotator = %w[- \\ | /]
+  @bs = "\b" * @rotator[0].size
+  @tty = STDERR.tty? && /dumb/ !~ ENV["TERM"]
+  @tty &&= /mswin|mingw/ !~ RUBY_PLATFORM
+  case @color
+  when nil
+    @color = @tty
+  when true
+    @tty = true
+  end
+  if @color
+    @passed = "\e[#{ENV['PASSED_COLOR']||'32'}m"
+    @failed = "\e[#{ENV['FAILED_COLOR']||'31'}m"
+    @reset = "\e[m"
+  else
+    @passed = @failed = @reset = ""
+  end
+
+  if @tty
+    def self.pass
+      STDERR.print "#{@bs}#{@rotator[(@count += 1) % @rotator.size]}"
+    end
+    def self.fail
+      @ok = false
+      STDERR.print "#{@bs}#{@failed}F#{@reset}#{@rotator[@count % @rotator.size]}"
+    end
+    def self.init
+      @ok = true
+      STDERR.print " "
+    end
+    def self.finish
+      STDERR.print "#{@bs}#{' ' * @bs.size}#{@bs}#{@passed}#{@ok ? 'OK' : ''} #{$testnum}#{@reset}"
+    end
+  else
+    def self.pass
+      STDERR.print "."
+    end
+    def self.fail
+      STDERR.print "F"
+    end
+    def self.init
+    end
+    def self.finish
+    end
+  end
+end
 
 def test_check(what)
+  unless $ntest.zero?
+    PROGRESS.finish
+  end
   STDERR.print "\nsample/test.rb:#{what} "
+  PROGRESS.init
   $what = what
   $testnum = 0
 end
@@ -16,10 +74,10 @@ def test_ok(cond,n=1)
   $ntest+=1
   where = (st = caller(n)) ? st[0] : "caller error! (n=#{n}, trace=#{caller(0).join(', ')}"
   if cond
-    STDERR.print "."
+    PROGRESS.pass
     printf "ok %d (%s)\n", $testnum, where
   else
-    STDERR.print "F"
+    PROGRESS.fail
     printf "not ok %s %d -- %s\n", $what, $testnum, where
     $failed+=1
   end
@@ -2259,6 +2317,7 @@ ObjectSpace.each_object{|o|
 
 test_ok true   # reach here or dumps core
 
+PROGRESS.finish
 if $failed > 0
   printf "not ok/test: %d failed %d\n", $ntest, $failed
 else

@@ -172,9 +172,13 @@ class TestPTY < Test::Unit::TestCase
       st1 = PTY.check(pid)
       w.close
       r.close
-      sleep(0.1)
-      st2 = PTY.check(pid)
+      begin
+        sleep(0.1)
+      end until st2 = PTY.check(pid)
     end
+  rescue RuntimeError
+    skip $!
+  else
     assert_equal(pid, st1.pid) if st1
     assert_nil(st1)
     assert_equal(pid, st2.pid)
@@ -191,9 +195,25 @@ class TestPTY < Test::Unit::TestCase
       sleep(0.1)
       st2 = assert_raise(PTY::ChildExited, bug2642) {PTY.check(pid, true)}.status
     end
+  rescue RuntimeError
+    skip $!
+  else
     assert_equal(pid, st1.pid) if st1
     assert_nil(st1)
     assert_equal(pid, st2.pid)
+  end
+
+  def test_cloexec
+    PTY.open {|m, s|
+      assert(m.close_on_exec?)
+      assert(s.close_on_exec?)
+    }
+    PTY.spawn(RUBY, '-e', '') {|r, w, pid|
+      assert(r.close_on_exec?)
+      assert(w.close_on_exec?)
+    }
+  rescue RuntimeError
+    skip $!
   end
 end if defined? PTY
 

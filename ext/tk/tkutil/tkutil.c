@@ -12,7 +12,7 @@
 #include "ruby.h"
 
 #ifdef RUBY_VM
-static VALUE rb_thread_critical; /* dummy */
+static int rb_thread_critical; /* dummy */
 #else
 /* On Ruby 1.8.x, use rb_thread_critical (defined at rubysig.h) */
 #include "rubysig.h"
@@ -202,8 +202,8 @@ tk_uninstall_cmd(self, cmd_id)
     VALUE self;
     VALUE cmd_id;
 {
-    int head_len = strlen(cmd_id_head);
-    int prefix_len = strlen(cmd_id_prefix);
+    size_t head_len = strlen(cmd_id_head);
+    size_t prefix_len = strlen(cmd_id_prefix);
 
     StringValue(cmd_id);
     if (strncmp(cmd_id_head, RSTRING_PTR(cmd_id), head_len) != 0) {
@@ -266,7 +266,6 @@ to_strkey(key, value, hash)
     VALUE value;
     VALUE hash;
 {
-    if (key == Qundef) return ST_CONTINUE;
     rb_hash_aset(hash, rb_funcall(key, ID_to_s, 0, 0), value);
     return ST_CHECK;
 }
@@ -280,7 +279,7 @@ tk_symbolkey2str(self, keys)
 
     if NIL_P(keys) return new_keys;
     keys = rb_convert_type(keys, T_HASH, "Hash", "to_hash");
-    st_foreach(RHASH_TBL(keys), to_strkey, new_keys);
+    st_foreach_check(RHASH_TBL(keys), to_strkey, new_keys, Qundef);
     return new_keys;
 }
 
@@ -298,7 +297,8 @@ ary2list(ary, enc_flag, self)
     VALUE enc_flag;
     VALUE self;
 {
-    int idx, idx2, size, size2, req_chk_flag;
+    long idx, idx2, size, size2;
+    int req_chk_flag;
     volatile VALUE val, val2, str_val;
     volatile VALUE dst;
     volatile VALUE sys_enc, dst_enc, str_enc;
@@ -451,7 +451,8 @@ ary2list2(ary, enc_flag, self)
     VALUE enc_flag;
     VALUE self;
 {
-    int idx, size, req_chk_flag;
+    long idx, size;
+    int req_chk_flag;
     volatile VALUE val, str_val;
     volatile VALUE dst;
     volatile VALUE sys_enc, dst_enc, str_enc;
@@ -551,7 +552,7 @@ assoc2kv(assoc, ary, self)
     VALUE ary;
     VALUE self;
 {
-    int i, j, len;
+    long i, j, len;
     volatile VALUE pair;
     volatile VALUE val;
     volatile VALUE dst = rb_ary_new2(2 * RARRAY_LEN(assoc));
@@ -599,7 +600,7 @@ assoc2kv_enc(assoc, ary, self)
     VALUE ary;
     VALUE self;
 {
-    int i, j, len;
+    long i, j, len;
     volatile VALUE pair;
     volatile VALUE val;
     volatile VALUE dst = rb_ary_new2(2 * RARRAY_LEN(assoc));
@@ -651,7 +652,6 @@ push_kv(key, val, args)
 
     ary = RARRAY_PTR(args)[0];
 
-    if (key == Qundef) return ST_CONTINUE;
 #if 0
     rb_ary_push(ary, key2keyname(key));
     if (val != TK_None) rb_ary_push(ary, val);
@@ -674,7 +674,7 @@ hash2kv(hash, ary, self)
     volatile VALUE dst = rb_ary_new2(2 * RHASH_SIZE(hash));
     volatile VALUE args = rb_ary_new3(2, dst, self);
 
-    st_foreach(RHASH_TBL(hash), push_kv, args);
+    st_foreach_check(RHASH_TBL(hash), push_kv, args, Qundef);
 
     if (NIL_P(ary)) {
         return dst;
@@ -693,7 +693,6 @@ push_kv_enc(key, val, args)
 
     ary = RARRAY_PTR(args)[0];
 
-    if (key == Qundef) return ST_CONTINUE;
 #if 0
     rb_ary_push(ary, key2keyname(key));
     if (val != TK_None) {
@@ -719,7 +718,7 @@ hash2kv_enc(hash, ary, self)
     volatile VALUE dst = rb_ary_new2(2 * RHASH_SIZE(hash));
     volatile VALUE args = rb_ary_new3(2, dst, self);
 
-    st_foreach(RHASH_TBL(hash), push_kv_enc, args);
+    st_foreach_check(RHASH_TBL(hash), push_kv_enc, args, Qundef);
 
     if (NIL_P(ary)) {
         return dst;
@@ -801,6 +800,8 @@ tk_hash_kv(argc, argv, self)
         }
         rb_raise(rb_eArgError, "Hash is expected for 1st argument");
     }
+
+    UNREACHABLE;
 }
 
 static VALUE
@@ -1079,7 +1080,7 @@ tkstr_to_str(value)
     VALUE value;
 {
     char * ptr;
-    int len;
+    long len;
 
     ptr = RSTRING_PTR(value);
     len = RSTRING_LEN(value);
@@ -1133,8 +1134,8 @@ tcl2rb_num_or_nil(self, value)
 
 #define CBSUBST_TBL_MAX (256)
 struct cbsubst_info {
-    int   full_subst_length;
-    int   keylen[CBSUBST_TBL_MAX];
+    long  full_subst_length;
+    long  keylen[CBSUBST_TBL_MAX];
     char  *key[CBSUBST_TBL_MAX];
     char  type[CBSUBST_TBL_MAX];
     ID    ivar[CBSUBST_TBL_MAX];
@@ -1300,7 +1301,8 @@ cbsubst_sym_to_subst(self, sym)
     struct cbsubst_info *inf;
     const char *str;
     char *buf, *ptr;
-    int idx, len;
+    int idx;
+    long len;
     ID id;
     volatile VALUE ret;
 
@@ -1354,7 +1356,8 @@ cbsubst_get_subst_arg(argc, argv, self)
     struct cbsubst_info *inf;
     const char *str;
     char *buf, *ptr;
-    int i, idx, len;
+    int i, idx;
+    long len;
     ID id;
     volatile VALUE arg_sym, ret;
 
@@ -1422,7 +1425,8 @@ cbsubst_get_subst_key(self, str)
     volatile VALUE list;
     volatile VALUE ret;
     VALUE keyval;
-    int i, len, keylen, idx;
+    long i, len, keylen;
+    int idx;
     char *buf, *ptr, *key;
 
     list = rb_funcall(cTclTkLib, ID_split_tklist, 1, str);
@@ -1473,7 +1477,8 @@ cbsubst_get_all_subst_keys(self)
     struct cbsubst_info *inf;
     char *buf, *ptr;
     char *keys_buf, *keys_ptr;
-    int idx, len;
+    int idx;
+    long len;
     volatile VALUE ret;
 
     Data_Get_Struct(rb_const_get(self, ID_SUBST_INFO),
@@ -1525,7 +1530,7 @@ cbsubst_table_setup(argc, argv, self)
   VALUE inf;
   ID id;
   struct cbsubst_info *subst_inf;
-  int idx, len;
+  long idx, len;
   unsigned char chr;
 
   /* accept (key_inf, proc_inf) or (key_inf, longkey_inf, procinf) */
@@ -1646,10 +1651,10 @@ cbsubst_scan_args(self, arg_key, val_ary)
     VALUE val_ary;
 {
     struct cbsubst_info *inf;
-    int idx;
+    long idx;
     unsigned char *keyptr = (unsigned char*)RSTRING_PTR(arg_key);
-    int keylen = RSTRING_LEN(arg_key);
-    int vallen = RARRAY_LEN(val_ary);
+    long keylen = RSTRING_LEN(arg_key);
+    long vallen = RARRAY_LEN(val_ary);
     unsigned char type_chr;
     volatile VALUE dst = rb_ary_new2(vallen);
     volatile VALUE proc;

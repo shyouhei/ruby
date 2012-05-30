@@ -66,6 +66,7 @@ ossl_x509_new_from_file(VALUE filename)
     if (!(fp = fopen(RSTRING_PTR(filename), "r"))) {
 	ossl_raise(eX509CertError, "%s", strerror(errno));
     }
+    rb_fd_fix_cloexec(fileno(fp));
     x509 = PEM_read_X509(fp, NULL, NULL, NULL);
     /*
      * prepare for DER...
@@ -489,7 +490,7 @@ ossl_x509_get_not_after(VALUE self)
 
 /*
  * call-seq:
- *    cert.not_before = time => time
+ *    cert.not_after = time => time
  */
 static VALUE
 ossl_x509_set_not_after(VALUE self, VALUE time)

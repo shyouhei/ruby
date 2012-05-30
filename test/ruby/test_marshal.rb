@@ -103,16 +103,16 @@ class TestMarshal < Test::Unit::TestCase
   def test_pipe
     o1 = C.new("a" * 10000)
 
-    r, w = IO.pipe
-    t = Thread.new { Marshal.load(r) }
-    Marshal.dump(o1, w)
-    o2 = t.value
+    o2 = IO.pipe do |r, w|
+      Thread.new {Marshal.dump(o1, w)}
+      Marshal.load(r)
+    end
     assert_equal(o1.str, o2.str)
 
-    r, w = IO.pipe
-    t = Thread.new { Marshal.load(r) }
-    Marshal.dump(o1, w, 2)
-    o2 = t.value
+    o2 = IO.pipe do |r, w|
+      Thread.new {Marshal.dump(o1, w, 2)}
+      Marshal.load(r)
+    end
     assert_equal(o1.str, o2.str)
 
     assert_raise(TypeError) { Marshal.dump("foo", Object.new) }
@@ -263,7 +263,7 @@ class TestMarshal < Test::Unit::TestCase
     assert_equal(true, y.first.first.untrusted?)
   end
 
-  def test_symbol
+  def test_symbol2
     [:ruby, :"\u{7d05}\u{7389}"].each do |sym|
       assert_equal(sym, Marshal.load(Marshal.dump(sym)), '[ruby-core:24788]')
     end
@@ -321,7 +321,7 @@ class TestMarshal < Test::Unit::TestCase
     end
   end
 
-  def test_regexp
+  def test_regexp2
     assert_equal(/\\u/, Marshal.load("\004\b/\b\\\\u\000"))
     assert_equal(/u/, Marshal.load("\004\b/\a\\u\000"))
     assert_equal(/u/, Marshal.load("\004\bI/\a\\u\000\006:\016@encoding\"\vEUC-JP"))
@@ -455,6 +455,15 @@ class TestMarshal < Test::Unit::TestCase
     assert_equal(o1, o2)
   end
 
+  def test_marshal_symbol_ascii8bit
+    bug6209 = '[ruby-core:43762]'
+    o1 = "\xff".force_encoding("ASCII-8BIT").intern
+    m = Marshal.dump(o1)
+    o2 = nil
+    assert_nothing_raised(EncodingError, bug6209) {o2 = Marshal.load(m)}
+    assert_equal(o1, o2, bug6209)
+  end
+
   class PrivateClass
     def initialize(foo)
       @foo = foo
@@ -468,5 +477,19 @@ class TestMarshal < Test::Unit::TestCase
     o2 = Marshal.load(Marshal.dump(o1))
     assert_equal(o1.class, o2.class)
     assert_equal(o1.foo, o2.foo)
+  end
+
+  def test_marshal_complex
+    assert_raise(ArgumentError){Marshal.load("\x04\bU:\fComplex[\x05")}
+    assert_raise(ArgumentError){Marshal.load("\x04\bU:\fComplex[\x06i\x00")}
+    assert_equal(Complex(1, 2), Marshal.load("\x04\bU:\fComplex[\ai\x06i\a"))
+    assert_raise(ArgumentError){Marshal.load("\x04\bU:\fComplex[\bi\x00i\x00i\x00")}
+  end
+
+  def test_marshal_rational
+    assert_raise(ArgumentError){Marshal.load("\x04\bU:\rRational[\x05")}
+    assert_raise(ArgumentError){Marshal.load("\x04\bU:\rRational[\x06i\x00")}
+    assert_equal(Rational(1, 2), Marshal.load("\x04\bU:\rRational[\ai\x06i\a"))
+    assert_raise(ArgumentError){Marshal.load("\x04\bU:\rRational[\bi\x00i\x00i\x00")}
   end
 end

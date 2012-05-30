@@ -1,7 +1,7 @@
 # -*- makefile -*-
 
 SHELL = $(COMSPEC)
-NULLCMD = :
+ECHO1 = $(V:1=@:)
 RUNCMD = $(COMSPEC) /c
 MKFILES = Makefile
 NULL = nul
@@ -74,6 +74,7 @@ RM = $(COMSPEC) /C $(srcdir:/=\)\win32\rm.bat
 RMDIR = $(COMSPEC) /C $(srcdir:/=\)\win32\rmdirs.bat
 RMDIRS = $(COMSPEC) /C $(srcdir:/=\)\win32\rmdirs.bat
 RMALL = $(COMSPEC) /C $(srcdir:/=\)\win32\rmall.bat
+MAKEDIRS = $(COMSPEC) /E:ON /C $(srcdir:/=\)\win32\makedirs.bat
 CP = copy > nul
 MV = move > nul
 !if !defined(BASERUBY)
@@ -121,6 +122,9 @@ PLATFORM = mswin32
 !endif
 !ifdef NTVER
 ARCHDEFS = -D_WIN32_WINNT=$(NTVER) $(ARCHDEFS)
+!endif
+!if !defined(PLATFORM_DIR)
+PLATFORM_DIR = win32
 !endif
 
 arch = $(ARCH)-$(PLATFORM)
@@ -218,6 +222,9 @@ RFLAGS = -r
 !if !defined(EXTLIBS)
 EXTLIBS =
 !endif
+!if !defined(EXTSOLIBS)
+EXTSOLIBS =
+!endif
 !if !defined(LIBS)
 LIBS = oldnames.lib user32.lib advapi32.lib shell32.lib ws2_32.lib imagehlp.lib $(EXTLIBS)
 !endif
@@ -225,7 +232,7 @@ LIBS = oldnames.lib user32.lib advapi32.lib shell32.lib ws2_32.lib imagehlp.lib 
 LIBS = unicows.lib $(LIBS)
 !endif
 !if !defined(MISSING)
-MISSING = acosh.obj cbrt.obj crypt.obj erf.obj ffs.obj langinfo.obj lgamma_r.obj strlcat.obj strlcpy.obj tgamma.obj win32.obj setproctitle.obj
+MISSING = acosh.obj cbrt.obj crypt.obj erf.obj ffs.obj langinfo.obj lgamma_r.obj strlcat.obj strlcpy.obj tgamma.obj win32/win32.obj win32/file.obj setproctitle.obj
 !endif
 
 ARFLAGS = -machine:$(MACHINE) -out:
@@ -277,6 +284,7 @@ XRUBY = $(MINIRUBY)
 !else
 XRUBY = $(RUNRUBY)
 !endif
+BTESTRUBY = $(MINIRUBY)
 !ifndef RUBY
 RUBY = ruby
 !endif
@@ -285,8 +293,6 @@ DEFAULT_PRELUDES = $(NO_GEM_PRELUDE)
 !else
 DEFAULT_PRELUDES = $(YES_GEM_PRELUDE)
 !endif
-
-MAKEDIRS = $(MINIRUBY) -run -e mkdir -- -p
 
 !if !defined(STACK)
 !if "$(ARCH)" == "x64" || "$(ARCH)" == "ia64"
@@ -368,6 +374,19 @@ ruby: $(PROGRAM)
 rubyw: $(WPROGRAM)
 stub: $(STUBPROGRAM)
 
+!if !exist(newline.c) && exist($(srcdir)/newline.c)
+NEWLINE_C = $(srcdir)/newline.c
+!else
+NEWLINE_C = newline.c
+!endif
+!if !exist(miniprelude.c) && exist($(srcdir)/miniprelude.c)
+MINIPRELUDE_C = $(srcdir)/miniprelude.c
+!else
+MINIPRELUDE_C = miniprelude.c
+!endif
+
+!include $(srcdir)/common.mk
+
 !ifdef SCRIPTPROGRAMS
 !else if [echo>scriptbin.mk SCRIPTPROGRAMS = \]
 !else if [for %I in ($(srcdir:/=\)\bin\*) do @echo>>scriptbin.mk %~nI.exe \]
@@ -378,9 +397,12 @@ stub: $(STUBPROGRAM)
 !endif
 !if [for %I in ($(srcdir:/=\)\bin\*) do @for %J in (\
 "%~nI.exe: $$(srcdir)/bin/%~nI" \
-"	@echo generating $$(@)" \
-"	@copy /b $$(STUBPROGRAM) +<< +$$(srcdir:/=\)\bin\%~nI $$(@) > nul" \
-"" "<<" "" \
+"	$$(ECHO) generating $$(@)" \
+"	$$(Q) copy /y /b $$(STUBPROGRAM) $$(@) > nul" \
+"	$$(Q) echo.>>$$(@)" \
+"	$$(Q) echo.>>$$(@)" \
+"	$$(Q) copy /b $$(@)+$$(srcdir:/=\)\bin\%~nI $$(@) > nul" \
+"" \
 ) do @echo.%~J>>scriptbin.mk]
 !else
 ! include scriptbin.mk
@@ -394,8 +416,6 @@ $(SCRIPTPROGRAMS): $(STUBPROGRAM)
 
 up::
 	@cd "$(srcdir:/=\)" && set LC_TIME=C && $(VCSUP)
-
-!include $(srcdir)/common.mk
 
 update-mspec:
 !if exist($(srcdir)/spec/mspec)
@@ -435,8 +455,8 @@ config.status: $(CONFIG_H)
 
 BANG = !
 
-!if exist(config.h)
-!include config.h
+!if exist($(RUBY_CONFIG_H))
+!include $(RUBY_CONFIG_H)
 !endif
 
 guard = INCLUDE_RUBY_CONFIG_H
@@ -458,7 +478,7 @@ $(CONFIG_H): $(MKFILES) $(srcdir)/win32/Makefile.sub $(win_srcdir)/Makefile.sub
 !if "$(ENABLE_WIN95)" == "yes" && "$(MACHINE)" == "x86"
 #define WIN95 1
 !endif
-#define RT_VER $(RT_VER)
+#define RUBY_MSVCRT_VERSION $(RT_VER)
 #define STDC_HEADERS 1
 #define HAVE_SYS_TYPES_H 1
 #define HAVE_SYS_STAT_H 1
@@ -540,42 +560,46 @@ $(CONFIG_H): $(MKFILES) $(srcdir)/win32/Makefile.sub $(win_srcdir)/Makefile.sub
 #define rb_uid_t int
 #define HAVE_STRUCT_STAT_ST_RDEV 1
 #define HAVE_ST_RDEV 1
-#define HAVE_INT8_T 1
+!if $(MSC_VER) >= 1600
+#define HAVE_STDINT_H 1
+!else
 #define int8_t signed char
-#define HAVE_UINT8_T 1
 #define uint8_t unsigned char
-#define SIZEOF_INT8_T 1
-#define SIZEOF_UINT8_T 1
+#define int16_t short
+#define uint16_t unsigned short
+#define int32_t int
+#define uint32_t unsigned int
+#define int64_t __int64
+#define uint64_t unsigned __int64
 #define INT8_MIN _I8_MIN
 #define INT8_MAX _I8_MAX
 #define UINT8_MAX _UI8_MAX
-#define HAVE_INT16_T 1
-#define int16_t short
-#define HAVE_UINT16_T 1
-#define uint16_t unsigned short
-#define SIZEOF_INT16_T 2
-#define SIZEOF_UINT16_T 2
 #define INT16_MIN _I16_MIN
 #define INT16_MAX _I16_MAX
 #define UINT16_MAX _UI16_MAX
-#define HAVE_INT32_T 1
-#define int32_t int
-#define HAVE_UINT32_T 1
-#define uint32_t unsigned int
-#define SIZEOF_INT32_T 4
-#define SIZEOF_UINT32_T 4
 #define INT32_MIN _I32_MIN
 #define INT32_MAX _I32_MAX
 #define UINT32_MAX _UI32_MAX
-#define HAVE_INT64_T 1
-#define int64_t __int64
-#define HAVE_UINT64_T 1
-#define uint64_t unsigned __int64
-#define SIZEOF_INT64_T 8
-#define SIZEOF_UINT64_T 8
 #define INT64_MIN _I64_MIN
 #define INT64_MAX _I64_MAX
 #define UINT64_MAX _UI64_MAX
+!endif
+#define HAVE_INT8_T 1
+#define HAVE_UINT8_T 1
+#define SIZEOF_INT8_T 1
+#define SIZEOF_UINT8_T 1
+#define HAVE_INT16_T 1
+#define HAVE_UINT16_T 1
+#define SIZEOF_INT16_T 2
+#define SIZEOF_UINT16_T 2
+#define HAVE_INT32_T 1
+#define HAVE_UINT32_T 1
+#define SIZEOF_INT32_T 4
+#define SIZEOF_UINT32_T 4
+#define HAVE_INT64_T 1
+#define HAVE_UINT64_T 1
+#define SIZEOF_INT64_T 8
+#define SIZEOF_UINT64_T 8
 #define HAVE_INTPTR_T 1
 #define HAVE_UINTPTR_T 1
 #define HAVE_SSIZE_T 1
@@ -631,10 +655,9 @@ $(CONFIG_H): $(MKFILES) $(srcdir)/win32/Makefile.sub $(win_srcdir)/Makefile.sub
 #define HAVE_SIGNBIT 1
 #define HAVE_TZNAME 1
 #define HAVE_DAYLIGHT 1
+#define HAVE_GMTIME_R 1
 #define SETPGRP_VOID 1
 #define RSHIFT(x,y) ((x)>>(int)y)
-#define FILE_COUNT _cnt
-#define FILE_READPTR _ptr
 #define HAVE_RB_FD_INIT 1
 #define RUBY_SETJMP(env) _setjmp(env)
 #define RUBY_LONGJMP(env,val) longjmp(env,val)
@@ -652,10 +675,6 @@ $(CONFIG_H): $(MKFILES) $(srcdir)/win32/Makefile.sub $(win_srcdir)/Makefile.sub
 #define LOAD_RELATIVE 1
 #define DLEXT ".so"
 #define EXECUTABLE_EXTS $(EXECUTABLE_EXTS)
-#define RUBY_LIB_VERSION_STYLE 3	/* full */
-#define RUBY_LIB_PREFIX "/lib/$(RUBY_BASE_NAME)"
-#define RUBY_PLATFORM "$(arch)"
-#define RUBY_SITEARCH "$(sitearch)"
 #define RUBY_COREDLL "$(RT)"
 #define LIBRUBY_SO "$(LIBRUBY_SO)"
 #if 0
@@ -664,6 +683,13 @@ config.h: nul
 $(BANG)endif
 #endif
 #endif /* $(guard) */
+<<
+	@echo Creating verconf.h
+	@$(IFCHANGE) verconf.h <<
+#define RUBY_LIB_VERSION_STYLE 3	/* full */
+#define RUBY_LIB_PREFIX "/lib/$(RUBY_BASE_NAME)"
+#define RUBY_PLATFORM "$(arch)"
+#define RUBY_SITEARCH "$(sitearch)"
 <<
 	@exit > $(@:/=\)
 
@@ -731,6 +757,7 @@ s,@target_alias@,$(ARCH)-$(PLATFORM),;t t
 s,@target_cpu@,$(ARCH),;t t
 s,@target_vendor@,pc,;t t
 s,@target_os@,$(PLATFORM),;t t
+s,@NULLCMD@,:,;t t
 s,@CC@,$(CC),;t t
 s,@CPP@,$(CPP),;t t
 s,@CXX@,$$(CC),;t t
@@ -908,13 +935,17 @@ clean-local::
 
 distclean-local::
 		$(Q)$(RM) ext\config.cache $(RBCONFIG:/=\) $(CONFIG_H:/=\)
-		-$(Q)$(RM) $(INSTALLED_LIST:/=\) $(arch_hdrdir:/=\)\ruby\config.h
+		-$(Q)$(RM) $(INSTALLED_LIST:/=\) $(arch_hdrdir:/=\)\ruby\config.h verconf.h
 		-$(Q)$(RMDIRS) $(arch_hdrdir:/=\)\ruby
 
 clean-rdoc distclean-rdoc realclean-rdoc:
 		-$(Q)$(RMALL) $(RDOCOUT:/=\)
 clean-capi distclean-capi realclean-capi:
 		-$(Q)$(RMALL) $(CAPIOUT:/=\)
+
+clean-platform:
+		$(Q)$(RM) $(PLATFORM_D:/=\)
+		-$(Q)$(RMDIR) $(PLATFORM_DIR:/=\)
 
 clean-ext distclean-ext realclean-ext::
 !if "$(EXTS)" != ""
@@ -989,7 +1020,7 @@ $(ruby_pc): $(RBCONFIG)
 {$(win_srcdir)/sys}.c.obj:
 	$(ECHO) compiling $(<:\=/)
 	$(Q) $(CC) $(CFLAGS) $(XCFLAGS) $(CPPFLAGS) $(COUTFLAG)$@ -c -Tc$(<:\=/)
-{$(srcdir)}.c.obj:
+{$(srcdir)}.c{}.obj:
 	$(ECHO) compiling $(<:\=/)
 	$(Q) $(CC) $(CFLAGS) $(XCFLAGS) $(CPPFLAGS) $(COUTFLAG)$@ -c -Tc$(<:\=/)
 .c.obj:
@@ -1036,7 +1067,7 @@ enc/unicode/name2ctype.h: {$(srcdir)}enc/unicode/name2ctype.h.blt
 
 $(OBJS): {$(hdrdir)/ruby}win32.h
 
-dir.$(OBJEXT) win32.$(OBJEXT): {$(srcdir)}win32/dir.h
+dir.$(OBJEXT) win32/win32.$(OBJEXT): {$(srcdir)}win32/dir.h
 
 ext/extinit.obj: ext/extinit.c $(SETUP)
 	$(ECHO) compiling ext/extinit.c

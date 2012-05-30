@@ -243,7 +243,7 @@ binding_free(void *ptr)
     RUBY_FREE_ENTER("binding");
     if (ptr) {
 	bind = ptr;
-	ruby_xfree(ptr);
+	ruby_xfree(bind);
     }
     RUBY_FREE_LEAVE("binding");
 }
@@ -322,7 +322,7 @@ rb_binding_new(void)
 
     GetBindingPtr(bindval, bind);
     bind->env = rb_vm_make_env_object(th, cfp);
-    bind->filename = cfp->iseq->filename;
+    bind->filename = cfp->iseq->location.filename;
     bind->line_no = rb_vm_get_sourceline(cfp);
     return bindval;
 }
@@ -544,6 +544,7 @@ proc_lambda(void)
 static VALUE
 proc_call(int argc, VALUE *argv, VALUE procval)
 {
+    VALUE vret;
     rb_proc_t *proc;
     rb_block_t *blockptr = 0;
     rb_iseq_t *iseq;
@@ -560,8 +561,10 @@ proc_call(int argc, VALUE *argv, VALUE procval)
 	}
     }
 
-    return rb_vm_invoke_proc(GET_THREAD(), proc, proc->block.self,
+    vret = rb_vm_invoke_proc(GET_THREAD(), proc, proc->block.self,
 			     argc, argv, blockptr);
+    RB_GC_GUARD(procval);
+    return vret;
 }
 
 #if SIZEOF_LONG > SIZEOF_INT
@@ -581,15 +584,20 @@ check_argc(long argc)
 VALUE
 rb_proc_call(VALUE self, VALUE args)
 {
+    VALUE vret;
     rb_proc_t *proc;
     GetProcPtr(self, proc);
-    return rb_vm_invoke_proc(GET_THREAD(), proc, proc->block.self,
+    vret = rb_vm_invoke_proc(GET_THREAD(), proc, proc->block.self,
 			     check_argc(RARRAY_LEN(args)), RARRAY_PTR(args), 0);
+    RB_GC_GUARD(self);
+    RB_GC_GUARD(args);
+    return vret;
 }
 
 VALUE
 rb_proc_call_with_block(VALUE self, int argc, VALUE *argv, VALUE pass_procval)
 {
+    VALUE vret;
     rb_proc_t *proc;
     rb_block_t *block = 0;
     GetProcPtr(self, proc);
@@ -600,8 +608,11 @@ rb_proc_call_with_block(VALUE self, int argc, VALUE *argv, VALUE pass_procval)
 	block = &pass_proc->block;
     }
 
-    return rb_vm_invoke_proc(GET_THREAD(), proc, proc->block.self,
+    vret = rb_vm_invoke_proc(GET_THREAD(), proc, proc->block.self,
 			     argc, argv, block);
+    RB_GC_GUARD(self);
+    RB_GC_GUARD(pass_procval);
+    return vret;
 }
 
 /*
@@ -688,7 +699,7 @@ iseq_location(rb_iseq_t *iseq)
     VALUE loc[2];
 
     if (!iseq) return Qnil;
-    loc[0] = iseq->filename;
+    loc[0] = iseq->location.filename;
     if (iseq->line_info_table) {
 	loc[1] = INT2FIX(rb_iseq_first_lineno(iseq));
     }
@@ -783,6 +794,16 @@ proc_eq(VALUE self, VALUE other)
     return Qfalse;
 }
 
+st_index_t
+rb_hash_proc(st_index_t hash, VALUE prc)
+{
+    rb_proc_t *proc;
+    GetProcPtr(prc, proc);
+    hash = rb_hash_uint(hash, (st_index_t)proc->block.iseq);
+    hash = rb_hash_uint(hash, (st_index_t)proc->envval);
+    return rb_hash_uint(hash, (st_index_t)proc->block.lfp >> 16);
+}
+
 /*
  * call-seq:
  *   prc.hash   ->  integer
@@ -794,11 +815,8 @@ static VALUE
 proc_hash(VALUE self)
 {
     st_index_t hash;
-    rb_proc_t *proc;
-    GetProcPtr(self, proc);
-    hash = rb_hash_start((st_index_t)proc->block.iseq);
-    hash = rb_hash_uint(hash, (st_index_t)proc->envval);
-    hash = rb_hash_uint(hash, (st_index_t)proc->block.lfp >> 16);
+    hash = rb_hash_start(0);
+    hash = rb_hash_proc(hash, self);
     hash = rb_hash_end(hash);
     return LONG2FIX(hash);
 }
@@ -831,7 +849,7 @@ proc_to_s(VALUE self)
 	    line_no = rb_iseq_first_lineno(iseq);
 	}
 	str = rb_sprintf("#<%s:%p@%s:%d%s>", cname, (void *)self,
-			 RSTRING_PTR(iseq->filename),
+			 RSTRING_PTR(iseq->location.filename),
 			 line_no, is_lambda);
     }
     else {
@@ -1064,7 +1082,7 @@ method_hash(VALUE method)
     TypedData_Get_Struct(method, struct METHOD, &method_data_type, m);
     hash = rb_hash_start((st_index_t)m->rclass);
     hash = rb_hash_uint(hash, (st_index_t)m->recv);
-    hash = rb_hash_uint(hash, (st_index_t)m->me->def);
+    hash = rb_hash_method_entry(hash, m->me);
     hash = rb_hash_end(hash);
 
     return INT2FIX(hash);
@@ -1332,7 +1350,8 @@ rb_mod_define_method(int argc, VALUE *argv, VALUE mod)
 	id = rb_to_id(argv[0]);
 	body = rb_block_lambda();
     }
-    else if (argc == 2) {
+    else {
+	rb_check_arity(argc, 1, 2);
 	id = rb_to_id(argv[0]);
 	body = argv[1];
 	if (!rb_obj_is_method(body) && !rb_obj_is_proc(body)) {
@@ -1340,9 +1359,6 @@ rb_mod_define_method(int argc, VALUE *argv, VALUE mod)
 		     "wrong argument type %s (expected Proc/Method)",
 		     rb_obj_classname(body));
 	}
-    }
-    else {
-	rb_raise(rb_eArgError, "wrong number of arguments (%d for 1)", argc);
     }
 
     if (rb_obj_is_method(body)) {
@@ -1647,6 +1663,8 @@ rb_method_entry_arity(const rb_method_entry_t *me)
       }
     }
     rb_bug("rb_method_entry_arity: invalid method entry type (%d)", def->type);
+
+    UNREACHABLE;
 }
 
 /*
@@ -1952,7 +1970,7 @@ proc_binding(VALUE self)
     rb_binding_t *bind;
 
     GetProcPtr(self, proc);
-    if (TYPE(proc->block.iseq) == T_NODE) {
+    if (RB_TYPE_P((VALUE)proc->block.iseq, T_NODE)) {
 	if (!IS_METHOD_PROC_NODE((NODE *)proc->block.iseq)) {
 	    rb_raise(rb_eArgError, "Can't create Binding from C level Proc");
 	}
@@ -1962,7 +1980,7 @@ proc_binding(VALUE self)
     GetBindingPtr(bindval, bind);
     bind->env = proc->envval;
     if (RUBY_VM_NORMAL_ISEQ_P(proc->block.iseq)) {
-	bind->filename = proc->block.iseq->filename;
+	bind->filename = proc->block.iseq->location.filename;
 	bind->line_no = rb_iseq_first_lineno(proc->block.iseq);
     }
     else {

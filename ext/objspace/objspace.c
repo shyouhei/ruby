@@ -97,7 +97,7 @@ memsize_of(VALUE obj)
       case T_MATCH:
 	if (RMATCH(obj)->rmatch) {
             struct rmatch *rm = RMATCH(obj)->rmatch;
-	    size += sizeof(struct re_registers); /* TODO: onig_region_memsize(&rm->regs); */
+	    size += onig_region_memsize(&rm->regs);
 	    size += sizeof(struct rmatch_offset) * rm->char_offset_num_allocated;
 	    size += sizeof(struct rmatch);
 	}
@@ -300,7 +300,7 @@ count_objects_size(int argc, VALUE *argv, VALUE os)
     VALUE hash;
 
     if (rb_scan_args(argc, argv, "01", &hash) == 1) {
-        if (TYPE(hash) != T_HASH)
+        if (!RB_TYPE_P(hash, T_HASH))
             rb_raise(rb_eTypeError, "non-hash given");
     }
 
@@ -404,7 +404,7 @@ count_nodes(int argc, VALUE *argv, VALUE os)
     VALUE hash;
 
     if (rb_scan_args(argc, argv, "01", &hash) == 1) {
-        if (TYPE(hash) != T_HASH)
+        if (!RB_TYPE_P(hash, T_HASH))
             rb_raise(rb_eTypeError, "non-hash given");
     }
 
@@ -609,7 +609,7 @@ count_tdata_objects(int argc, VALUE *argv, VALUE self)
     VALUE hash;
 
     if (rb_scan_args(argc, argv, "01", &hash) == 1) {
-        if (TYPE(hash) != T_HASH)
+        if (!RB_TYPE_P(hash, T_HASH))
             rb_raise(rb_eTypeError, "non-hash given");
     }
 

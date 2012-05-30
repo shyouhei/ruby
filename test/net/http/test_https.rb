@@ -103,7 +103,7 @@ class TestNetHTTPS < Test::Unit::TestCase
     ex = assert_raise(OpenSSL::SSL::SSLError){
       http.request_get("/") {|res| }
     }
-    assert_match(/hostname does not match/, ex.message)
+    assert_match(/hostname \"127.0.0.1\" does not match/, ex.message)
   end
 
   def test_timeout_during_SSL_handshake
@@ -115,11 +115,11 @@ class TestNetHTTPS < Test::Unit::TestCase
 
       conn = Net::HTTP.new('localhost', port)
       conn.use_ssl = true
-      conn.read_timeout = 1
-      conn.open_timeout = 1
+      conn.read_timeout = 0.01
+      conn.open_timeout = 0.01
 
       th = Thread.new do
-        assert_raise(Timeout::Error) {
+        assert_raise(Net::OpenTimeout) {
           conn.get('/')
         }
       end

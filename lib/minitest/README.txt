@@ -1,12 +1,24 @@
 = minitest/{unit,spec,mock,benchmark}
 
 home :: https://github.com/seattlerb/minitest
-rdoc :: http://bfts.rubyforge.org/minitest
+rdoc :: http://docs.seattlerb.org/minitest
+vim  :: https://github.com/sunaku/vim-ruby-minitest
 
 == DESCRIPTION:
 
 minitest provides a complete suite of testing facilities supporting
 TDD, BDD, mocking, and benchmarking.
+
+    "I had a class with Jim Weirich on testing last week and we were
+     allowed to choose our testing frameworks. Kirk Haines and I were
+     paired up and we cracked open the code for a few test
+     frameworks...
+
+     I MUST say that minitest is *very* readable / understandable
+     compared to the 'other two' options we looked at. Nicely done and
+     thank you for helping us keep our mental sanity."
+
+    -- Wayne E. Seguin
 
 minitest/unit is a small and incredibly fast unit testing framework.
 It provides a rich set of assertions to make your tests clean and
@@ -21,8 +33,8 @@ algorithms in a repeatable manner. Now you can assert that your newb
 co-worker doesn't replace your linear algorithm with an exponential
 one!
 
-minitest/mock by Steven Baker, is a beautifully tiny mock object
-framework.
+minitest/mock by Steven Baker, is a beautifully tiny mock (and stub)
+object framework.
 
 minitest/pride shows pride in testing and adds coloring to your test
 output. I guess it is an example of how to write IO pipes too. :P
@@ -32,12 +44,17 @@ implementors that need a minimal set of methods to bootstrap a working
 test suite. For example, there is no magic involved for test-case
 discovery.
 
+    "Again, I can't praise enough the idea of a testing/specing
+     framework that I can actually read in full in one sitting!"
+
+    -- Piotr Szotkowski
+
 == FEATURES/PROBLEMS:
 
 * minitest/autorun - the easy and explicit way to run all your tests.
 * minitest/unit - a very fast, simple, and clean test system.
 * minitest/spec - a very fast, simple, and clean spec system.
-* minitest/mock - a simple and clean mock system.
+* minitest/mock - a simple and clean mock/stub system.
 * minitest/benchmark - an awesome way to assert your algorithm's performance.
 * minitest/pride - show your pride in testing!
 * Incredibly small and fast runner, but no bells and whistles.
@@ -100,6 +117,10 @@ Given that you'd like to test the following class:
     end
   end
 
+For matchers support check out:
+
+https://github.com/zenspider/minitest-matchers
+
 === Benchmarks
 
 Add benchmarks to your regular unit tests. If the unit tests fail, the
@@ -112,9 +133,7 @@ benchmarks won't run.
     # Override self.bench_range or default range is [1, 10, 100, 1_000, 10_000]
     def bench_my_algorithm
       assert_performance_linear 0.9999 do |n| # n is a range value
-        n.times do
-          @obj.my_algorithm
-        end
+        @obj.my_algorithm(n)
       end
     end
   end
@@ -152,7 +171,7 @@ Output is tab-delimited to make it easy to paste into a spreadsheet.
 
     def ask(question)
       method = question.tr(" ","_") + "?"
-      @meme.send(method)
+      @meme.__send__(method)
     end
   end
 
@@ -172,6 +191,18 @@ Output is tab-delimited to make it easy to paste into a spreadsheet.
           @meme.verify
         end
       end
+    end
+  end
+
+=== Stubs
+
+  def test_stale_eh
+    obj_under_test = Something.new
+
+    refute obj_under_test.stale?
+
+    Time.stub :now, Time.at(0) do   # stub goes away once the block is done
+      assert obj_under_test.stale?
     end
   end
 
@@ -226,6 +257,46 @@ fixture loading:
   end
 
   MiniTest::Unit.runner = MiniTestWithTransactions::Unit.new
+
+== Known Extensions:
+
+minitest-capistrano    :: Assertions and expectations for testing Capistrano recipes
+minitest-capybara      :: Capybara matchers support for minitest unit and spec
+minitest-chef-handler  :: Run Minitest suites as Chef report handlers
+minitest-ci            :: CI reporter plugin for MiniTest.
+minitest-colorize      :: Colorize MiniTest output and show failing tests instantly.
+minitest-context       :: Defines contexts for code reuse in MiniTest
+                          specs that share common expectations.
+minitest-debugger      :: Wraps assert so failed assertions drop into
+                          the ruby debugger.
+minitest-display       :: Patches MiniTest to allow for an easily configurable output.
+minitest-emoji         :: Print out emoji for your test passes, fails, and skips.
+minitest-excludes      :: Clean API for excluding certain tests you
+                          don't want to run under certain conditions.
+minitest-firemock      :: Makes your MiniTest mocks more resilient.
+minitest-growl         :: Test notifier for minitest via growl.
+minitest-instrument    :: Instrument ActiveSupport::Notifications when
+                          test method is executed
+minitest-instrument-db :: Store information about speed of test
+                          execution provided by minitest-instrument in database
+minitest-libnotify     :: Test notifier for minitest via libnotify.
+minitest-macruby       :: Provides extensions to minitest for macruby UI testing.
+minitest-matchers      :: Adds support for RSpec-style matchers to minitest.
+minitest-metadata      :: Annotate tests with metadata (key-value).
+minitest-mongoid       :: Mongoid assertion matchers for MiniTest
+minitest-must_not      :: Provides must_not as an alias for wont in MiniTest
+minitest-predicates    :: Adds support for .predicate? methods
+minitest-pry           :: A minitest plugin to drop into pry on assertion failure.
+minitest-rails         :: MiniTest integration for Rails 3.1.
+minitest-reporters     :: Create customizable MiniTest output formats
+minitest-rg            :: redgreen minitest
+minitest-spec-magic    :: Minitest::Spec extensions for Rails and beyond
+minitest-tags          :: add tags for minitest
+minitest-wscolor       :: Yet another test colorizer.
+minitest_owrapper      :: Get tests results as a TestResult object.
+minitest_should        :: Shoulda style syntax for minitest test::unit.
+minitest_tu_shim       :: minitest_tu_shim bridges between test/unit and minitest.
+mongoid-minitest       :: MiniTest matchers for Mongoid.
 
 == REQUIREMENTS:
 

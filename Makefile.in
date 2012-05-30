@@ -1,5 +1,7 @@
 SHELL = /bin/sh
 NULLCMD = @NULLCMD@
+n=$(NULLCMD)
+ECHO1 = $(V:1=@$n)
 RUNCMD = $(SHELL)
 CHDIR = @CHDIR@
 exec = exec
@@ -10,9 +12,11 @@ NULL = /dev/null
 srcdir = @srcdir@
 top_srcdir = $(srcdir)
 hdrdir = $(srcdir)/include
+PLATFORM_DIR = @PLATFORM_DIR@
 
 CC = @CC@
 CPP = @CPP@
+LD = @LD@
 YACC = bison
 PURIFY =
 AUTOCONF = autoconf
@@ -48,7 +52,7 @@ empty =
 OUTFLAG = @OUTFLAG@$(empty)
 COUTFLAG = @COUTFLAG@$(empty)
 ARCH_FLAG = @ARCH_FLAG@
-CFLAGS = @CFLAGS@
+CFLAGS = @CFLAGS@ $(ARCH_FLAG)
 cflags = @cflags@
 optflags = @optflags@
 debugflags = @debugflags@
@@ -57,31 +61,38 @@ INCFLAGS = -I. -I$(arch_hdrdir) -I$(hdrdir) -I$(srcdir)
 XCFLAGS = @XCFLAGS@
 CPPFLAGS = @CPPFLAGS@ $(INCFLAGS)
 LDFLAGS = @STATIC@ $(CFLAGS) @LDFLAGS@
-EXTLDFLAGS = 
+EXTLDFLAGS = @EXTLDFLAGS@
 XLDFLAGS = @XLDFLAGS@ $(EXTLDFLAGS)
-EXTLIBS = 
+EXTLIBS =
 LIBS = @LIBS@ $(EXTLIBS)
 MISSING = @LIBOBJS@ @ALLOCA@
 LDSHARED = @LIBRUBY_LDSHARED@
-DLDFLAGS = @LIBRUBY_DLDFLAGS@ $(EXTLDFLAGS) $(ARCH_FLAG)
+DLDFLAGS = @LIBRUBY_DLDFLAGS@ $(XLDFLAGS) $(ARCH_FLAG)
 SOLIBS = @SOLIBS@
 MAINLIBS = @MAINLIBS@
 ARCHMINIOBJS = @MINIOBJS@
+ENCOBJS = @ENCOBJS@
+EXTOBJS = @EXTOBJS@
 BUILTIN_ENCOBJS = @BUILTIN_ENCOBJS@
 BUILTIN_TRANSSRCS = @BUILTIN_TRANSSRCS@
 BUILTIN_TRANSOBJS = @BUILTIN_TRANSOBJS@
+POSTLINK = @POSTLINK@
 
 RUBY_BASE_NAME=@RUBY_BASE_NAME@
 RUBY_PROGRAM_VERSION=@RUBY_PROGRAM_VERSION@
 RUBY_INSTALL_NAME=@RUBY_INSTALL_NAME@
 RUBY_SO_NAME=@RUBY_SO_NAME@
+RUBY_RELEASE_DATE=@RUBY_RELEASE_DATE@
 EXEEXT = @EXEEXT@
+LIBEXT = @LIBEXT@
 PROGRAM=$(RUBY_INSTALL_NAME)$(EXEEXT)
 RUBY = $(RUBY_INSTALL_NAME)
 MINIRUBY = @MINIRUBY@\
 	$(MINIRUBYOPT)
 RUNRUBY = @RUNRUBY@ $(RUNRUBYOPT) -- $(RUN_OPTS)
 XRUBY = @XRUBY@
+BTESTRUBY = @BTESTRUBY@\
+	$(MINIRUBYOPT)
 INSTALL = @INSTALL@
 INSTALL_DATA = @INSTALL_DATA@
 INSTALL_SCRIPT = @INSTALL_SCRIPT@
@@ -144,6 +155,9 @@ INSTALLED_LIST= .installed.list
 
 MKMAIN_CMD    = mkmain.sh
 
+NEWLINE_C     = newline.c
+MINIPRELUDE_C = miniprelude.c
+
 SRC_FILE      = $<
 
 MESSAGE_BEGIN = @for line in
@@ -167,7 +181,8 @@ miniruby$(EXEEXT):
 $(PROGRAM):
 		@$(RM) $@
 		$(ECHO) linking $@
-		$(Q) $(PURIFY) $(CC) $(LDFLAGS) $(XLDFLAGS) $(MAINLIBS) $(MAINOBJ) $(EXTOBJS) $(LIBRUBYARG) $(LIBS) $(OUTFLAG)$@
+		$(Q) $(PURIFY) $(CC) $(LDFLAGS) $(XLDFLAGS) $(MAINLIBS) $(MAINOBJ) $(EXTOBJS) $(LIBRUBYARG) $(LIBS) $(EXTLIBS) $(OUTFLAG)$@
+		$(Q) $(POSTLINK)
 
 # We must `rm' the library each time this rule is invoked because "updating" a
 # MAB library on Apple/NeXT (see --enable-fat-binary in configure) is not
@@ -177,11 +192,14 @@ $(LIBRUBY_A):
 		$(ECHO) linking static-library $@
 		$(Q) $(AR) $(ARFLAGS) $@ $(OBJS) $(DMYEXT)
 		@-$(RANLIB) $@ 2> /dev/null || true
+		$(ECHO) verifying static-library $@
+		@$(PURIFY) $(CC) $(XLDFLAGS) $(MAINOBJ) $(LIBRUBY_A) $(MAINLIBS) $(EXTLIBS) $(LIBS) $(OUTFLAG)conftest$(EXEEXT) $(LDFLAGS)
+		@$(RM) conftest$(EXEEXT) conftest.c
 
 $(LIBRUBY_SO):
 		@-$(PRE_LIBRUBY_UPDATE)
 		$(ECHO) linking shared-library $@
-		$(Q) $(LDSHARED) $(DLDFLAGS) $(OBJS) $(DLDOBJS) $(SOLIBS) $(OUTFLAG)$@
+		$(Q) $(LDSHARED) $(DLDFLAGS) $(OBJS) $(DLDOBJS) $(SOLIBS) $(EXTSOLIBS) $(OUTFLAG)$@
 		-$(Q) $(OBJCOPY) -w -L '$(SYMBOL_PREFIX)Init_*' -L '$(SYMBOL_PREFIX)*_threadptr_*' $@
 		@-$(MINIRUBY) -e 'ARGV.each{|link| File.delete link if File.exist? link; \
 						  File.symlink "$(LIBRUBY_SO)", link}' \
@@ -234,7 +252,8 @@ config.status-args = ./config.status --recheck
 reconfig-exec-0 = exec 3>&1; exit `exec 4>&1; { "$$@" 3>&- 4>&-; echo $$? 1>&4; } | fgrep -v '(cached)' 1>&3`
 reconfig-exec-1 = set -x; "$$@"
 
-reconfig config.status:	$(srcdir)/configure $(srcdir)/enc/Makefile.in
+reconfig config.status:	$(srcdir)/configure $(srcdir)/enc/Makefile.in \
+			$(srcdir)/include/ruby/version.h
 	@PWD= MINIRUBY="$(MINIRUBY)"; export MINIRUBY; \
 	set $(SHELL) $($@-args); $(reconfig-exec-$(V))
 
@@ -275,7 +294,7 @@ enc/unicode/name2ctype.h: enc/unicode/name2ctype.kwd
 	  trap '$(RM) $@-1.h $@-2.h' 0 && \
 	  set -x; \
 	  sed '/^#ifdef USE_UNICODE_PROPERTIES/,/^#endif/d' $? | gperf $(NAME2CTYPE_OPTIONS) > $@-1.h && \
-	  gperf $(NAME2CTYPE_OPTIONS) < $? > $@-2.h && \
+	  sed -e '/^#ifdef USE_UNICODE_PROPERTIES/,/^#endif/{' -e '/^#/d' -e '}' $? | gperf $(NAME2CTYPE_OPTIONS) > $@-2.h && \
 	  diff -DUSE_UNICODE_PROPERTIES $@-1.h $@-2.h > $@.tmp || :; \
 	  $(MV) $@.tmp $@ && \
 	  $(CP) $? $(?:.kwd=.src) && \
@@ -299,13 +318,14 @@ enc/unicode/name2ctype.h: enc/unicode/name2ctype.kwd
 	$(Q) $(CPP) $(XCFLAGS) $(CPPFLAGS) $(COUTFLAG)$@ -E $< > $@
 
 clean-local::
-	$(Q)$(RM) ext/extinit.c ext/extinit.$(OBJEXT) ext/ripper/y.output
+	$(Q)$(RM) ext/extinit.c ext/extinit.$(OBJEXT) ext/ripper/y.output \
+		enc/encinit.c enc/encinit.$(OBJEXT)
 	-$(Q)$(RM) $(pkgconfig_DATA)
 
 distclean-local::
 	$(Q)$(RM) ext/config.cache $(RBCONFIG) Doxyfile
 	-$(Q)$(RM) run.gdb
-	-$(Q)$(RM) $(INSTALLED_LIST) $(arch_hdrdir)/ruby/config.h
+	-$(Q)$(RM) $(INSTALLED_LIST) $(arch_hdrdir)/ruby/config.h verconf.h
 	-$(Q)$(RMDIRS) $(arch_hdrdir)/ruby 2> /dev/null || true
 
 clean-ext distclean-ext realclean-ext::
@@ -323,8 +343,10 @@ clean-ext distclean-ext realclean-ext::
 		$(RMDIRS) "ext/$$dir" 2> /dev/null || true;; \
 	    esac; \
 	done
+	-$(Q)$(RM) ext/extinit.$(OBJEXT)
 
 distclean-ext realclean-ext::
+	-$(Q)$(RM) ext/extinit.c
 	-$(Q)$(RMDIR) ext 2> /dev/null || true
 
 clean-extout:
@@ -342,10 +364,15 @@ clean-capi distclean-capi realclean-capi:
 	@echo $(@:-capi=ing) capi
 	$(Q)$(RMALL) $(CAPIOUT)
 
+clean-platform:
+	@$(RM) $(PLATFORM_D)
+	-$(Q) $(RMDIR) $(PLATFORM_DIR) 2> /dev/null || true
 
 ext/extinit.$(OBJEXT): ext/extinit.c $(SETUP)
 	$(ECHO) compiling $@
 	$(Q) $(CC) $(CFLAGS) $(XCFLAGS) $(CPPFLAGS) $(COUTFLAG)$@ -c ext/extinit.c
+
+enc/encinit.$(OBJEXT): enc/encinit.c $(SETUP)
 
 up::
 	@$(CHDIR) "$(srcdir)" && LC_TIME=C exec $(VCSUP)

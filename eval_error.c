@@ -55,9 +55,22 @@ rb_get_backtrace(VALUE info)
     return get_backtrace(info);
 }
 
+VALUE rb_exc_set_backtrace(VALUE exc, VALUE bt);
+
 static void
 set_backtrace(VALUE info, VALUE bt)
 {
+    ID set_backtrace = rb_intern("set_backtrace");
+
+    if (rb_backtrace_p(bt)) {
+	if (rb_method_basic_definition_p(CLASS_OF(info), set_backtrace)) {
+	    rb_exc_set_backtrace(info, bt);
+	    return;
+	}
+	else {
+	    bt = rb_backtrace_to_str_ary(bt);
+	}
+    }
     rb_funcall(info, rb_intern("set_backtrace"), 1, bt);
 }
 
@@ -168,7 +181,7 @@ error_print(void)
 #define TRACE_TAIL 5
 
 	for (i = 1; i < len; i++) {
-	    if (TYPE(ptr[i]) == T_STRING) {
+	    if (RB_TYPE_P(ptr[i], T_STRING)) {
 		warn_printf("\tfrom %s\n", RSTRING_PTR(ptr[i]));
 	    }
 	    if (skip && i == TRACE_HEAD && len > TRACE_MAX) {

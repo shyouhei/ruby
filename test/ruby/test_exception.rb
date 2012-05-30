@@ -1,4 +1,5 @@
 require 'test/unit'
+require 'tempfile'
 require_relative 'envutil'
 
 class TestException < Test::Unit::TestCase
@@ -81,16 +82,16 @@ class TestException < Test::Unit::TestCase
     assert(!$bad)
 
     assert(catch(:foo) {
-         loop do
-           loop do
-    	 throw :foo, true
-    	 break
-           end
-           break
-           assert(false)			# should no reach here
-         end
-         false
-       })
+             loop do
+               loop do
+                 throw :foo, true
+                 break
+               end
+               break
+               assert(false)			# should no reach here
+             end
+             false
+           })
 
   end
 
@@ -244,7 +245,7 @@ class TestException < Test::Unit::TestCase
   end
 
   def test_thread_signal_location
-    stdout, stderr, status = EnvUtil.invoke_ruby("-d", <<-RUBY, false, true)
+    _, stderr, _ = EnvUtil.invoke_ruby("-d", <<-RUBY, false, true)
 Thread.start do
   begin
     Process.kill(:INT, $$)
@@ -327,5 +328,85 @@ end.join
 
   def test_errno
     assert_equal(Encoding.find("locale"), Errno::EINVAL.new.message.encoding)
+  end
+
+  def test_too_many_args_in_eval
+    bug5720 = '[ruby-core:41520]'
+    arg_string = (0...140000).to_a.join(", ")
+    assert_raise(SystemStackError, bug5720) {eval "raise(#{arg_string})"}
+  end
+
+  def test_systemexit_new
+    e0 = SystemExit.new
+    assert_equal(0, e0.status)
+    assert_equal("SystemExit", e0.message)
+    ei = SystemExit.new(3)
+    assert_equal(3, ei.status)
+    assert_equal("SystemExit", ei.message)
+    es = SystemExit.new("msg")
+    assert_equal(0, es.status)
+    assert_equal("msg", es.message)
+    eis = SystemExit.new(7, "msg")
+    assert_equal(7, eis.status)
+    assert_equal("msg", eis.message)
+
+    bug5728 = '[ruby-dev:44951]'
+    et = SystemExit.new(true)
+    assert_equal(true, et.success?, bug5728)
+    assert_equal("SystemExit", et.message, bug5728)
+    ef = SystemExit.new(false)
+    assert_equal(false, ef.success?, bug5728)
+    assert_equal("SystemExit", ef.message, bug5728)
+    ets = SystemExit.new(true, "msg")
+    assert_equal(true, ets.success?, bug5728)
+    assert_equal("msg", ets.message, bug5728)
+    efs = SystemExit.new(false, "msg")
+    assert_equal(false, efs.success?, bug5728)
+    assert_equal("msg", efs.message, bug5728)
+  end
+
+  def test_exception_in_name_error_to_str
+    bug5575 = '[ruby-core:41612]'
+    t = nil
+    Tempfile.open(["test_exception_in_name_error_to_str", ".rb"]) do |f|
+      t = f
+      t.puts <<-EOC
+      begin
+        BasicObject.new.inspect
+      rescue
+        $!.inspect
+      end
+    EOC
+    end
+    assert_nothing_raised(NameError, bug5575) do
+      load(t.path)
+    end
+  ensure
+    t.close(true) if t
+  end
+
+  def test_equal
+    bug5865 = '[ruby-core:41979]'
+    assert_equal(RuntimeError.new("a"), RuntimeError.new("a"), bug5865)
+    assert_not_equal(RuntimeError.new("a"), StandardError.new("a"), bug5865)
+  end
+
+  def test_exception_in_exception_equal
+    bug5865 = '[ruby-core:41979]'
+    t = nil
+    Tempfile.open(["test_exception_in_exception_equal", ".rb"]) do |f|
+      t = f
+      t.puts <<-EOC
+      o = Object.new
+      def o.exception(arg)
+      end
+      _ = RuntimeError.new("a") == o
+    EOC
+    end
+    assert_nothing_raised(ArgumentError, bug5865) do
+      load(t.path)
+    end
+  ensure
+    t.close(true) if t
   end
 end

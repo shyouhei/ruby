@@ -233,9 +233,11 @@ static const struct token_assoc {
     {tRPAREN,		&ripper_id_rparen},
     {tRSHFT,		&ripper_id_op},
     {tSTAR,		&ripper_id_op},
+    {tDSTAR,		&ripper_id_op},
     {tSTRING_BEG,	&ripper_id_tstring_beg},
     {tSTRING_CONTENT,	&ripper_id_tstring_content},
     {tSTRING_DBEG,	&ripper_id_embexpr_beg},
+    {tSTRING_DEND,	&ripper_id_embexpr_end},
     {tSTRING_DVAR,	&ripper_id_embvar},
     {tSTRING_END,	&ripper_id_tstring_end},
     {tSYMBEG,		&ripper_id_symbeg},
@@ -274,4 +276,6 @@ ripper_token2eventid(int tok)
         return ripper_id_CHAR;
     }
     rb_raise(rb_eRuntimeError, "[Ripper FATAL] unknown token %d", tok);
+
+    UNREACHABLE;
 }

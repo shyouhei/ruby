@@ -30,12 +30,6 @@
 # An OpenStruct employs a Hash internally to store the methods and values and
 # can even be initialized with one:
 #
-#   country_data = { :country => "Australia", :population => 20_000_000 }
-#   australia = OpenStruct.new(country_data)
-#   p australia   # -> <OpenStruct country="Australia" population=20000000>
-#
-# You may also define the hash in the initialization call:
-#
 #   australia = OpenStruct.new(:country => "Australia", :population => 20_000_000)
 #   p australia   # -> <OpenStruct country="Australia" population=20000000>
 #
@@ -89,12 +83,6 @@ class OpenStruct
   #
   #   p data        # -> <OpenStruct country="Australia" population=20000000>
   #
-  # You may also define the hash in the initialization call:
-  #
-  #   australia = OpenStruct.new(:country => "Australia",
-  #                              :population => 20_000_000)
-  #   p australia   # -> <OpenStruct country="Australia" population=20000000>
-  #
   def initialize(hash=nil)
     @table = {}
     if hash
@@ -109,6 +97,20 @@ class OpenStruct
   def initialize_copy(orig)
     super
     @table = @table.dup
+    @table.each_key{|key| new_ostruct_member(key)}
+  end
+
+  #
+  # Converts the OpenStruct to a hash with keys representing
+  # each attribute (as symbols) and their corresponding values
+  # Example:
+  #
+  #   require 'ostruct'
+  #   data = OpenStruct.new("country" => "Australia", :population => 20_000_000)
+  #   data.to_h   # => {:country => "Australia", :population => 20000000 }
+  #
+  def to_h
+    @table.dup
   end
 
   #
@@ -146,7 +148,7 @@ class OpenStruct
 
   #
   # #modifiable is used internally to check if the OpenStruct is able to be
-  # modified before granting access to the internal Hash table to be augmented.
+  # modified before granting access to the internal Hash table to be modified.
   #
   def modifiable
     begin
@@ -190,8 +192,8 @@ class OpenStruct
   end
 
   #
-  # Remove the named field from the object. Returning the value that the field
-  # contained if it has defined.
+  # Remove the named field from the object. Returns the value that the field
+  # contained if it was defined.
   #
   #   require 'ostruct'
   #
@@ -201,8 +203,8 @@ class OpenStruct
   #
   def delete_field(name)
     sym = name.to_sym
-    @table.delete sym
     singleton_class.__send__(:remove_method, sym, "#{name}=")
+    @table.delete sym
   end
 
   InspectKey = :__inspect_key__ # :nodoc:

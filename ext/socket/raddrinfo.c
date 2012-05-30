@@ -421,20 +421,25 @@ rsock_ipaddr(struct sockaddr *sockaddr, int norevlookup)
 }
 
 #ifdef HAVE_SYS_UN_H
-const char*
-rsock_unixpath(struct sockaddr_un *sockaddr, socklen_t len)
+VALUE
+rsock_unixpath_str(struct sockaddr_un *sockaddr, socklen_t len)
 {
-    if (sockaddr->sun_path < (char*)sockaddr + len)
-        return sockaddr->sun_path;
+    char *s, *e;
+    s = sockaddr->sun_path;
+    e = (char *)sockaddr + len;
+    while (s < e && *(e-1) == '\0')
+        e--;
+    if (s <= e)
+        return rb_str_new(s, e-s);
     else
-        return "";
+        return rb_str_new2("");
 }
 
 VALUE
 rsock_unixaddr(struct sockaddr_un *sockaddr, socklen_t len)
 {
     return rb_assoc_new(rb_str_new2("AF_UNIX"),
-                        rb_str_new2(rsock_unixpath(sockaddr, len)));
+                        rsock_unixpath_str(sockaddr, len));
 }
 #endif
 
@@ -661,31 +666,32 @@ make_inspectname(VALUE node, VALUE service, struct addrinfo *res)
     VALUE inspectname = Qnil;
 
     if (res) {
+        /* drop redundant information which also shown in address:port part. */
         char hbuf[NI_MAXHOST], pbuf[NI_MAXSERV];
         int ret;
         ret = rb_getnameinfo(res->ai_addr, res->ai_addrlen, hbuf,
                              sizeof(hbuf), pbuf, sizeof(pbuf),
                              NI_NUMERICHOST|NI_NUMERICSERV);
         if (ret == 0) {
-            if (TYPE(node) == T_STRING && strcmp(hbuf, RSTRING_PTR(node)) == 0)
+            if (RB_TYPE_P(node, T_STRING) && strcmp(hbuf, RSTRING_PTR(node)) == 0)
                 node = Qnil;
-            if (TYPE(service) == T_STRING && strcmp(pbuf, RSTRING_PTR(service)) == 0)
+            if (RB_TYPE_P(service, T_STRING) && strcmp(pbuf, RSTRING_PTR(service)) == 0)
                 service = Qnil;
-            else if (TYPE(service) == T_FIXNUM && atoi(pbuf) == FIX2INT(service))
+            else if (RB_TYPE_P(service, T_FIXNUM) && atoi(pbuf) == FIX2INT(service))
                 service = Qnil;
         }
     }
 
-    if (TYPE(node) == T_STRING) {
+    if (RB_TYPE_P(node, T_STRING)) {
         inspectname = rb_str_dup(node);
     }
-    if (TYPE(service) == T_STRING) {
+    if (RB_TYPE_P(service, T_STRING)) {
         if (NIL_P(inspectname))
             inspectname = rb_sprintf(":%s", StringValueCStr(service));
         else
             rb_str_catf(inspectname, ":%s", StringValueCStr(service));
     }
-    else if (TYPE(service) == T_FIXNUM && FIX2INT(service) != 0)
+    else if (RB_TYPE_P(service, T_FIXNUM) && FIX2INT(service) != 0)
     {
         if (NIL_P(inspectname))
             inspectname = rb_sprintf(":%d", FIX2INT(service));
@@ -766,9 +772,10 @@ init_unix_addrinfo(rb_addrinfo_t *rai, VALUE path, int socktype)
 
     StringValue(path);
 
-    if (sizeof(un.sun_path) <= (size_t)RSTRING_LEN(path))
-        rb_raise(rb_eArgError, "too long unix socket path (max: %dbytes)",
-            (int)sizeof(un.sun_path)-1);
+    if (sizeof(un.sun_path) < (size_t)RSTRING_LEN(path))
+        rb_raise(rb_eArgError,
+            "too long unix socket path (%"PRIuSIZE" bytes given but %"PRIuSIZE" bytes max)",
+            (size_t)RSTRING_LEN(path), sizeof(un.sun_path));
 
     MEMZERO(&un, struct sockaddr_un, 1);
 
@@ -996,9 +1003,11 @@ inspect_sockaddr(VALUE addrinfo, VALUE ret)
           case AF_UNIX:
           {
             struct sockaddr_un *addr = (struct sockaddr_un *)&rai->addr;
-            char *p, *s, *t, *e;
+            char *p, *s, *e;
             s = addr->sun_path;
             e = (char*)addr + rai->sockaddr_len;
+            while (s < e && *(e-1) == '\0')
+                e--;
             if (e < s)
                 rb_str_cat2(ret, "too-short-AF_UNIX-sockaddr");
             else if (s == e)
@@ -1006,28 +1015,17 @@ inspect_sockaddr(VALUE addrinfo, VALUE ret)
             else {
                 int printable_only = 1;
                 p = s;
-                while (p < e && *p != '\0') {
+                while (p < e) {
                     printable_only = printable_only && ISPRINT(*p) && !ISSPACE(*p);
                     p++;
                 }
-                t = p;
-                while (p < e && *p == '\0')
-                    p++;
-                if (printable_only && /* only printable, no space */
-                    t < e && /* NUL terminated */
-                    p == e) { /* no data after NUL */
-		    if (s == t)
-			rb_str_cat2(ret, "empty-path-AF_UNIX-sockaddr");
-		    else if (s[0] == '/') /* absolute path */
-			rb_str_cat2(ret, s);
-		    else
-                        rb_str_catf(ret, "AF_UNIX %s", s);
+                if (printable_only) { /* only printable, no space */
+                    if (s[0] != '/') /* relative path */
+                        rb_str_cat2(ret, "AF_UNIX ");
+                    rb_str_cat(ret, s, p - s);
                 }
                 else {
                     rb_str_cat2(ret, "AF_UNIX");
-                    e = (char *)addr->sun_path + sizeof(addr->sun_path);
-                    while (s < e && *(e-1) == '\0')
-                        e--;
                     while (s < e)
                         rb_str_catf(ret, ":%02x", (unsigned char)*s++);
                 }
@@ -1060,7 +1058,7 @@ inspect_sockaddr(VALUE addrinfo, VALUE ret)
  *
  * returns a string which shows addrinfo in human-readable form.
  *
- *   Addrinfo.tcp("localhost", 80).inspect #=> "#<Addrinfo: 127.0.0.1:80 TCP (localhost:80)>"
+ *   Addrinfo.tcp("localhost", 80).inspect #=> "#<Addrinfo: 127.0.0.1:80 TCP (localhost)>"
  *   Addrinfo.unix("/tmp/sock").inspect    #=> "#<Addrinfo: /tmp/sock SOCK_STREAM>"
  *
  */
@@ -1201,7 +1199,7 @@ addrinfo_mdump(VALUE self)
         struct sockaddr_un *su = (struct sockaddr_un *)&rai->addr;
         char *s, *e;
         s = su->sun_path;
-        e = (char*)s + sizeof(su->sun_path);
+        e = (char*)su + rai->sockaddr_len;
         while (s < e && *(e-1) == '\0')
             e--;
         sockaddr = rb_str_new(s, e-s);
@@ -1298,12 +1296,14 @@ addrinfo_mload(VALUE self, VALUE ary)
       case AF_UNIX:
       {
         struct sockaddr_un uaddr;
-        memset(&uaddr, 0, sizeof(uaddr));
+        MEMZERO(&uaddr, struct sockaddr_un, 1);
         uaddr.sun_family = AF_UNIX;
 
         StringValue(v);
-        if (sizeof(uaddr.sun_path) <= (size_t)RSTRING_LEN(v))
-            rb_raise(rb_eSocket, "too long AF_UNIX path");
+        if (sizeof(uaddr.sun_path) < (size_t)RSTRING_LEN(v))
+            rb_raise(rb_eSocket,
+                "too long AF_UNIX path (%"PRIuSIZE" bytes given but %"PRIuSIZE" bytes max)",
+                (size_t)RSTRING_LEN(v), sizeof(uaddr.sun_path));
         memcpy(uaddr.sun_path, RSTRING_PTR(v), RSTRING_LEN(v));
         len = (socklen_t)sizeof(uaddr);
         memcpy(&ss, &uaddr, len);
@@ -1432,7 +1432,7 @@ addrinfo_to_sockaddr(VALUE self)
  * The canonical name is set by Addrinfo.getaddrinfo when AI_CANONNAME is specified.
  *
  *   list = Addrinfo.getaddrinfo("www.ruby-lang.org", 80, :INET, :STREAM, nil, Socket::AI_CANONNAME)
- *   p list[0] #=> #<Addrinfo: 221.186.184.68:80 TCP carbon.ruby-lang.org (www.ruby-lang.org:80)>
+ *   p list[0] #=> #<Addrinfo: 221.186.184.68:80 TCP carbon.ruby-lang.org (www.ruby-lang.org)>
  *   p list[0].canonname #=> "carbon.ruby-lang.org"
  *
  */
@@ -1936,9 +1936,12 @@ addrinfo_unix_path(VALUE self)
     s = addr->sun_path;
     e = (char*)addr + rai->sockaddr_len;
     if (e < s)
-        rb_raise(rb_eSocket, "too short AF_UNIX address");
+        rb_raise(rb_eSocket, "too short AF_UNIX address: %"PRIuSIZE" bytes given for minimum %"PRIuSIZE" bytes.",
+            (size_t)rai->sockaddr_len, (size_t)(s - (char *)addr));
     if (addr->sun_path + sizeof(addr->sun_path) < e)
-        rb_raise(rb_eSocket, "too long AF_UNIX address");
+        rb_raise(rb_eSocket,
+            "too long AF_UNIX path (%"PRIuSIZE" bytes given but %"PRIuSIZE" bytes max)",
+            (size_t)(e - addr->sun_path), sizeof(addr->sun_path));
     while (s < e && *(e-1) == '\0')
         e--;
     return rb_str_new(s, e-s);
@@ -1968,15 +1971,24 @@ addrinfo_unix_path(VALUE self)
  *
  * Similarly, PF_INET6 as family restricts for IPv6.
  *
- * flags should be bitwise OR of Socket::AI_??? constants.
+ * flags should be bitwise OR of Socket::AI_??? constants such as follows.
+ * Note that the exact list of the constants depends on OS.
+ *
+ *   AI_PASSIVE      Get address to use with bind()
+ *   AI_CANONNAME    Fill in the canonical name
+ *   AI_NUMERICHOST  Prevent host name resolution
+ *   AI_NUMERICSERV  Prevent service name resolution
+ *   AI_V4MAPPED     Accept IPv4-mapped IPv6 addresses
+ *   AI_ALL          Allow all addresses
+ *   AI_ADDRCONFIG   Accept only if any address is assigned
  *
  * Note that socktype should be specified whenever application knows the usage of the address.
  * Some platform causes an error when socktype is omitted and servname is specified as an integer
  * because some port numbers, 512 for example, are ambiguous without socktype.
  *
  *   Addrinfo.getaddrinfo("www.kame.net", 80, nil, :STREAM)
- *   #=> [#<Addrinfo: 203.178.141.194:80 TCP (www.kame.net:80)>,
- *   #    #<Addrinfo: [2001:200:0:8002:203:47ff:fea5:3085]:80 TCP (www.kame.net:80)>]
+ *   #=> [#<Addrinfo: 203.178.141.194:80 TCP (www.kame.net)>,
+ *   #    #<Addrinfo: [2001:200:dff:fff1:216:3eff:feb1:44d7]:80 TCP (www.kame.net)>]
  *
  */
 static VALUE
@@ -2143,6 +2155,8 @@ rsock_io_socket_addrinfo(VALUE io, struct sockaddr *addr, socklen_t len)
       default:
         rb_raise(rb_eTypeError, "neither IO nor file descriptor");
     }
+
+    UNREACHABLE;
 }
 
 /*

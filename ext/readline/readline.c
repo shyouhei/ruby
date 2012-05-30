@@ -40,6 +40,10 @@
 #include <unistd.h>
 #endif
 
+#ifdef HAVE_SYS_STAT_H
+#include <sys/stat.h>
+#endif
+
 static VALUE mReadline;
 
 #define EDIT_LINE_LIBRARY_VERSION "EditLine wrapper"
@@ -57,6 +61,12 @@ static ID completion_proc, completion_case_fold;
 #if USE_INSERT_IGNORE_ESCAPE
 static ID id_orig_prompt, id_last_prompt;
 #endif
+#if defined(HAVE_RL_PRE_INPUT_HOOK)
+static ID id_pre_input_hook;
+#endif
+#if defined(HAVE_RL_SPECIAL_PREFIXES)
+static ID id_special_prefixes;
+#endif
 
 #ifndef HAVE_RL_FILENAME_COMPLETION_FUNCTION
 # define rl_filename_completion_function filename_completion_function
@@ -69,6 +79,10 @@ static ID id_orig_prompt, id_last_prompt;
 #endif
 
 static int (*history_get_offset_func)(int);
+static int (*history_replace_offset_func)(int);
+#ifdef HAVE_RL_COMPLETION_APPEND_CHARACTER
+static int readline_completion_append_character;
+#endif
 
 static char **readline_attempted_completion_function(const char *text,
                                                      int start, int end);
@@ -158,7 +172,7 @@ readline_getc(FILE *input)
             }
         }
     }
-#endif    
+#endif
     c = rb_funcall(readline_instream, id_getbyte, 0, 0);
     if (NIL_P(c)) return EOF;
     return NUM2CHR(c);
@@ -257,6 +271,9 @@ insert_ignore_escape(VALUE self, VALUE prompt)
 static VALUE
 readline_get(VALUE prompt)
 {
+#ifdef HAVE_RL_COMPLETION_APPEND_CHARACTER
+    readline_completion_append_character = rl_completion_append_character;
+#endif
     return (VALUE)readline((char *)prompt);
 }
 
@@ -365,6 +382,13 @@ readline_readline(int argc, VALUE *argv, VALUE self)
     }
 
     if (!isatty(fileno(rl_instream)) && errno == EBADF) rb_raise(rb_eIOError, "closed stdin");
+    if (rl_outstream) {
+	struct stat stbuf;
+	int fd = fileno(rl_outstream);
+	if (fd < 0 || fstat(fd, &stbuf) != 0) {
+	    rb_raise(rb_eIOError, "closed stdout");
+	}
+    }
 
 #ifdef _WIN32
     rl_prep_terminal(1);
@@ -449,6 +473,108 @@ readline_s_set_output(VALUE self, VALUE output)
     rl_outstream = rb_io_stdio_file(ofp);
     return output;
 }
+
+#if defined(HAVE_RL_PRE_INPUT_HOOK)
+/*
+ * call-seq:
+ *   Readline.pre_input_hook = proc
+ *
+ * Specifies a Proc object +proc+ to call after the first prompt has
+ * been printed and just before readline starts reading input
+ * characters.
+ *
+ * See GNU Readline's rl_pre_input_hook variable.
+ * 
+ * Raises ArgumentError if +proc+ does not respond to the call method.
+ *
+ * Raises SecurityError if $SAFE is 4.
+ */
+static VALUE
+readline_s_set_pre_input_hook(VALUE self, VALUE proc)
+{
+    rb_secure(4);
+    if (!NIL_P(proc) && !rb_respond_to(proc, rb_intern("call")))
+	rb_raise(rb_eArgError, "argument must respond to `call'");
+    return rb_ivar_set(mReadline, id_pre_input_hook, proc);
+}
+
+/*
+ * call-seq:
+ *   Readline.pre_input_hook -> proc
+ *
+ * Returns a Proc object +proc+ to call after the first prompt has
+ * been printed and just before readline starts reading input
+ * characters. The default is nil.
+ *
+ * Raises SecurityError if $SAFE is 4.
+ */
+static VALUE
+readline_s_get_pre_input_hook(VALUE self)
+{
+    rb_secure(4);
+    return rb_attr_get(mReadline, id_pre_input_hook);
+}
+
+static int
+readline_pre_input_hook(void)
+{
+    VALUE proc;
+
+    proc = rb_attr_get(mReadline, id_pre_input_hook);
+    if (!NIL_P(proc))
+	rb_funcall(proc, rb_intern("call"), 0);
+    return 0;
+}
+#else
+#define readline_s_set_pre_input_hook rb_f_notimplement
+#define readline_s_get_pre_input_hook rb_f_notimplement
+#endif
+
+#if defined(HAVE_RL_INSERT_TEXT)
+/*
+ * call-seq:
+ *   Readline.insert_text(string) -> self
+ *
+ * Insert text into the line at the current cursor position.
+ *
+ * See GNU Readline's rl_insert_text function.
+ *
+ * Raises SecurityError if $SAFE is 4.
+ */
+static VALUE
+readline_s_insert_text(VALUE self, VALUE str)
+{
+    rb_secure(4);
+    OutputStringValue(str);
+    rl_insert_text(RSTRING_PTR(str));
+    return self;
+}
+#else
+#define readline_s_insert_text rb_f_notimplement
+#endif
+
+#if defined(HAVE_RL_REDISPLAY)
+/*
+ * call-seq:
+ *   Readline.redisplay -> self
+ *
+ * Change what's displayed on the screen to reflect the current
+ * contents.
+ *
+ * See GNU Readline's rl_redisplay function.
+ *
+ * Raises SecurityError if $SAFE is 4.
+ */
+static VALUE
+readline_s_redisplay(VALUE self)
+{
+    rb_secure(4);
+    rl_redisplay();
+    return self;
+}
+#else
+#define readline_s_redisplay rb_f_notimplement
+#endif
 
 /*
  * call-seq:
@@ -637,24 +763,34 @@ readline_attempted_completion_function(const char *text, int start, int end)
     char **result;
     int case_fold;
     long i, matches;
+    rb_encoding *enc;
+    VALUE encobj;
 
     proc = rb_attr_get(mReadline, completion_proc);
     if (NIL_P(proc))
 	return NULL;
+#ifdef HAVE_RL_COMPLETION_APPEND_CHARACTER
+    rl_completion_append_character = readline_completion_append_character;
+#endif
 #ifdef HAVE_RL_ATTEMPTED_COMPLETION_OVER
     rl_attempted_completion_over = 1;
 #endif
     case_fold = RTEST(rb_attr_get(mReadline, completion_case_fold));
     ary = rb_funcall(proc, rb_intern("call"), 1, rb_locale_str_new_cstr(text));
-    if (TYPE(ary) != T_ARRAY)
+    if (!RB_TYPE_P(ary, T_ARRAY))
 	ary = rb_Array(ary);
     matches = RARRAY_LEN(ary);
-    if (matches == 0)
-	return NULL;
-    result = ALLOC_N(char *, matches + 2);
+    if (matches == 0) return NULL;
+    result = (char**)malloc((matches + 2)*sizeof(char*));
+    if (result == NULL) rb_memerror();
+    enc = rb_locale_encoding();
+    encobj = rb_enc_from_encoding(enc);
     for (i = 0; i < matches; i++) {
 	temp = rb_obj_as_string(RARRAY_PTR(ary)[i]);
-	result[i + 1] = ALLOC_N(char, RSTRING_LEN(temp) + 1);
+	StringValueCStr(temp);	/* must be NUL-terminated */
+	rb_enc_check(encobj, temp);
+	result[i + 1] = (char*)malloc(RSTRING_LEN(temp) + 1);
+	if (result[i + 1]  == NULL) rb_memerror();
 	strcpy(result[i + 1], RSTRING_PTR(temp));
     }
     result[matches + 1] = NULL;
@@ -663,30 +799,30 @@ readline_attempted_completion_function(const char *text, int start, int end)
         result[0] = strdup(result[1]);
     }
     else {
-	register int i = 1;
-	int low = 100000;
+	const char *result1 = result[1];
+	long low = strlen(result1);
 
-	while (i < matches) {
-	    register int c1, c2, si;
+	for (i = 1; i < matches; ++i) {
+	    register int c1, c2;
+	    long i1, i2, l2;
+	    int n1, n2;
+	    const char *p2 = result[i + 1];
 
-	    if (case_fold) {
-		for (si = 0;
-		     (c1 = TOLOWER(result[i][si])) &&
-			 (c2 = TOLOWER(result[i + 1][si]));
-		     si++)
-		    if (c1 != c2) break;
-	    } else {
-		for (si = 0;
-		     (c1 = result[i][si]) &&
-			 (c2 = result[i + 1][si]);
-		     si++)
-		    if (c1 != c2) break;
+	    l2 = strlen(p2);
+	    for (i1 = i2 = 0; i1 < low && i2 < l2; i1 += n1, i2 += n2) {
+		c1 = rb_enc_codepoint_len(result1 + i1, result1 + low, &n1, enc);
+		c2 = rb_enc_codepoint_len(p2 + i2, p2 + l2, &n2, enc);
+		if (case_fold) {
+		    c1 = rb_tolower(c1);
+		    c2 = rb_tolower(c2);
+		}
+		if (c1 != c2) break;
 	    }
 
-	    if (low > si) low = si;
-	    i++;
+	    low = i1;
 	}
-	result[0] = ALLOC_N(char, low + 1);
+	result[0] = (char*)malloc(low + 1);
+	if (result[0]  == NULL) rb_memerror();
 	strncpy(result[0], result[1], low);
 	result[0][low] = '\0';
     }
@@ -1046,6 +1182,73 @@ readline_s_get_completer_word_break_characters(VALUE self, VALUE str)
 #define readline_s_get_completer_word_break_characters rb_f_notimplement
 #endif
 
+#if defined(HAVE_RL_SPECIAL_PREFIXES)
+/*
+ * call-seq:
+ *   Readline.special_prefixes = string
+ *
+ * Sets the list of characters that are word break characters, but
+ * should be left in text when it is passed to the completion
+ * function. Programs can use this to help determine what kind of
+ * completing to do. For instance, Bash sets this variable to "$@" so
+ * that it can complete shell variables and hostnames.
+ *
+ * See GNU Readline's rl_special_prefixes variable.
+ *
+ * Raises NotImplementedError if the using readline library does not support.
+ *
+ * Raises SecurityError exception if $SAFE is 4.
+ */
+static VALUE
+readline_s_set_special_prefixes(VALUE self, VALUE str)
+{
+    rb_secure(4);
+    if (!NIL_P(str)) {
+	OutputStringValue(str);
+	str = rb_str_dup_frozen(str);
+	RBASIC(str)->klass = 0;
+    }
+    rb_ivar_set(mReadline, id_special_prefixes, str);
+    if (NIL_P(str)) {
+	rl_special_prefixes = NULL;
+    }
+    else {
+	rl_special_prefixes = RSTRING_PTR(str);
+    }
+    return self;
+}
+
+/*
+ * call-seq:
+ *   Readline.special_prefixes -> string
+ *
+ * Gets the list of characters that are word break characters, but
+ * should be left in text when it is passed to the completion
+ * function.
+ *
+ * See GNU Readline's rl_special_prefixes variable.
+ *
+ * Raises NotImplementedError if the using readline library does not support.
+ *
+ * Raises SecurityError exception if $SAFE is 4.
+ */
+static VALUE
+readline_s_get_special_prefixes(VALUE self)
+{
+    VALUE str;
+    rb_secure(4);
+    str = rb_ivar_get(mReadline, id_special_prefixes);
+    if (!NIL_P(str)) {
+	str = rb_str_dup_frozen(str);
+	RBASIC(str)->klass = rb_cString;
+    }
+    return str;
+}
+#else
+#define readline_s_set_special_prefixes rb_f_notimplement
+#define readline_s_get_special_prefixes rb_f_notimplement
+#endif
+
 #ifdef HAVE_RL_BASIC_QUOTE_CHARACTERS
 /*
  * call-seq:
@@ -1299,7 +1502,7 @@ hist_set(VALUE self, VALUE index, VALUE str)
         i += history_length;
     }
     if (i >= 0) {
-	entry = replace_history_entry(i, RSTRING_PTR(str), NULL);
+	entry = replace_history_entry(history_replace_offset_func(i), RSTRING_PTR(str), NULL);
     }
     if (entry == NULL) {
 	rb_raise(rb_eIndexError, "invalid index");
@@ -1351,7 +1554,8 @@ rb_remove_history(int index)
     return Qnil;
 #else
     rb_notimplement();
-    return Qnil; /* not reached */
+
+    UNREACHABLE;
 #endif
 }
 
@@ -1494,10 +1698,26 @@ Init_readline()
     /* Allow conditional parsing of the ~/.inputrc file. */
     rl_readline_name = (char *)"Ruby";
 
+#if defined HAVE_RL_GETC_FUNCTION
+    /* libedit check rl_getc_function only when rl_initialize() is called, */
+    /* and using_history() call rl_initialize(). */
+    /* This assignment should be placed before using_history() */
+    rl_getc_function = readline_getc;
+    id_getbyte = rb_intern_const("getbyte");
+#elif defined HAVE_RL_EVENT_HOOK
+    rl_event_hook = readline_event;
+#endif
+
     using_history();
 
     completion_proc = rb_intern(COMPLETION_PROC);
     completion_case_fold = rb_intern(COMPLETION_CASE_FOLD);
+#if defined(HAVE_RL_PRE_INPUT_HOOK)
+    id_pre_input_hook = rb_intern("pre_input_hook");
+#endif
+#if defined(HAVE_RL_SPECIAL_PREFIXES)
+    id_special_prefixes = rb_intern("special_prefixes");
+#endif
 
     mReadline = rb_define_module("Readline");
     rb_define_module_function(mReadline, "readline",
@@ -1556,6 +1776,18 @@ Init_readline()
 			       readline_s_get_filename_quote_characters, 0);
     rb_define_singleton_method(mReadline, "refresh_line",
 			       readline_s_refresh_line, 0);
+    rb_define_singleton_method(mReadline, "pre_input_hook=",
+			       readline_s_set_pre_input_hook, 1);
+    rb_define_singleton_method(mReadline, "pre_input_hook",
+			       readline_s_get_pre_input_hook, 0);
+    rb_define_singleton_method(mReadline, "insert_text",
+			       readline_s_insert_text, 1);
+    rb_define_singleton_method(mReadline, "redisplay",
+			       readline_s_redisplay, 0);
+    rb_define_singleton_method(mReadline, "special_prefixes=",
+ 			       readline_s_set_special_prefixes, 1);
+    rb_define_singleton_method(mReadline, "special_prefixes",
+ 			       readline_s_get_special_prefixes, 0);
 
 #if USE_INSERT_IGNORE_ESCAPE
     CONST_ID(id_orig_prompt, "orig_prompt");
@@ -1604,6 +1836,7 @@ Init_readline()
      */
     rb_define_const(mReadline, "USERNAME_COMPLETION_PROC", ucomp);
     history_get_offset_func = history_get_offset_history_base;
+    history_replace_offset_func = history_get_offset_0;
 #if defined HAVE_RL_LIBRARY_VERSION
     version = rb_str_new_cstr(rl_library_version);
 #if defined HAVE_CLEAR_HISTORY || defined HAVE_REMOVE_HISTORY
@@ -1613,7 +1846,12 @@ Init_readline()
 	if (history_get(history_get_offset_func(0)) == NULL) {
 	    history_get_offset_func = history_get_offset_0;
 	}
-#if !defined HAVE_CLEAR_HISTORY
+#ifdef HAVE_REPLACE_HISTORY_ENTRY
+	if (replace_history_entry(0, "a", NULL) == NULL) {
+	    history_replace_offset_func = history_get_offset_history_base;
+	}
+#endif
+#ifdef HAVE_CLEAR_HISTORY
 	clear_history();
 #else
 	{
@@ -1633,11 +1871,8 @@ Init_readline()
     rb_define_const(mReadline, "VERSION", version);
 
     rl_attempted_completion_function = readline_attempted_completion_function;
-#if defined HAVE_RL_GETC_FUNCTION
-    rl_getc_function = readline_getc;
-    id_getbyte = rb_intern_const("getbyte");
-#elif defined HAVE_RL_EVENT_HOOK
-    rl_event_hook = readline_event;
+#if defined(HAVE_RL_PRE_INPUT_HOOK)
+    rl_pre_input_hook = (Function *)readline_pre_input_hook;
 #endif
 #ifdef HAVE_RL_CATCH_SIGNALS
     rl_catch_signals = 0;

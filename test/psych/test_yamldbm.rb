@@ -1,15 +1,17 @@
 # -*- coding: UTF-8 -*-
+
+require 'psych/helper'
+require 'tmpdir'
+
 begin
-  require 'test/unit'
   require 'yaml/dbm'
-  require 'tmpdir'
 rescue LoadError
 end
 
 module Psych
   ::Psych::DBM = ::YAML::DBM unless defined?(::Psych::DBM)
 
-  class YAMLDBMTest < Test::Unit::TestCase
+  class YAMLDBMTest < TestCase
     def setup
       @engine, YAML::ENGINE.yamler = YAML::ENGINE.yamler, 'psych'
       @dir = Dir.mktmpdir("rubytest-file")
@@ -48,7 +50,7 @@ module Psych
     def test_to_a
       @yamldbm['a'] = 'b'
       @yamldbm['c'] = 'd'
-      assert_equal([['a','b'],['c','d']], @yamldbm.to_a)
+      assert_equal([['a','b'],['c','d']], @yamldbm.to_a.sort)
     end
 
     def test_to_hash
@@ -79,6 +81,7 @@ module Psych
     # end
 
     def test_key
+      skip 'only on ruby 2.0.0' if RUBY_VERSION < '2.0.0'
       @yamldbm['a'] = 'b'
       @yamldbm['c'] = 'd'
       assert_equal 'a', @yamldbm.key('b')
@@ -97,8 +100,8 @@ module Psych
     def test_shift
       @yamldbm['a'] = 'b'
       @yamldbm['c'] = 'd'
-      assert_equal(['a','b'], @yamldbm.shift)
-      assert_equal(['c','d'], @yamldbm.shift)
+      assert_equal([['a','b'], ['c','d']],
+                   [@yamldbm.shift, @yamldbm.shift].sort)
       assert_nil @yamldbm.shift
     end
 
@@ -166,7 +169,7 @@ module Psych
       assert_equal [], @yamldbm.values
       @yamldbm['a'] = 'b'
       @yamldbm['c'] = 'd'
-      assert_equal ['b','d'], @yamldbm.values
+      assert_equal ['b','d'], @yamldbm.values.sort
     end
 
     def test_values_at
@@ -191,4 +194,4 @@ module Psych
       assert_equal([], @yamldbm.select {false})
     end
   end
-end if defined?(YAML::DBM)
+end if defined?(YAML::DBM) && defined?(Psych)

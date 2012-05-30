@@ -108,18 +108,34 @@ class TestBignum < Test::Unit::TestCase
     assert_equal("-1777777777777777777777" ,-18446744073709551615.to_s(8))
   end
 
+  b = 2**64
+  b *= b until Bignum === b
 
-  T_ZERO = (2**32).coerce(0).first
-  T_ONE  = (2**32).coerce(1).first
-  T_MONE = (2**32).coerce(-1).first
-  T31  = 2**31   # 2147483648
-  T31P = T31 - 1 # 2147483647
-  T32  = 2**32   # 4294967296
-  T32P = T32 - 1 # 4294967295
-  T64  = 2**64   # 18446744073709551616
-  T64P = T64 - 1 # 18446744073709551615
-  T1024  = 2**1024
-  T1024P = T1024 - 1
+  T_ZERO = b.coerce(0).first
+  T_ONE  = b.coerce(1).first
+  T_MONE = b.coerce(-1).first
+  T31  = b.coerce(2**31).first   # 2147483648
+  T31P = b.coerce(T31 - 1).first # 2147483647
+  T32  = b.coerce(2**32).first   # 4294967296
+  T32P = b.coerce(T32 - 1).first # 4294967295
+  T64  = b.coerce(2**64).first   # 18446744073709551616
+  T64P = b.coerce(T64 - 1).first # 18446744073709551615
+  T1024  = b.coerce(2**1024).first
+  T1024P = b.coerce(T1024 - 1).first
+
+  def test_prepare
+    assert_instance_of(Bignum, T_ZERO)
+    assert_instance_of(Bignum, T_ONE)
+    assert_instance_of(Bignum, T_MONE)
+    assert_instance_of(Bignum, T31)
+    assert_instance_of(Bignum, T31P)
+    assert_instance_of(Bignum, T32)
+    assert_instance_of(Bignum, T32P)
+    assert_instance_of(Bignum, T64)
+    assert_instance_of(Bignum, T64P)
+    assert_instance_of(Bignum, T1024)
+    assert_instance_of(Bignum, T1024P)
+  end
 
   def test_big_2comp
     assert_equal("-4294967296", (~T32P).to_s)
@@ -252,10 +268,19 @@ class TestBignum < Test::Unit::TestCase
     assert_equal(0, T32 / T64)
   end
 
+  def test_divide
+    bug5490 = '[ruby-core:40429]'
+    assert_raise(ZeroDivisionError, bug5490) {T1024./(0)}
+    assert_equal(Float::INFINITY, T1024./(0.0), bug5490)
+  end
+
   def test_div
     assert_equal(T32.to_f, T32 / 1.0)
     assert_raise(TypeError) { T32 / "foo" }
     assert_equal(0x20000000, 0x40000001.div(2.0), "[ruby-dev:34553]")
+    bug5490 = '[ruby-core:40429]'
+    assert_raise(ZeroDivisionError, bug5490) {T1024.div(0)}
+    assert_raise(ZeroDivisionError, bug5490) {T1024.div(0.0)}
   end
 
   def test_idiv
@@ -301,6 +326,9 @@ class TestBignum < Test::Unit::TestCase
     ### rational changes the behavior of Bignum#**
     #assert_raise(TypeError) { T32**"foo" }
     assert_raise(TypeError, ArgumentError) { T32**"foo" }
+
+    feature3429 = '[ruby-core:30735]'
+    assert_instance_of(Bignum, (2 ** 7830457), feature3429)
   end
 
   def test_and

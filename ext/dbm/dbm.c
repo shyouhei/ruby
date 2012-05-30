@@ -21,6 +21,15 @@
 #include <fcntl.h>
 #include <errno.h>
 
+#define DSIZE_TYPE TYPEOF_DATUM_DSIZE
+#if SIZEOF_DATUM_DSIZE > SIZEOF_INT
+# define RSTRING_DSIZE(s) RSTRING_LEN(s)
+# define TOO_LONG(n) 0
+#else
+# define RSTRING_DSIZE(s) RSTRING_LENINT(s)
+# define TOO_LONG(n) ((long)(+(DSIZE_TYPE)(n)) != (n))
+#endif
+
 static VALUE rb_cDBM, rb_eDBMError;
 
 #define RUBY_DBM_RW_BIT 0x20000000
@@ -137,26 +146,67 @@ fdbm_initialize(int argc, VALUE *argv, VALUE obj)
 
     FilePathValue(file);
 
+    /*
+     * Note:
+     * gdbm 1.10 works with O_CLOEXEC.  gdbm 1.9.1 silently ignore it.
+     */
+#ifndef O_CLOEXEC
+#   define O_CLOEXEC 0
+#endif
+
     if (flags & RUBY_DBM_RW_BIT) {
         flags &= ~RUBY_DBM_RW_BIT;
-        dbm = dbm_open(RSTRING_PTR(file), flags, mode);
+        dbm = dbm_open(RSTRING_PTR(file), flags|O_CLOEXEC, mode);
     }
     else {
         dbm = 0;
         if (mode >= 0) {
-            dbm = dbm_open(RSTRING_PTR(file), O_RDWR|O_CREAT, mode);
+            dbm = dbm_open(RSTRING_PTR(file), O_RDWR|O_CREAT|O_CLOEXEC, mode);
         }
         if (!dbm) {
-            dbm = dbm_open(RSTRING_PTR(file), O_RDWR, 0);
+            dbm = dbm_open(RSTRING_PTR(file), O_RDWR|O_CLOEXEC, 0);
         }
         if (!dbm) {
-            dbm = dbm_open(RSTRING_PTR(file), O_RDONLY, 0);
+            dbm = dbm_open(RSTRING_PTR(file), O_RDONLY|O_CLOEXEC, 0);
         }
+    }
+
+    if (dbm) {
+    /*
+     * History of dbm_pagfno() and dbm_dirfno() in ndbm and its compatibles.
+     * (dbm_pagfno() and dbm_dirfno() is not standardized.)
+     *
+     * 1986: 4.3BSD provides ndbm.
+     *       It provides dbm_pagfno() and dbm_dirfno() as macros.
+     * 1991: gdbm-1.5 provides them as functions.
+     *       They returns a same descriptor.
+     *       (Earlier releases may have the functions too.)
+     * 1991: Net/2 provides Berkeley DB.
+     *       It doesn't provide dbm_pagfno() and dbm_dirfno().
+     * 1992: 4.4BSD Alpha provides Berkeley DB with dbm_dirfno() as a function.
+     *       dbm_pagfno() is a macro as DBM_PAGFNO_NOT_AVAILABLE.
+     * 1997: Berkeley DB 2.0 is released by Sleepycat Software, Inc.
+     *       It defines dbm_pagfno() and dbm_dirfno() as macros.
+     * 2011: gdbm-1.9 creates a separate dir file.
+     *       dbm_pagfno() and dbm_dirfno() returns different descriptors.
+     */
+#if defined(HAVE_DBM_PAGFNO)
+        rb_fd_fix_cloexec(dbm_pagfno(dbm));
+#endif
+#if defined(HAVE_DBM_DIRFNO)
+        rb_fd_fix_cloexec(dbm_dirfno(dbm));
+#endif
+
+#if defined(RUBYDBM_DB_HEADER) && defined(HAVE_TYPE_DBC)
+    /* Disable Berkeley DB error messages such as:
+     * DB->put: attempt to modify a read-only database */
+        ((DBC*)dbm)->dbp->set_errfile(((DBC*)dbm)->dbp, NULL);
+#endif
     }
 
     if (!dbm) {
 	if (mode == -1) return Qnil;
-	rb_sys_fail(RSTRING_PTR(file));
+	rb_sys_fail_str(file);
     }
 
     dbmp = ALLOC(struct dbmdata);
@@ -197,14 +247,18 @@ fdbm_fetch(VALUE obj, VALUE keystr, VALUE ifnone)
     datum key, value;
     struct dbmdata *dbmp;
     DBM *dbm;
+    long len;
 
     ExportStringValue(keystr);
+    len = RSTRING_LEN(keystr);
+    if (TOO_LONG(len)) goto not_found;
     key.dptr = RSTRING_PTR(keystr);
-    key.dsize = (int)RSTRING_LEN(keystr);
+    key.dsize = (DSIZE_TYPE)len;
 
     GetDBM2(obj, dbmp, dbm);
     value = dbm_fetch(dbm, key);
     if (value.dptr == 0) {
+      not_found:
 	if (ifnone == Qnil && rb_block_given_p())
 	    return rb_yield(rb_tainted_str_new(key.dptr, key.dsize));
 	return ifnone;
@@ -258,15 +312,18 @@ fdbm_key(VALUE obj, VALUE valstr)
     datum key, val;
     struct dbmdata *dbmp;
     DBM *dbm;
+    long len;
 
     ExportStringValue(valstr);
+    len = RSTRING_LEN(valstr);
+    if (TOO_LONG(len)) return Qnil;
     val.dptr = RSTRING_PTR(valstr);
-    val.dsize = (int)RSTRING_LEN(valstr);
+    val.dsize = (DSIZE_TYPE)len;
 
     GetDBM2(obj, dbmp, dbm);
     for (key = dbm_firstkey(dbm); key.dptr; key = dbm_nextkey(dbm)) {
 	val = dbm_fetch(dbm, key);
-	if ((long)val.dsize == (int)RSTRING_LEN(valstr) &&
+	if ((long)val.dsize == RSTRING_LEN(valstr) &&
 	    memcmp(val.dptr, RSTRING_PTR(valstr), val.dsize) == 0) {
 	    return rb_tainted_str_new(key.dptr, key.dsize);
 	}
@@ -352,16 +409,20 @@ fdbm_delete(VALUE obj, VALUE keystr)
     struct dbmdata *dbmp;
     DBM *dbm;
     VALUE valstr;
+    long len;
 
     fdbm_modify(obj);
     ExportStringValue(keystr);
+    len = RSTRING_LEN(keystr);
+    if (TOO_LONG(len)) goto not_found;
     key.dptr = RSTRING_PTR(keystr);
-    key.dsize = (int)RSTRING_LEN(keystr);
+    key.dsize = (DSIZE_TYPE)len;
 
     GetDBM2(obj, dbmp, dbm);
 
     value = dbm_fetch(dbm, key);
     if (value.dptr == 0) {
+      not_found:
 	if (rb_block_given_p()) return rb_yield(keystr);
 	return Qnil;
     }
@@ -424,7 +485,7 @@ fdbm_delete_if(VALUE obj)
     struct dbmdata *dbmp;
     DBM *dbm;
     VALUE keystr, valstr;
-    VALUE ret, ary = rb_ary_new();
+    VALUE ret, ary = rb_ary_tmp_new(0);
     int i, status = 0;
     long n;
 
@@ -436,6 +497,7 @@ fdbm_delete_if(VALUE obj)
     for (key = dbm_firstkey(dbm); key.dptr; key = dbm_nextkey(dbm)) {
 	val = dbm_fetch(dbm, key);
 	keystr = rb_tainted_str_new(key.dptr, key.dsize);
+	OBJ_FREEZE(keystr);
 	valstr = rb_tainted_str_new(val.dptr, val.dsize);
         ret = rb_protect(rb_yield, rb_assoc_new(rb_str_dup(keystr), valstr), &status);
         if (status != 0) break;
@@ -445,15 +507,15 @@ fdbm_delete_if(VALUE obj)
 
     for (i = 0; i < RARRAY_LEN(ary); i++) {
 	keystr = RARRAY_PTR(ary)[i];
-	ExportStringValue(keystr);
 	key.dptr = RSTRING_PTR(keystr);
-	key.dsize = (int)RSTRING_LEN(keystr);
+	key.dsize = (DSIZE_TYPE)RSTRING_LEN(keystr);
 	if (dbm_delete(dbm, key)) {
 	    rb_raise(rb_eDBMError, "dbm_delete failed");
 	}
     }
     if (status) rb_jump_tag(status);
     if (n > 0) dbmp->di_size = n - RARRAY_LEN(ary);
+    rb_ary_clear(ary);
 
     return obj;
 }
@@ -574,17 +636,15 @@ fdbm_store(VALUE obj, VALUE keystr, VALUE valstr)
     valstr = rb_obj_as_string(valstr);
 
     key.dptr = RSTRING_PTR(keystr);
-    key.dsize = (int)RSTRING_LEN(keystr);
+    key.dsize = RSTRING_DSIZE(keystr);
 
     val.dptr = RSTRING_PTR(valstr);
-    val.dsize = (int)RSTRING_LEN(valstr);
+    val.dsize = RSTRING_DSIZE(valstr);
 
     GetDBM2(obj, dbmp, dbm);
     dbmp->di_size = -1;
     if (dbm_store(dbm, key, val, DBM_REPLACE)) {
-#ifdef HAVE_DBM_CLEARERR
 	dbm_clearerr(dbm);
-#endif
 	if (errno == EPERM) rb_sys_fail(0);
 	rb_raise(rb_eDBMError, "dbm_store failed");
     }
@@ -783,10 +843,13 @@ fdbm_has_key(VALUE obj, VALUE keystr)
     datum key, val;
     struct dbmdata *dbmp;
     DBM *dbm;
+    long len;
 
     ExportStringValue(keystr);
+    len = RSTRING_LEN(keystr);
+    if (TOO_LONG(len)) return Qfalse;
     key.dptr = RSTRING_PTR(keystr);
-    key.dsize = (int)RSTRING_LEN(keystr);
+    key.dsize = (DSIZE_TYPE)len;
 
     GetDBM2(obj, dbmp, dbm);
     val = dbm_fetch(dbm, key);
@@ -807,15 +870,18 @@ fdbm_has_value(VALUE obj, VALUE valstr)
     datum key, val;
     struct dbmdata *dbmp;
     DBM *dbm;
+    long len;
 
     ExportStringValue(valstr);
+    len = RSTRING_LEN(valstr);
+    if (TOO_LONG(len)) return Qfalse;
     val.dptr = RSTRING_PTR(valstr);
-    val.dsize = (int)RSTRING_LEN(valstr);
+    val.dsize = (DSIZE_TYPE)len;
 
     GetDBM2(obj, dbmp, dbm);
     for (key = dbm_firstkey(dbm); key.dptr; key = dbm_nextkey(dbm)) {
 	val = dbm_fetch(dbm, key);
-	if (val.dsize == (int)RSTRING_LEN(valstr) &&
+	if ((DSIZE_TYPE)val.dsize == (DSIZE_TYPE)RSTRING_LEN(valstr) &&
 	    memcmp(val.dptr, RSTRING_PTR(valstr), val.dsize) == 0)
 	    return Qtrue;
     }
@@ -901,10 +967,13 @@ fdbm_reject(VALUE obj)
  * The exact library used depends on how Ruby was compiled. It could be any
  * of the following:
  *
+ * - The original ndbm library is released in 4.3BSD.
+ *   It is based on dbm library in Unix Version 7 but has different API to
+ *   support multiple databases in a process.
  * - {Berkeley DB}[http://en.wikipedia.org/wiki/Berkeley_DB] versions
  *   1 thru 5, also known as BDB and Sleepycat DB, now owned by Oracle
  *   Corporation.
- * - ndbm, aka Berkeley DB 1.x, still found in FreeBSD and OpenBSD.
+ * - Berkeley DB 1.x, still found in 4.4BSD derivatives (FreeBSD, OpenBSD, etc).
  * - {gdbm}[http://www.gnu.org/software/gdbm/], the GNU implementation of dbm.
  * - {qdbm}[http://fallabs.com/qdbm/index.html], another open source
  *   reimplementation of dbm.
@@ -985,9 +1054,9 @@ Init_dbm(void)
     rb_define_method(rb_cDBM, "reject!", fdbm_delete_if, 0);
     rb_define_method(rb_cDBM, "reject", fdbm_reject, 0);
     rb_define_method(rb_cDBM, "clear", fdbm_clear, 0);
-    rb_define_method(rb_cDBM,"invert", fdbm_invert, 0);
-    rb_define_method(rb_cDBM,"update", fdbm_update, 1);
-    rb_define_method(rb_cDBM,"replace", fdbm_replace, 1);
+    rb_define_method(rb_cDBM, "invert", fdbm_invert, 0);
+    rb_define_method(rb_cDBM, "update", fdbm_update, 1);
+    rb_define_method(rb_cDBM, "replace", fdbm_replace, 1);
 
     rb_define_method(rb_cDBM, "include?", fdbm_has_key, 1);
     rb_define_method(rb_cDBM, "has_key?", fdbm_has_key, 1);
@@ -1016,10 +1085,50 @@ Init_dbm(void)
      */
     rb_define_const(rb_cDBM, "NEWDB",   INT2FIX(O_RDWR|O_CREAT|O_TRUNC|RUBY_DBM_RW_BIT));
 
-#ifdef DB_VERSION_STRING
-    /* The version of the dbm library, if using Berkeley DB */
-    rb_define_const(rb_cDBM, "VERSION",  rb_str_new2(DB_VERSION_STRING));
+    {
+        VALUE version;
+#if defined(_DBM_IOERR)
+        version = rb_str_new2("ndbm (4.3BSD)");
+#elif defined(RUBYDBM_GDBM_HEADER)
+#  if defined(HAVE_DECLARED_LIBVAR_GDBM_VERSION)
+        /* since gdbm 1.9 */
+        version = rb_str_new2(gdbm_version);
+#  elif defined(HAVE_UNDECLARED_LIBVAR_GDBM_VERSION)
+        /* ndbm.h doesn't declare gdbm_version until gdbm 1.8.3.
+         * See extconf.rb for more information. */
+        RUBY_EXTERN char *gdbm_version;
+        version = rb_str_new2(gdbm_version);
+#  else
+        version = rb_str_new2("GDBM (unknown)");
+#  endif
+#elif defined(RUBYDBM_DB_HEADER)
+#  if defined(HAVE_DB_VERSION)
+        /* The version of the dbm library, if using Berkeley DB */
+        version = rb_str_new2(db_version(NULL, NULL, NULL));
+#  else
+        version = rb_str_new2("Berkeley DB (unknown)");
+#  endif
+#elif defined(_RELIC_H)
+#  if defined(HAVE_DPVERSION)
+        version = rb_sprintf("QDBM %s", dpversion);
+#  else
+        version = rb_str_new2("QDBM (unknown)");
+#  endif
 #else
-    rb_define_const(rb_cDBM, "VERSION",  rb_str_new2("unknown"));
+        version = rb_str_new2("ndbm (unknown)");
 #endif
+        /*
+         * Identifies ndbm library version.
+         *
+         * Examples:
+         *
+         * - "ndbm (4.3BSD)"
+         * - "Berkeley DB 4.8.30: (April  9, 2010)"
+         * - "Berkeley DB (unknown)" (4.4BSD, maybe)
+         * - "GDBM version 1.8.3. 10/15/2002 (built Jul  1 2011 12:32:45)"
+         * - "QDBM 1.8.78"
+         *   
+         */
+        rb_define_const(rb_cDBM, "VERSION", version);
+    }
 }

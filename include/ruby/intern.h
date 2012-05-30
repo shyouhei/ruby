@@ -43,6 +43,7 @@ extern "C" {
  */
 
 #define ID_ALLOCATOR 1
+#define UNLIMITED_ARGUMENTS (-1)
 
 /* array.c */
 void rb_mem_clear(register VALUE*, register long);
@@ -197,6 +198,7 @@ VALUE rb_fiber_yield(int argc, VALUE *args);
 VALUE rb_fiber_current(void);
 VALUE rb_fiber_alive_p(VALUE);
 /* enum.c */
+VALUE rb_enum_values_pack(int, VALUE*);
 /* enumerator.c */
 VALUE rb_enumeratorize(VALUE, VALUE, int, VALUE *);
 #define RETURN_ENUMERATOR(obj, argc, argv) do {				\
@@ -209,13 +211,13 @@ VALUE rb_exc_new(VALUE, const char*, long);
 VALUE rb_exc_new2(VALUE, const char*);
 VALUE rb_exc_new3(VALUE, VALUE);
 PRINTF_ARGS(NORETURN(void rb_loaderror(const char*, ...)), 1, 2);
+PRINTF_ARGS(NORETURN(void rb_loaderror_with_path(VALUE path, const char*, ...)), 2, 3);
 PRINTF_ARGS(NORETURN(void rb_name_error(ID, const char*, ...)), 2, 3);
 PRINTF_ARGS(NORETURN(void rb_name_error_str(VALUE, const char*, ...)), 2, 3);
 NORETURN(void rb_invalid_str(const char*, const char*));
 PRINTF_ARGS(void rb_compile_error(const char*, int, const char*, ...), 3, 4);
 PRINTF_ARGS(void rb_compile_error_with_enc(const char*, int, void *, const char*, ...), 4, 5);
 PRINTF_ARGS(void rb_compile_error_append(const char*, ...), 1, 2);
-NORETURN(void rb_load_fail(const char*));
 NORETURN(void rb_error_frozen(const char*));
 void rb_error_untrusted(VALUE);
 void rb_check_frozen(VALUE);
@@ -254,6 +256,12 @@ rb_check_trusted_inline(VALUE obj)
 int rb_sourceline(void);
 const char *rb_sourcefile(void);
 VALUE rb_check_funcall(VALUE, ID, int, VALUE*);
+
+NORETURN(void rb_error_arity(int, int, int));
+#define rb_check_arity(argc, min, max) do { \
+  if (((argc) < (min)) || ((argc) > (max) && (max) != UNLIMITED_ARGUMENTS)) \
+    rb_error_arity(argc, min, max); \
+  } while(0)
 
 #if defined(NFDBITS) && defined(HAVE_RB_FD_INIT)
 typedef struct {
@@ -413,21 +421,13 @@ VALUE rb_file_expand_path(VALUE, VALUE);
 VALUE rb_file_s_absolute_path(int, VALUE *);
 VALUE rb_file_absolute_path(VALUE, VALUE);
 VALUE rb_file_dirname(VALUE fname);
-void rb_file_const(const char*, VALUE);
-int rb_file_load_ok(const char *);
 int rb_find_file_ext_safe(VALUE*, const char* const*, int);
 VALUE rb_find_file_safe(VALUE, int);
 int rb_find_file_ext(VALUE*, const char* const*);
 VALUE rb_find_file(VALUE);
-char *rb_path_next(const char *);
-char *rb_path_skip_prefix(const char *);
-char *rb_path_last_separator(const char *);
-char *rb_path_end(const char *);
 VALUE rb_file_directory_p(VALUE,VALUE);
 VALUE rb_str_encode_ospath(VALUE);
 int rb_is_absolute_path(const char *);
-const char *ruby_find_basename(const char *name, long *baselen, long *alllen);
-const char *ruby_find_extname(const char *name, long *len);
 /* gc.c */
 void ruby_set_stack_size(size_t);
 NORETURN(void rb_memerror(void));
@@ -502,8 +502,14 @@ void rb_write_error2(const char*, long);
 void rb_close_before_exec(int lowfd, int maxhint, VALUE noclose_fds);
 int rb_pipe(int *pipes);
 int rb_reserved_fd_p(int fd);
+int rb_cloexec_open(const char *pathname, int flags, mode_t mode);
+int rb_cloexec_dup(int oldfd);
+int rb_cloexec_dup2(int oldfd, int newfd);
+int rb_cloexec_pipe(int fildes[2]);
+int rb_cloexec_fcntl_dupfd(int fd, int minfd);
 #define RB_RESERVED_FD_P(fd) rb_reserved_fd_p(fd)
 void rb_update_max_fd(int fd);
+void rb_fd_fix_cloexec(int fd);
 /* marshal.c */
 VALUE rb_marshal_dump(VALUE, VALUE);
 VALUE rb_marshal_load(VALUE);
@@ -547,11 +553,13 @@ VALUE rb_check_convert_type(VALUE,int,const char*,const char*);
 VALUE rb_check_to_integer(VALUE, const char *);
 VALUE rb_check_to_float(VALUE);
 VALUE rb_to_int(VALUE);
+VALUE rb_check_to_int(VALUE);
 VALUE rb_Integer(VALUE);
 VALUE rb_to_float(VALUE);
 VALUE rb_Float(VALUE);
 VALUE rb_String(VALUE);
 VALUE rb_Array(VALUE);
+VALUE rb_Hash(VALUE);
 double rb_cstr_to_dbl(const char*, int);
 double rb_str_to_dbl(VALUE, int);
 /* parse.y */
@@ -583,6 +591,7 @@ struct rb_exec_arg {
     const char *prog;
     VALUE options;
     VALUE redirect_fds;
+    VALUE progname;
 };
 int rb_proc_exec_n(int, VALUE*, const char*);
 int rb_proc_exec(const char*);
@@ -698,6 +707,7 @@ VALUE rb_str_buf_cat2(VALUE, const char*);
 VALUE rb_str_buf_cat_ascii(VALUE, const char*);
 VALUE rb_obj_as_string(VALUE);
 VALUE rb_check_string_type(VALUE);
+void rb_must_asciicompat(VALUE);
 VALUE rb_str_dup(VALUE);
 VALUE rb_str_resurrect(VALUE str);
 VALUE rb_str_locktmp(VALUE);
@@ -710,6 +720,7 @@ long rb_str_sublen(VALUE, long);
 VALUE rb_str_substr(VALUE, long, long);
 VALUE rb_str_subseq(VALUE, long, long);
 void rb_str_modify(VALUE);
+void rb_str_modify_expand(VALUE, long);
 VALUE rb_str_freeze(VALUE);
 void rb_str_set_len(VALUE, long);
 VALUE rb_str_resize(VALUE, long);

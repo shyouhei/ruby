@@ -197,22 +197,9 @@ void xfree(void*);
         /* MB_CUR_MAX will not work well in C locale */
 #endif
 
-#if defined(sparc) || defined(__sparc__)
-static inline void
-flush_register_windows(void)
-{
-    asm
-#ifdef __GNUC__
-	volatile
-#endif
-# if defined(__sparc_v9__) || defined(__sparcv9) || defined(__arch64__)
-	("flushw")
-# else
-	("ta 0x03")
-# endif /* trap always to flush register windows if we are on a Sparc system */
-	;
-}
-#  define FLUSH_REGISTER_WINDOWS flush_register_windows()
+#if defined(__sparc)
+void rb_sparc_flush_register_windows(void);
+#  define FLUSH_REGISTER_WINDOWS rb_sparc_flush_register_windows()
 #elif defined(__ia64)
 void *rb_ia64_bsp(void);
 void rb_ia64_flushrs(void);

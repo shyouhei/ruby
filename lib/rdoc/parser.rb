@@ -61,7 +61,7 @@ class RDoc::Parser
     old_ext = old_ext.sub(/^\.(.*)/, '\1')
     new_ext = new_ext.sub(/^\.(.*)/, '\1')
 
-    parser = can_parse "xxx.#{old_ext}"
+    parser = can_parse_by_name "xxx.#{old_ext}"
     return false unless parser
 
     RDoc::Parser.parsers.unshift [/\.#{new_ext}$/, parser]
@@ -80,14 +80,14 @@ class RDoc::Parser
 
     have_encoding = s.respond_to? :encoding
 
-    if have_encoding then
-      return false if s.encoding != Encoding::ASCII_8BIT and s.valid_encoding?
-    end
-
     return true if s[0, 2] == Marshal.dump('')[0, 2] or s.index("\x00")
 
     if have_encoding then
-      s.force_encoding Encoding.default_external
+      mode = "r"
+      s.sub!(/\A#!.*\n/, '')     # assume shebang line isn't longer than 1024.
+      encoding = s[/^\s*\#\s*(?:-\*-\s*)?(?:en)?coding:\s*([^\s;]+?)(?:-\*-|[\s;])/, 1]
+      mode = "r:#{encoding}" if encoding
+      s = File.open(file, mode) {|f| f.gets(nil, 1024)}
 
       not s.valid_encoding?
     else
@@ -134,21 +134,29 @@ class RDoc::Parser
     zip_signature == "PK\x03\x04" or
       zip_signature == "PK\x05\x06" or
       zip_signature == "PK\x07\x08"
+  rescue
+    false
   end
 
   ##
   # Return a parser that can handle a particular extension
 
   def self.can_parse(file_name)
-    parser = RDoc::Parser.parsers.find { |regexp,| regexp =~ file_name }.last
+    parser = can_parse_by_name(file_name)
 
     # HACK Selenium hides a jar file using a .txt extension
     return if parser == RDoc::Parser::Simple and zip? file_name
 
+    parser
+  end
+
+  def self.can_parse_by_name(file_name)
+    pattern, parser = RDoc::Parser.parsers.find { |regexp,| regexp =~ file_name }
+
     # The default parser must not parse binary files
     ext_name = File.extname file_name
     return parser if ext_name.empty?
-    return if parser == RDoc::Parser::Simple and ext_name !~ /txt|rdoc/
+    return if parser == RDoc::Parser::Simple and ext_name !~ /txt|rdoc/ and file_name[pattern].empty?
 
     parser
   end

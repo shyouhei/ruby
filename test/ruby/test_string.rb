@@ -483,8 +483,15 @@ class TestString < Test::Unit::TestCase
     assert_equal(4, a.count(S("ej-m")))
     assert_equal(0, S("y").count(S("a\\-z")))
     assert_equal(5, "abc\u{3042 3044 3046}".count("^a"))
+    assert_equal(1, "abc\u{3042 3044 3046}".count("\u3042"))
     assert_equal(5, "abc\u{3042 3044 3046}".count("^\u3042"))
     assert_equal(2, "abc\u{3042 3044 3046}".count("a-z", "^a"))
+    assert_equal(0, "abc\u{3042 3044 3046}".count("a", "\u3042"))
+    assert_equal(0, "abc\u{3042 3044 3046}".count("\u3042", "a"))
+    assert_equal(0, "abc\u{3042 3044 3046}".count("\u3042", "\u3044"))
+    assert_equal(4, "abc\u{3042 3044 3046}".count("^a", "^\u3044"))
+    assert_equal(4, "abc\u{3042 3044 3046}".count("^\u3044", "^a"))
+    assert_equal(4, "abc\u{3042 3044 3046}".count("^\u3042", "^\u3044"))
 
     assert_raise(ArgumentError) { "foo".count }
   end
@@ -508,6 +515,9 @@ class TestString < Test::Unit::TestCase
     assert_equal("a", "abc\u{3042 3044 3046}".delete("^a"))
     assert_equal("bc\u{3042 3044 3046}", "abc\u{3042 3044 3046}".delete("a"))
     assert_equal("\u3042", "abc\u{3042 3044 3046}".delete("^\u3042"))
+
+    bug6160 = '[ruby-dev:45374]'
+    assert_equal("", '\\'.delete('\\'), bug6160)
   end
 
   def test_delete!
@@ -647,6 +657,15 @@ class TestString < Test::Unit::TestCase
   def test_empty?
     assert(S("").empty?)
     assert(!S("not").empty?)
+  end
+
+  def test_end_with?
+    assert_send([S("hello"), :end_with?, S("llo")])
+    assert_not_send([S("hello"), :end_with?, S("ll")])
+    assert_send([S("hello"), :end_with?, S("el"), S("lo")])
+
+    bug5536 = '[ruby-core:40623]'
+    assert_raise(TypeError, bug5536) {S("str").end_with? :not_convertible_to_string}
   end
 
   def test_eql?
@@ -1164,6 +1183,12 @@ class TestString < Test::Unit::TestCase
 
     assert_equal("[2, 3]", [1,2,3].slice!(1,10000).inspect, "moved from btest/knownbug")
 
+    bug6206 = '[ruby-dev:45441]'
+    Encoding.list.each do |enc|
+      next unless enc.ascii_compatible?
+      s = S("a:".force_encoding(enc))
+      assert_equal([enc]*2, s.split(":", 2).map(&:encoding), bug6206)
+    end
   end
 
   def test_squeeze
@@ -1189,6 +1214,15 @@ class TestString < Test::Unit::TestCase
 
     a=S("The quick brown fox")
     assert_nil(a.squeeze!)
+  end
+
+  def test_start_with?
+    assert_send([S("hello"), :start_with?, S("hel")])
+    assert_not_send([S("hello"), :start_with?, S("el")])
+    assert_send([S("hello"), :start_with?, S("el"), S("he")])
+
+    bug5536 = '[ruby-core:40623]'
+    assert_raise(TypeError, bug5536) {S("str").start_with? :not_convertible_to_string}
   end
 
   def test_strip
@@ -1462,6 +1496,13 @@ class TestString < Test::Unit::TestCase
     assert_equal(0x4000000000000000, "4611686018427387904".to_i(10))
     assert_equal(1, "1__2".to_i(10))
     assert_equal(1, "1_z".to_i(10))
+
+    bug6192 = '[ruby-core:43566]'
+    assert_raise(Encoding::CompatibilityError, bug6192) {"0".encode("utf-16be").to_i}
+    assert_raise(Encoding::CompatibilityError, bug6192) {"0".encode("utf-16le").to_i}
+    assert_raise(Encoding::CompatibilityError, bug6192) {"0".encode("utf-32be").to_i}
+    assert_raise(Encoding::CompatibilityError, bug6192) {"0".encode("utf-32le").to_i}
+    assert_raise(Encoding::CompatibilityError, bug6192) {"0".encode("iso-2022-jp").to_i}
   end
 
   def test_to_s
@@ -1500,6 +1541,10 @@ class TestString < Test::Unit::TestCase
     assert_equal(true, "\u0101".tr("\u0101", "a").ascii_only?)
     assert_equal(true, "\u3041".tr("\u3041", "a").ascii_only?)
     assert_equal(false, "\u3041\u3042".tr("\u3041", "a").ascii_only?)
+
+    bug6156 = '[ruby-core:43335]'
+    str, range, star = %w[b a-z *].map{|s|s.encode("utf-16le")}
+    assert_equal(star, str.tr(range, star), bug6156)
   end
 
   def test_tr!
@@ -1747,10 +1792,6 @@ class TestString < Test::Unit::TestCase
     assert_nil(l.slice!(/\A.*\n/), "[ruby-dev:31665]")
   end
 
-  def test_end_with?
-    assert("abc".end_with?("c"))
-  end
-
   def test_times2
     s1 = ''
     100.times {|n|
@@ -1803,6 +1844,13 @@ class TestString < Test::Unit::TestCase
     assert_raise(TypeError) { "hello".partition(1) }
     def (hyphen = Object.new).to_str; "-"; end
     assert_equal(%w(foo - bar), "foo-bar".partition(hyphen), '[ruby-core:23540]')
+
+    bug6206 = '[ruby-dev:45441]'
+    Encoding.list.each do |enc|
+      next unless enc.ascii_compatible?
+      s = S("a:".force_encoding(enc))
+      assert_equal([enc]*3, s.partition("|").map(&:encoding), bug6206)
+    end
   end
 
   def test_rpartition
@@ -1811,6 +1859,13 @@ class TestString < Test::Unit::TestCase
     assert_raise(TypeError) { "hello".rpartition(1) }
     def (hyphen = Object.new).to_str; "-"; end
     assert_equal(%w(foo - bar), "foo-bar".rpartition(hyphen), '[ruby-core:23540]')
+
+    bug6206 = '[ruby-dev:45441]'
+    Encoding.list.each do |enc|
+      next unless enc.ascii_compatible?
+      s = S("a:".force_encoding(enc))
+      assert_equal([enc]*3, s.rpartition("|").map(&:encoding), bug6206)
+    end
   end
 
   def test_setter
@@ -1975,5 +2030,12 @@ class TestString < Test::Unit::TestCase
     assert_equal(u("\x81\x82"), "\u3042".byteslice(1..2))
 
     assert_equal(u("\x82")+("\u3042"*9), ("\u3042"*10).byteslice(2, 28))
+  end
+end
+
+class TestString2 < TestString
+  def initialize(*args)
+    super
+    @cls = S2
   end
 end

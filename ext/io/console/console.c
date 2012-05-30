@@ -91,16 +91,45 @@ getattr(int fd, conmode *t)
 
 static ID id_getc, id_console;
 
+typedef struct {
+    int vmin;
+    int vtime;
+} rawmode_arg_t;
+
+static rawmode_arg_t *
+rawmode_opt(int argc, VALUE *argv, rawmode_arg_t *opts)
+{
+    rawmode_arg_t *optp = NULL;
+    VALUE vopts;
+    rb_scan_args(argc, argv, "0:", &vopts);
+    if (!NIL_P(vopts)) {
+	VALUE vmin = rb_hash_aref(vopts, ID2SYM(rb_intern("min")));
+	VALUE vtime = rb_hash_aref(vopts, ID2SYM(rb_intern("time")));
+	VALUE v10 = INT2FIX(10);
+	if (!NIL_P(vmin)) {
+	    vmin = rb_funcall3(vmin, '*', 1, &v10);
+	    opts->vmin = NUM2INT(vmin);
+	    optp = opts;
+	}
+	if (!NIL_P(vtime)) {
+	    vtime = rb_funcall3(vtime, '*', 1, &v10);
+	    opts->vtime = NUM2INT(vtime);
+	    optp = opts;
+	}
+    }
+    return optp;
+}
+
 static void
-set_rawmode(conmode *t)
+set_rawmode(conmode *t, void *arg)
 {
 #ifdef HAVE_CFMAKERAW
     cfmakeraw(t);
-#else
-#if defined HAVE_TERMIOS_H || defined HAVE_TERMIO_H
+    t->c_lflag &= ~(ECHOE|ECHOK);
+#elif defined HAVE_TERMIOS_H || defined HAVE_TERMIO_H
     t->c_iflag &= ~(IGNBRK|BRKINT|PARMRK|ISTRIP|INLCR|IGNCR|ICRNL|IXON);
     t->c_oflag &= ~OPOST;
-    t->c_lflag &= ~(ECHO|ECHONL|ICANON|ISIG|IEXTEN);
+    t->c_lflag &= ~(ECHO|ECHOE|ECHOK|ECHONL|ICANON|ISIG|IEXTEN);
     t->c_cflag &= ~(CSIZE|PARENB);
     t->c_cflag |= CS8;
 #elif defined HAVE_SGTTY_H
@@ -109,11 +138,32 @@ set_rawmode(conmode *t)
 #elif defined _WIN32
     *t = 0;
 #endif
+#if defined HAVE_TERMIOS_H || defined HAVE_TERMIO_H
+    if (arg) {
+	const rawmode_arg_t *r = arg;
+	if (r->vmin >= 0) t->c_cc[VMIN] = r->vmin;
+	if (r->vtime >= 0) t->c_cc[VTIME] = r->vtime;
+    }
 #endif
 }
 
 static void
-set_noecho(conmode *t)
+set_cookedmode(conmode *t, void *arg)
+{
+#if defined HAVE_TERMIOS_H || defined HAVE_TERMIO_H
+    t->c_iflag |= (BRKINT|ISTRIP|ICRNL|IXON);
+    t->c_oflag |= OPOST;
+    t->c_lflag |= (ECHO|ECHOE|ECHOK|ECHONL|ICANON|ISIG|IEXTEN);
+#elif defined HAVE_SGTTY_H
+    t->sg_flags |= ECHO;
+    t->sg_flags &= ~RAW;
+#elif defined _WIN32
+    *t |= ENABLE_ECHO_INPUT|ENABLE_LINE_INPUT|ENABLE_PROCESSED_INPUT;
+#endif
+}
+
+static void
+set_noecho(conmode *t, void *arg)
 {
 #if defined HAVE_TERMIOS_H || defined HAVE_TERMIO_H
     t->c_lflag &= ~(ECHO | ECHOE | ECHOK | ECHONL);
@@ -125,7 +175,7 @@ set_noecho(conmode *t)
 }
 
 static void
-set_echo(conmode *t)
+set_echo(conmode *t, void *arg)
 {
 #if defined HAVE_TERMIOS_H || defined HAVE_TERMIO_H
     t->c_lflag |= (ECHO | ECHOE | ECHOK | ECHONL);
@@ -140,7 +190,7 @@ static int
 echo_p(conmode *t)
 {
 #if defined HAVE_TERMIOS_H || defined HAVE_TERMIO_H
-    return (t->c_lflag & (ECHO | ECHOE | ECHOK | ECHONL)) != 0;
+    return (t->c_lflag & (ECHO | ECHONL)) != 0;
 #elif defined HAVE_SGTTY_H
     return (t->sg_flags & ECHO) != 0;
 #elif defined _WIN32
@@ -149,12 +199,12 @@ echo_p(conmode *t)
 }
 
 static int
-set_ttymode(int fd, conmode *t, void (*setter)(conmode *))
+set_ttymode(int fd, conmode *t, void (*setter)(conmode *, void *), void *arg)
 {
     conmode r;
     if (!getattr(fd, t)) return 0;
     r = *t;
-    setter(&r);
+    setter(&r, arg);
     return setattr(fd, &r);
 }
 
@@ -182,7 +232,7 @@ get_write_fd(const rb_io_t *fptr)
 #define FD_PER_IO 2
 
 static VALUE
-ttymode(VALUE io, VALUE (*func)(VALUE), void (*setter)(conmode *))
+ttymode(VALUE io, VALUE (*func)(VALUE), void (*setter)(conmode *, void *), void *arg)
 {
     rb_io_t *fptr;
     int status = -1;
@@ -194,7 +244,7 @@ ttymode(VALUE io, VALUE (*func)(VALUE), void (*setter)(conmode *))
     GetOpenFile(io, fptr);
     fd[0] = GetReadFD(fptr);
     if (fd[0] != -1) {
-	if (set_ttymode(fd[0], t+0, setter)) {
+	if (set_ttymode(fd[0], t+0, setter, arg)) {
 	    status = 0;
 	}
 	else {
@@ -204,7 +254,7 @@ ttymode(VALUE io, VALUE (*func)(VALUE), void (*setter)(conmode *))
     }
     fd[1] = GetWriteFD(fptr);
     if (fd[1] != -1 && fd[1] != fd[0]) {
-	if (set_ttymode(fd[1], t+1, setter)) {
+	if (set_ttymode(fd[1], t+1, setter, arg)) {
 	    status = 0;
 	}
 	else {
@@ -240,30 +290,79 @@ ttymode(VALUE io, VALUE (*func)(VALUE), void (*setter)(conmode *))
 
 /*
  * call-seq:
- *   io.raw {|io| }
+ *   io.raw(min: nil, time: nil) {|io| }
  *
  * Yields +self+ within raw mode.
  *
  *   STDIN.raw(&:gets)
  *
- * will read and return a line with echo back and line editing.
+ * will read and return a line without echo back and line editing.
+ *
+ * You must require 'io/console' to use this method.
  */
 static VALUE
-console_raw(VALUE io)
+console_raw(int argc, VALUE *argv, VALUE io)
 {
-    return ttymode(io, rb_yield, set_rawmode);
+    rawmode_arg_t opts, *optp = rawmode_opt(argc, argv, &opts);
+    return ttymode(io, rb_yield, set_rawmode, optp);
 }
 
 /*
  * call-seq:
- *   io.raw!
+ *   io.raw!(min: nil, time: nil)
  *
  * Enables raw mode.
  *
  * If the terminal mode needs to be back, use io.raw { ... }.
+ *
+ * You must require 'io/console' to use this method.
  */
 static VALUE
-console_set_raw(VALUE io)
+console_set_raw(int argc, VALUE *argv, VALUE io)
+{
+    conmode t;
+    rb_io_t *fptr;
+    int fd;
+    rawmode_arg_t opts, *optp = rawmode_opt(argc, argv, &opts);
+
+    GetOpenFile(io, fptr);
+    fd = GetReadFD(fptr);
+    if (!getattr(fd, &t)) rb_sys_fail(0);
+    set_rawmode(&t, optp);
+    if (!setattr(fd, &t)) rb_sys_fail(0);
+    return io;
+}
+
+/*
+ * call-seq:
+ *   io.cooked {|io| }
+ *
+ * Yields +self+ within cooked mode.
+ *
+ *   STDIN.cooked(&:gets)
+ *
+ * will read and return a line with echo back and line editing.
+ *
+ * You must require 'io/console' to use this method.
+ */
+static VALUE
+console_cooked(VALUE io)
+{
+    return ttymode(io, rb_yield, set_cookedmode, NULL);
+}
+
+/*
+ * call-seq:
+ *   io.cooked!
+ *
+ * Enables cooked mode.
+ *
+ * If the terminal mode needs to be back, use io.cooked { ... }.
+ *
+ * You must require 'io/console' to use this method.
+ */
+static VALUE
+console_set_cooked(VALUE io)
 {
     conmode t;
     rb_io_t *fptr;
@@ -272,7 +371,7 @@ console_set_raw(VALUE io)
     GetOpenFile(io, fptr);
     fd = GetReadFD(fptr);
     if (!getattr(fd, &t)) rb_sys_fail(0);
-    set_rawmode(&t);
+    set_cookedmode(&t, NULL);
     if (!setattr(fd, &t)) rb_sys_fail(0);
     return io;
 }
@@ -285,14 +384,17 @@ getc_call(VALUE io)
 
 /*
  * call-seq:
- *   io.getch       -> char
+ *   io.getch(min: nil, time: nil)       -> char
  *
  * Reads and returns a character in raw mode.
+ *
+ * You must require 'io/console' to use this method.
  */
 static VALUE
-console_getch(VALUE io)
+console_getch(int argc, VALUE *argv, VALUE io)
 {
-    return ttymode(io, getc_call, set_rawmode);
+    rawmode_arg_t opts, *optp = rawmode_opt(argc, argv, &opts);
+    return ttymode(io, getc_call, set_rawmode, optp);
 }
 
 /*
@@ -304,11 +406,13 @@ console_getch(VALUE io)
  *   STDIN.noecho(&:gets)
  *
  * will read and return a line without echo back.
+ *
+ * You must require 'io/console' to use this method.
  */
 static VALUE
 console_noecho(VALUE io)
 {
-    return ttymode(io, rb_yield, set_noecho);
+    return ttymode(io, rb_yield, set_noecho, NULL);
 }
 
 /*
@@ -316,6 +420,10 @@ console_noecho(VALUE io)
  *   io.echo = flag
  *
  * Enables/disables echo back.
+ * On some platforms, all combinations of this flags and raw/cooked
+ * mode may not be valid.
+ *
+ * You must require 'io/console' to use this method.
  */
 static VALUE
 console_set_echo(VALUE io, VALUE f)
@@ -328,9 +436,9 @@ console_set_echo(VALUE io, VALUE f)
     fd = GetReadFD(fptr);
     if (!getattr(fd, &t)) rb_sys_fail(0);
     if (RTEST(f))
-	set_echo(&t);
+	set_echo(&t, NULL);
     else
-	set_noecho(&t);
+	set_noecho(&t, NULL);
     if (!setattr(fd, &t)) rb_sys_fail(0);
     return io;
 }
@@ -340,6 +448,8 @@ console_set_echo(VALUE io, VALUE f)
  *   io.echo?       -> true or false
  *
  * Returns +true+ if echo back is enabled.
+ *
+ * You must require 'io/console' to use this method.
  */
 static VALUE
 console_echo_p(VALUE io)
@@ -379,6 +489,8 @@ typedef CONSOLE_SCREEN_BUFFER_INFO rb_console_size_t;
  *   io.winsize     -> [rows, columns]
  *
  * Returns console size.
+ *
+ * You must require 'io/console' to use this method.
  */
 static VALUE
 console_winsize(VALUE io)
@@ -399,6 +511,8 @@ console_winsize(VALUE io)
  *
  * Tries to set console size.  The effect depends on the platform and
  * the running environment.
+ *
+ * You must require 'io/console' to use this method.
  */
 static VALUE
 console_set_winsize(VALUE io, VALUE size)
@@ -458,6 +572,8 @@ console_set_winsize(VALUE io, VALUE size)
  *   io.iflush
  *
  * Flushes input buffer in kernel.
+ *
+ * You must require 'io/console' to use this method.
  */
 static VALUE
 console_iflush(VALUE io)
@@ -478,6 +594,8 @@ console_iflush(VALUE io)
  *   io.oflush
  *
  * Flushes output buffer in kernel.
+ *
+ * You must require 'io/console' to use this method.
  */
 static VALUE
 console_oflush(VALUE io)
@@ -498,6 +616,8 @@ console_oflush(VALUE io)
  *   io.ioflush
  *
  * Flushes input and output buffers in kernel.
+ *
+ * You must require 'io/console' to use this method.
  */
 static VALUE
 console_ioflush(VALUE io)
@@ -527,6 +647,8 @@ console_ioflush(VALUE io)
  *   IO.console      -> #<File:/dev/tty>
  *
  * Returns an File instance opened console.
+ *
+ * You must require 'io/console' to use this method.
  */
 static VALUE
 console_dev(VALUE klass)
@@ -537,7 +659,7 @@ console_dev(VALUE klass)
     if (klass == rb_cIO) klass = rb_cFile;
     if (rb_const_defined(klass, id_console)) {
 	con = rb_const_get(klass, id_console);
-	if (TYPE(con) == T_FILE) {
+	if (RB_TYPE_P(con, T_FILE)) {
 	    if ((fptr = RFILE(con)->fptr) && GetReadFD(fptr) != -1)
 		return con;
 	}
@@ -562,14 +684,14 @@ console_dev(VALUE klass)
 	int fd;
 
 #ifdef CONSOLE_DEVICE_FOR_WRITING
-	fd = open(CONSOLE_DEVICE_FOR_WRITING, O_WRONLY);
+	fd = rb_cloexec_open(CONSOLE_DEVICE_FOR_WRITING, O_WRONLY, 0);
 	if (fd < 0) return Qnil;
         rb_update_max_fd(fd);
 	args[1] = INT2FIX(O_WRONLY);
 	args[0] = INT2NUM(fd);
 	out = rb_class_new_instance(2, args, klass);
 #endif
-	fd = open(CONSOLE_DEVICE_FOR_READING, O_RDWR);
+	fd = rb_cloexec_open(CONSOLE_DEVICE_FOR_READING, O_RDWR, 0);
 	if (fd < 0) {
 #ifdef CONSOLE_DEVICE_FOR_WRITING
 	    rb_io_close(out);
@@ -599,6 +721,12 @@ console_dev(VALUE klass)
     return con;
 }
 
+static VALUE
+io_getch(int argc, VALUE *argv, VALUE io)
+{
+    return rb_funcall2(io, rb_intern("getc"), argc, argv);
+}
+
 /*
  * IO console methods
  */
@@ -613,9 +741,11 @@ Init_console(void)
 void
 InitVM_console(void)
 {
-    rb_define_method(rb_cIO, "raw", console_raw, 0);
-    rb_define_method(rb_cIO, "raw!", console_set_raw, 0);
-    rb_define_method(rb_cIO, "getch", console_getch, 0);
+    rb_define_method(rb_cIO, "raw", console_raw, -1);
+    rb_define_method(rb_cIO, "raw!", console_set_raw, -1);
+    rb_define_method(rb_cIO, "cooked", console_cooked, 0);
+    rb_define_method(rb_cIO, "cooked!", console_set_cooked, 0);
+    rb_define_method(rb_cIO, "getch", console_getch, -1);
     rb_define_method(rb_cIO, "echo=", console_set_echo, 1);
     rb_define_method(rb_cIO, "echo?", console_echo_p, 0);
     rb_define_method(rb_cIO, "noecho", console_noecho, 0);
@@ -625,4 +755,8 @@ InitVM_console(void)
     rb_define_method(rb_cIO, "oflush", console_oflush, 0);
     rb_define_method(rb_cIO, "ioflush", console_ioflush, 0);
     rb_define_singleton_method(rb_cIO, "console", console_dev, 0);
+    {
+	VALUE mReadable = rb_define_module_under(rb_cIO, "readable");
+	rb_define_method(mReadable, "getch", io_getch, -1);
+    }
 }

@@ -11,23 +11,66 @@ with all sufficient information, see the ChangeLog file.
 == Changes since the 1.9.3 release
 
 === C API updates
+* NUM2SHORT() and NUM2USHORT() added. They are similar to NUM2INT, but short.
+
 === Library updates (outstanding ones only)
 
 * builtin classes
 
+  * Enumerable
+    * added method:
+      * added Enumerable#lazy method for lazy enumeration.
+
+  * ENV
+    * aliased method:
+      * ENV.to_h is a new alias for ENV.to_hash
+
+  * Hash
+    * added method:
+      * added Hash#to_h as explicit conversion method, like Array#to_a.
+    * extended method:
+      * Hash#default_proc= can be passed nil to clear the default proc.
+
   * Kernel
+    * added method:
+      * added Kernel#Hash conversion method like Array() or Float().
     * extended method:
       * Kernel#warn accepts multiple args in like puts.
+      * Kernel#caller accepts second optional argument `n' which specify
+        required caller size.
+    * incompatible changes:
+      * system() and exec() closes non-standard file descriptors
+        (The default of :close_others option is changed to true by default.)
+      * respond_to? against a protected method now returns false unless
+        the second argument is true.
+
+  * LoadError
+    * added method:
+      * added LoadError#path method to return the file name that could not be
+        loaded.
+
+  * NilClass
+    * added method:
+      * added nil.to_h which returns {}
 
   * Signal
     * incompatible changes:
       * Signal.trap raises ArgumentError when :SEGV, :BUS, :ILL, :FPE, :VTALRM
         are specified.
 
+  * Struct
+    * added method:
+      * added Struct#to_h returning values with keys corresponding to the
+        instance variable names.
+
   * Time
     * change return value:
       * Time#to_s returned encoding defaults to US-ASCII but automatically
         transcodes to Encoding.default_internal if it is set.
+
+  * Fiber
+    * incompatible changes:
+      * Fiber#resume cannot resume a fiber which invokes "Fiber#transfer".
 
 * net/imap
   * new methods:
@@ -37,9 +80,65 @@ with all sufficient information, see the ChangeLog file.
     * Net::IMAP.default_ssl_port
     * Net::IMAP.default_imaps_port
 
+* ostruct
+  * new methods:
+    * OpenStruct#to_h converts the struct to a hash.
+
+* pathname
+  * extended method:
+    * Pathname#find returns an enumerator if no block is given.
+
+* resolv
+  * new methods:
+    * Resolv::DNS#timeouts=
+    * Resolv::DNS::Config#timeouts=
+
+* shellwords
+    * Shellwords#shellescape() now stringifies the given object using to_s.
+    * Shellwords#shelljoin() accepts non-string objects in the given
+      array, each of which is stringified using to_s.
+
+* syslog
+  * Added Syslog::Logger which provides a Logger API atop Syslog.
+  * Syslog::Priority, Syslog::Level, Syslog::Option and Syslog::Macros
+    are introduced for easy detection of available constants on a
+    running system.
+
+* lib/tmpdir.rb
+  * incompatible changes:
+    * Dir.mktmpdir uses FileUtils.remove_entry instead of
+      FileUtils.remove_entry_secure.  This means that applications should not
+      change the permission of the created temporary directory to make
+      accessible from other users.
+
+* zlib
+  * Added support for the new deflate strategies Zlib::RLE and Zlib::FIXED.
+
+* openssl
+  * Consistently raise an error when trying to encode nil values. All instances
+    of OpenSSL::ASN1::Primitive now raise TypeError when calling to_der on an
+    instance whose value is nil. All instances of OpenSSL::ASN1::Constructive
+    raise NoMethodError in the same case. Constructing such values is still
+    permitted.
+
 === Language changes
 === Compatibility issues (excluding feature bug fixes)
 
   * Signal.trap
+
+    See above.
+
+  * Merge Onigmo.
+    https://github.com/k-takata/Onigmo
+
+  * The :close_others option is true by default for system() and exec().
+    Also, the close-on-exec flag is set by default for all new file descriptors.
+    This means file descriptors doesn't inherit to spawned process unless
+    explicitly requested such as system(..., fd=>fd).
+
+  * Kernel#respond_to? against a protected method now returns false
+    unless the second argument is true.
+
+  * Dir.mktmpdir in lib/tmpdir.rb
 
     See above.

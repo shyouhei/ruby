@@ -64,25 +64,6 @@ class TestModule < Test::Unit::TestCase
 
   # Support stuff
 
-  def remove_pp_mixins(list)
-    list.reject {|c| c == PP::ObjectMixin }
-  end
-
-  def remove_json_mixins(list)
-    list.reject {|c| c.to_s.start_with?("JSON") }
-  end
-
-  def remove_rake_mixins(list)
-    list.reject {|c|
-      name = c.name
-      name.start_with?("Rake") or name.start_with?("FileUtils")
-    }
-  end
-
-  def remove_minitest_mixins(list)
-    list.reject {|c| c.to_s.start_with?("MiniTest") }
-  end
-
   module Mixin
     MIXIN = 1
     def mixin
@@ -220,10 +201,11 @@ class TestModule < Test::Unit::TestCase
     assert_equal([User, Mixin],      User.ancestors)
     assert_equal([Mixin],            Mixin.ancestors)
 
-    assert_equal([Object, Kernel, BasicObject],
-                 remove_minitest_mixins(remove_rake_mixins(remove_json_mixins(remove_pp_mixins(Object.ancestors)))))
-    assert_equal([String, Comparable, Object, Kernel, BasicObject],
-                 remove_minitest_mixins(remove_rake_mixins(remove_json_mixins(remove_pp_mixins(String.ancestors)))))
+    ancestors = Object.ancestors
+    mixins = ancestors - [Object, Kernel, BasicObject]
+    mixins << JSON::Ext::Generator::GeneratorMethods::String if defined?(JSON::Ext::Generator::GeneratorMethods::String)
+    assert_equal([Object, Kernel, BasicObject], ancestors - mixins)
+    assert_equal([String, Comparable, Object, Kernel, BasicObject], String.ancestors - mixins)
   end
 
   CLASS_EVAL = 2
@@ -277,13 +259,39 @@ class TestModule < Test::Unit::TestCase
     assert_equal([:MIXIN, :USER], User.constants.sort)
   end
 
+  def test_dup
+    bug6454 = '[ruby-core:45132]'
+
+    a = Module.new
+    Other.const_set :BUG6454, a
+
+    original = Other::BUG6454.inspect
+
+    b = a.dup
+    Other.const_set :BUG6454_dup, b
+
+    assert_equal "TestModule::Other::BUG6454_dup", b.inspect, bug6454
+  end
+
+  def test_dup_anonymous
+    bug6454 = '[ruby-core:45132]'
+
+    a = Module.new
+    original = a.inspect
+
+    b = a.dup
+
+    refute_equal original, b.inspect, bug6454
+  end
+
   def test_included_modules
     assert_equal([], Mixin.included_modules)
     assert_equal([Mixin], User.included_modules)
-    assert_equal([Kernel],
-                 remove_minitest_mixins(remove_rake_mixins(remove_json_mixins(remove_pp_mixins(Object.included_modules)))))
-    assert_equal([Comparable, Kernel],
-                 remove_minitest_mixins(remove_rake_mixins(remove_json_mixins(remove_pp_mixins(String.included_modules)))))
+
+    mixins = Object.included_modules - [Kernel]
+    mixins << JSON::Ext::Generator::GeneratorMethods::String if defined?(JSON::Ext::Generator::GeneratorMethods::String)
+    assert_equal([Kernel], Object.included_modules - mixins)
+    assert_equal([Comparable, Kernel], String.included_modules - mixins)
   end
 
   def test_instance_methods
@@ -1007,7 +1015,7 @@ class TestModule < Test::Unit::TestCase
       Module.new do
         define_method(:foo) do end
         alias bar foo
-        alias barf oo
+        alias bar foo
       end
     end
     assert_equal("", stderr)
@@ -1087,6 +1095,19 @@ class TestModule < Test::Unit::TestCase
     assert_raise(NameError) { c::FOO }
   end
 
+  def test_private_constant2
+    c = Class.new
+    c.const_set(:FOO, "foo")
+    c.const_set(:BAR, "bar")
+    assert_equal("foo", c::FOO)
+    assert_equal("bar", c::BAR)
+    c.private_constant(:FOO, :BAR)
+    assert_raise(NameError) { c::FOO }
+    assert_raise(NameError) { c::BAR }
+    assert_equal("foo", c.class_eval("FOO"))
+    assert_equal("bar", c.class_eval("BAR"))
+  end
+
   class PrivateClass
   end
   private_constant :PrivateClass
@@ -1132,6 +1153,27 @@ class TestModule < Test::Unit::TestCase
       end
     INPUT
     assert_in_out_err([], src, %w(Object :ok), [])
+  end
+
+  def test_private_constants_clear_inlinecache
+    bug5702 = '[ruby-dev:44929]'
+    src = <<-INPUT
+    class A
+      C = :Const
+      def self.get_C
+        A::C
+      end
+      # fill cache
+      A.get_C
+      private_constant :C, :D rescue nil
+      begin
+        A.get_C
+      rescue NameError
+        puts "A.get_C"
+      end
+    end
+    INPUT
+    assert_in_out_err([], src, %w(A.get_C), [], bug5702)
   end
 
   def test_constant_lookup_in_method_defined_by_class_eval

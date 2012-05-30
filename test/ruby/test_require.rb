@@ -5,6 +5,14 @@ require_relative 'envutil'
 require 'tmpdir'
 
 class TestRequire < Test::Unit::TestCase
+  def test_load_error_path
+    filename = "should_not_exist"
+    error = assert_raise(LoadError) do
+      require filename
+    end
+    assert_equal filename, error.path
+  end
+
   def test_require_invalid_shared_object
     t = Tempfile.new(["test_ruby_test_require", ".so"])
     t.puts "dummy"
@@ -42,8 +50,10 @@ class TestRequire < Test::Unit::TestCase
 
   def test_require_nonascii
     bug3758 = '[ruby-core:31915]'
-    e = assert_raise(LoadError, bug3758) {require "\u{221e}"}
-    assert_match(/\u{221e}\z/, e.message, bug3758)
+    ["\u{221e}", "\x82\xa0".force_encoding("cp932")].each do |path|
+      e = assert_raise(LoadError, bug3758) {require path}
+      assert_match(/#{path}\z/, e.message, bug3758)
+    end
   end
 
   def test_require_path_home_1
@@ -338,5 +348,61 @@ class TestRequire < Test::Unit::TestCase
     assert_in_out_err(['-e', '$LOADED_FEATURES.freeze; require "ostruct"'], "",
                       [], /\$LOADED_FEATURES is frozen; cannot append feature \(RuntimeError\)$/,
                       bug3756)
+  end
+
+  def test_race_exception
+    bug5754 = '[ruby-core:41618]'
+    tmp = Tempfile.new(%w"bug5754 .rb")
+    path = tmp.path
+    tmp.print %{\
+      th = Thread.current
+      t = th[:t]
+      scratch = th[:scratch]
+
+      if scratch.empty?
+        scratch << :pre
+        Thread.pass until t.stop?
+        raise RuntimeError
+      else
+        scratch << :post
+      end
+    }
+    tmp.close
+
+    start = false
+
+    scratch = []
+    t1_res = nil
+    t2_res = nil
+
+    t1 = Thread.new do
+      Thread.pass until start
+      begin
+        require(path)
+      rescue RuntimeError
+      end
+
+      t1_res = require(path)
+    end
+
+    t2 = Thread.new do
+      Thread.pass until scratch[0]
+      t2_res = require(path)
+    end
+
+    t1[:scratch] = t2[:scratch] = scratch
+    t1[:t] = t2
+    t2[:t] = t1
+
+    start = true
+
+    assert_nothing_raised(ThreadError, bug5754) {t1.join}
+    assert_nothing_raised(ThreadError, bug5754) {t2.join}
+
+    assert_equal(true, (t1_res ^ t2_res), bug5754 + " t1:#{t1_res} t2:#{t2_res}")
+    assert_equal([:pre, :post], scratch, bug5754)
+  ensure
+    $".delete(path)
+    tmp.close(true) if tmp
   end
 end

@@ -23,7 +23,7 @@
 # - Open3.pipeline_rw : pipes for first stdin and last stdout of a pipeline
 # - Open3.pipeline_r : pipe for last stdout of a pipeline
 # - Open3.pipeline_w : pipe for first stdin of a pipeline
-# - Open3.pipeline_start : a pipeline
+# - Open3.pipeline_start : run a pipeline and don't wait
 # - Open3.pipeline : run a pipline and wait
 #
 
@@ -55,9 +55,9 @@ module Open3
   # The parameters +cmd...+ is passed to Process.spawn.
   # So a commandline string and list of argument strings can be accepted as follows.
   #
-  #   Open3.popen3("echo a") {|i, o, e, t| ... }
-  #   Open3.popen3("echo", "a") {|i, o, e, t| ... }
-  #   Open3.popen3(["echo", "argv0"], "a") {|i, o, e, t| ... }
+  #   Open3.popen3("echo abc") {|i, o, e, t| ... }
+  #   Open3.popen3("echo", "abc") {|i, o, e, t| ... }
+  #   Open3.popen3(["echo", "argv0"], "abc") {|i, o, e, t| ... }
   #
   # If the last parameter, opts, is a Hash, it is recognized as an option for Process.spawn.
   #
@@ -248,8 +248,8 @@ module Open3
   #   End
   #   layouted_graph, dot_log = Open3.capture3("dot -v", :stdin_data=>graph)
   #
-  #   o, e, s = Open3.capture3("echo a; sort >&2", :stdin_data=>"foo\nbar\nbaz\n")
-  #   p o #=> "a\n"
+  #   o, e, s = Open3.capture3("echo abc; sort >&2", :stdin_data=>"foo\nbar\nbaz\n")
+  #   p o #=> "abc\n"
   #   p e #=> "bar\nbaz\nfoo\n"
   #   p s #=> #<Process::Status: pid 32682 exit 0>
   #
@@ -266,7 +266,7 @@ module Open3
   #     STDOUT.binmode; print thumnail
   #   end
   #
-  def capture3(*cmd, &block)
+  def capture3(*cmd)
     if Hash === cmd.last
       opts = cmd.pop.dup
     else
@@ -320,7 +320,7 @@ module Open3
   #   End
   #   image, s = Open3.capture2("gnuplot", :stdin_data=>gnuplot_commands, :binmode=>true)
   #
-  def capture2(*cmd, &block)
+  def capture2(*cmd)
     if Hash === cmd.last
       opts = cmd.pop.dup
     else
@@ -359,7 +359,7 @@ module Open3
   #   # capture make log
   #   make_log, s = Open3.capture2e("make")
   #
-  def capture2e(*cmd, &block)
+  def capture2e(*cmd)
     if Hash === cmd.last
       opts = cmd.pop.dup
     else
@@ -662,7 +662,7 @@ module Open3
   end
   module_function :pipeline
 
-  def pipeline_run(cmds, pipeline_opts, child_io, parent_io, &block) # :nodoc:
+  def pipeline_run(cmds, pipeline_opts, child_io, parent_io) # :nodoc:
     if cmds.empty?
       raise ArgumentError, "no commands"
     end

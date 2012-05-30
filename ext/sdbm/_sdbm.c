@@ -7,10 +7,6 @@
  * core routines
  */
 
-#ifndef lint
-/*char sdbm_rcsid[] = "$Id$";*/
-#endif
-
 #include "ruby/config.h"
 #include "ruby/defines.h"
 
@@ -110,7 +106,7 @@ static int   duppair proto((char *, datum));
 /*
  * externals
  */
-#if !defined sun && !defined _WIN32 && !defined __CYGWIN__ && !defined(errno)
+#if !defined(__sun) && !defined(_WIN32) && !defined(__CYGWIN__) && !defined(errno)
 extern int errno;
 #endif
 
@@ -178,6 +174,29 @@ sdbm_open(register char *file, register int flags, register int mode)
 	return db;
 }
 
+static int
+fd_set_cloexec(int fd)
+{
+  /* MinGW don't have F_GETFD and FD_CLOEXEC.  [ruby-core:40281] */
+#ifdef F_GETFD
+    int flags, ret;
+    flags = fcntl(fd, F_GETFD); /* should not fail except EBADF. */
+    if (flags == -1) {
+        return -1;
+    }
+    if (2 < fd) {
+        if (!(flags & FD_CLOEXEC)) {
+            flags |= FD_CLOEXEC;
+            ret = fcntl(fd, F_SETFD, flags);
+            if (ret == -1) {
+                return -1;
+            }
+        }
+    }
+#endif
+    return 0;
+}
+
 DBM *
 sdbm_prep(char *dirname, char *pagname, int flags, int mode)
 {
@@ -187,6 +206,8 @@ sdbm_prep(char *dirname, char *pagname, int flags, int mode)
 	if ((db = (DBM *) malloc(sizeof(DBM))) == NULL)
 		return errno = ENOMEM, (DBM *) NULL;
 
+        db->pagf = -1;
+        db->dirf = -1;
         db->flags = 0;
         db->hmask = 0;
         db->blkptr = 0;
@@ -205,31 +226,38 @@ sdbm_prep(char *dirname, char *pagname, int flags, int mode)
  * If we fail anywhere, undo everything, return NULL.
  */
 	flags |= O_BINARY;
-	if ((db->pagf = open(pagname, flags, mode)) > -1) {
-		if ((db->dirf = open(dirname, flags, mode)) > -1) {
+#ifdef O_CLOEXEC
+        flags |= O_CLOEXEC;
+#endif
+
+	if ((db->pagf = open(pagname, flags, mode)) == -1) goto err;
+        if (fd_set_cloexec(db->pagf) == -1) goto err;
+        if ((db->dirf = open(dirname, flags, mode)) == -1) goto err;
+        if (fd_set_cloexec(db->dirf) == -1) goto err;
 /*
  * need the dirfile size to establish max bit number.
  */
-			if (fstat(db->dirf, &dstat) == 0) {
+        if (fstat(db->dirf, &dstat) == -1) goto err;
 /*
  * zero size: either a fresh database, or one with a single,
  * unsplit data page: dirpage is all zeros.
  */
-				db->dirbno = (!dstat.st_size) ? 0 : -1;
-				db->pagbno = -1;
-				db->maxbno = dstat.st_size * (long) BYTESIZ;
+        db->dirbno = (!dstat.st_size) ? 0 : -1;
+        db->pagbno = -1;
+        db->maxbno = dstat.st_size * (long) BYTESIZ;
 
-				(void) memset(db->pagbuf, 0, PBLKSIZ);
-				(void) memset(db->dirbuf, 0, DBLKSIZ);
-			/*
-			 * success
-			 */
-				return db;
-			}
-			(void) close(db->dirf);
-		}
-		(void) close(db->pagf);
-	}
+        (void) memset(db->pagbuf, 0, PBLKSIZ);
+        (void) memset(db->dirbuf, 0, DBLKSIZ);
+/*
+ * success
+ */
+        return db;
+
+    err:
+        if (db->pagf != -1)
+                (void) close(db->pagf);
+        if (db->dirf != -1)
+                (void) close(db->dirf);
 	free((char *) db);
 	return (DBM *) NULL;
 }
@@ -604,10 +632,6 @@ getnext(register DBM *db)
  * page-level routines
  */
 
-#ifndef lint
-/*char pair_rcsid[] = "$Id$";*/
-#endif
-
 #ifndef BSD42
 /*#include <memory.h>*/
 #endif
@@ -648,8 +672,8 @@ fitpair(char *pag, int need)
 	register short *ino = (short *) pag;
 
 	off = ((n = GET_SHORT(ino,0)) > 0) ? GET_SHORT(ino,n) : PBLKSIZ;
-	free = off - (n + 1) * sizeof(short);
-	need += 2 * sizeof(short);
+	free = off - (n + 1) * (int)sizeof(short);
+	need += 2 * (int)sizeof(short);
 
 	debug(("free %d need %d\n", free, need));
 

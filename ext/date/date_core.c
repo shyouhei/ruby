@@ -1,5 +1,5 @@
 /*
-  date_core.c: Coded by Tadayoshi Funaba 2010, 2011
+  date_core.c: Coded by Tadayoshi Funaba 2010-2012
 */
 
 #include "ruby.h"
@@ -39,6 +39,7 @@ static double positive_inf, negative_inf;
 #define f_truncate(x) rb_funcall(x, rb_intern("truncate"), 0)
 #define f_round(x) rb_funcall(x, rb_intern("round"), 0)
 
+#define f_to_i(x) rb_funcall(x, rb_intern("to_i"), 0)
 #define f_to_r(x) rb_funcall(x, rb_intern("to_r"), 0)
 #define f_to_s(x) rb_funcall(x, rb_intern("to_s"), 0)
 #define f_inspect(x) rb_funcall(x, rb_intern("inspect"), 0)
@@ -1324,8 +1325,10 @@ encode_year(VALUE nth, int y, double style,
 static void
 decode_jd(VALUE jd, VALUE *nth, int *rjd)
 {
+    assert(FIXNUM_P(jd) || RB_TYPE_P(jd, T_BIGNUM));
     *nth = f_idiv(jd, INT2FIX(CM_PERIOD));
     if (f_zero_p(*nth)) {
+	assert(FIXNUM_P(jd));
 	*rjd = FIX2INT(jd);
 	return;
     }
@@ -3095,14 +3098,23 @@ wholenum_p(VALUE x)
 }
 
 inline static VALUE
+to_integer(VALUE x)
+{
+    if (FIXNUM_P(x) || RB_TYPE_P(x, T_BIGNUM))
+	return x;
+    return f_to_i(x);
+}
+
+inline static VALUE
 d_trunc(VALUE d, VALUE *fr)
 {
     VALUE rd;
 
     if (wholenum_p(d)) {
-	rd = d;
+	rd = to_integer(d);
 	*fr = INT2FIX(0);
-    } else {
+    }
+    else {
 	rd = f_idiv(d, INT2FIX(1));
 	*fr = f_mod(d, INT2FIX(1));
     }
@@ -3118,9 +3130,10 @@ h_trunc(VALUE h, VALUE *fr)
     VALUE rh;
 
     if (wholenum_p(h)) {
-	rh = h;
+	rh = to_integer(h);
 	*fr = INT2FIX(0);
-    } else {
+    }
+    else {
 	rh = f_idiv(h, INT2FIX(1));
 	*fr = f_mod(h, INT2FIX(1));
 	*fr = f_quo(*fr, INT2FIX(24));
@@ -3134,9 +3147,10 @@ min_trunc(VALUE min, VALUE *fr)
     VALUE rmin;
 
     if (wholenum_p(min)) {
-	rmin = min;
+	rmin = to_integer(min);
 	*fr = INT2FIX(0);
-    } else {
+    }
+    else {
 	rmin = f_idiv(min, INT2FIX(1));
 	*fr = f_mod(min, INT2FIX(1));
 	*fr = f_quo(*fr, INT2FIX(1440));
@@ -3150,9 +3164,10 @@ s_trunc(VALUE s, VALUE *fr)
     VALUE rs;
 
     if (wholenum_p(s)) {
-	rs = s;
+	rs = to_integer(s);
 	*fr = INT2FIX(0);
-    } else {
+    }
+    else {
 	rs = f_idiv(s, INT2FIX(1));
 	*fr = f_mod(s, INT2FIX(1));
 	*fr = f_quo(*fr, INT2FIX(86400));
@@ -3569,6 +3584,15 @@ date_s_nth_kday(int argc, VALUE *argv, VALUE klass)
 
 #if !defined(HAVE_GMTIME_R)
 static struct tm*
+gmtime_r(const time_t *t, struct tm *tm)
+{
+    auto struct tm *tmp = gmtime(t);
+    if (tmp)
+	*tm = *tmp;
+    return tmp;
+}
+
+static struct tm*
 localtime_r(const time_t *t, struct tm *tm)
 {
     auto struct tm *tmp = localtime(t);
@@ -3608,6 +3632,7 @@ date_s_today(int argc, VALUE *argv, VALUE klass)
 
     if (time(&t) == -1)
 	rb_sys_fail("time");
+    tzset();
     if (!localtime_r(&t, &tm))
 	rb_sys_fail("localtime");
 
@@ -4180,7 +4205,8 @@ date_s__strptime_internal(int argc, VALUE *argv, VALUE klass,
  *    Date._strptime(string[, format='%F'])  ->  hash
  *
  * Parses the given representation of date and time with the given
- * template, and returns a hash of parsed elements.
+ * template, and returns a hash of parsed elements.  _strptime does
+ * not support specification of flags and width unlike strftime.
  *
  * For example:
  *
@@ -4200,7 +4226,8 @@ date_s__strptime(int argc, VALUE *argv, VALUE klass)
  *    Date.strptime([string='-4712-01-01'[, format='%F'[, start=ITALY]]])  ->  date
  *
  * Parses the given representation of date and time with the given
- * template, and creates a date object.
+ * template, and creates a date object.  strptime does not support
+ * specification of flags and width unlike strftime.
  *
  * For example:
  *
@@ -6900,12 +6927,11 @@ date_strftime_internal(int argc, VALUE *argv, VALUE self,
  *    0  use zeros for padding.
  *    ^  upcase the result string.
  *    #  change case.
- *    :  use colons for %z.
  *
  *  The minimum field width specifies the minimum width.
  *
- *  The modifier is "E" and "O".
- *  They are ignored.
+ *  The modifiers are "E", "O", ":", "::" and ":::".
+ *  "E" and "O" are ignored.  No effect to result currently.
  *
  *  Format directives:
  *
@@ -6944,10 +6970,10 @@ date_strftime_internal(int argc, VALUE *argv, VALUE self,
  *
  *      %L - Millisecond of the second (000..999)
  *      %N - Fractional seconds digits, default is 9 digits (nanosecond)
- *              %3N  millisecond (3 digits)
- *              %6N  microsecond (6 digits)
- *              %9N  nanosecond (9 digits)
- *              %12N picosecond (12 digits)
+ *              %3N  millisecond (3 digits)   %15N femtosecond (15 digits)
+ *              %6N  microsecond (6 digits)   %18N attosecond  (18 digits)
+ *              %9N  nanosecond  (9 digits)   %21N zeptosecond (21 digits)
+ *              %12N picosecond (12 digits)   %24N yoctosecond (24 digits)
  *
  *    Time zone:
  *      %z - Time zone as hour and minute offset from UTC (e.g. +0900)
@@ -6955,7 +6981,7 @@ date_strftime_internal(int argc, VALUE *argv, VALUE self,
  *              %::z - hour, minute and second offset from UTC (e.g. +09:00:00)
  *              %:::z - hour, minute and second offset from UTC
  *                                                (e.g. +09, +09:30, +09:30:30)
- *      %Z - Time zone abbreviation name
+ *      %Z - Time zone abbreviation name or something similar information.
  *
  *    Weekday:
  *      %A - The full weekday name (``Sunday'')
@@ -7823,6 +7849,7 @@ datetime_s_now(int argc, VALUE *argv, VALUE klass)
 	rb_sys_fail("gettimeofday");
     sec = tv.tv_sec;
 #endif
+    tzset();
     if (!localtime_r(&sec, &tm))
 	rb_sys_fail("localtime");
 
@@ -7836,8 +7863,37 @@ datetime_s_now(int argc, VALUE *argv, VALUE klass)
 	s = 59;
 #ifdef HAVE_STRUCT_TM_TM_GMTOFF
     of = tm.tm_gmtoff;
+#elif defined(HAVE_VAR_TIMEZONE)
+#ifdef HAVE_VAR_ALTZONE
+    of = (long)((tm.tm_isdst > 0) ? altzone : timezone);
 #else
-    of = -timezone;
+    of = (long)-timezone;
+    if (tm.tm_isdst) {
+	time_t sec2;
+
+	tm.tm_isdst = 0;
+	sec2 = mktime(&tm);
+	of += (long)difftime(sec2, sec);
+    }
+#endif
+#elif defined(HAVE_TIMEGM)
+    {
+	time_t sec2;
+
+	sec2 = timegm(&tm);
+	of = (long)difftime(sec2, sec);
+    }
+#else
+    {
+	struct tm tm2;
+	time_t sec2;
+
+	if (!gmtime_r(&sec, &tm2))
+	    rb_sys_fail("gmtime");
+	tm2.tm_isdst = tm.tm_isdst;
+	sec2 = mktime(&tm2);
+	of = (long)difftime(sec, sec2);
+    }
 #endif
 #ifdef HAVE_CLOCK_GETTIME
     sf = ts.tv_nsec;
@@ -7958,7 +8014,8 @@ dt_new_by_frags(VALUE klass, VALUE hash, VALUE sg)
  *    DateTime._strptime(string[, format='%FT%T%z'])  ->  hash
  *
  * Parses the given representation of date and time with the given
- * template, and returns a hash of parsed elements.
+ * template, and returns a hash of parsed elements.  _strptime does
+ * not support specification of flags and width unlike strftime.
  *
  *  See also strptime(3) and strftime.
  */
@@ -7973,7 +8030,8 @@ datetime_s__strptime(int argc, VALUE *argv, VALUE klass)
  *    DateTime.strptime([string='-4712-01-01T00:00:00+00:00'[, format='%FT%T%z'[ ,start=ITALY]]])  ->  datetime
  *
  * Parses the given representation of date and time with the given
- * template, and creates a date object.
+ * template, and creates a date object.  strptime does not support
+ * specification of flags and width unlike strftime.
  *
  * For example:
  *
@@ -8349,10 +8407,10 @@ dt_lite_to_s(VALUE self)
  *
  *      %L - Millisecond of the second (000..999)
  *      %N - Fractional seconds digits, default is 9 digits (nanosecond)
- *              %3N  millisecond (3 digits)
- *              %6N  microsecond (6 digits)
- *              %9N  nanosecond (9 digits)
- *              %12N picosecond (12 digits)
+ *              %3N  millisecond (3 digits)   %15N femtosecond (15 digits)
+ *              %6N  microsecond (6 digits)   %18N attosecond  (18 digits)
+ *              %9N  nanosecond  (9 digits)   %21N zeptosecond (21 digits)
+ *              %12N picosecond (12 digits)   %24N yoctosecond (24 digits)
  *
  *    Time zone:
  *      %z - Time zone as hour and minute offset from UTC (e.g. +0900)
@@ -8360,7 +8418,7 @@ dt_lite_to_s(VALUE self)
  *              %::z - hour, minute and second offset from UTC (e.g. +09:00:00)
  *              %:::z - hour, minute and second offset from UTC
  *                                                (e.g. +09, +09:30, +09:30:30)
- *      %Z - Time zone abbreviation name
+ *      %Z - Time zone abbreviation name or something similar information.
  *
  *    Weekday:
  *      %A - The full weekday name (``Sunday'')
@@ -8471,6 +8529,7 @@ iso8601_timediv(VALUE self, VALUE n)
 {
     VALUE fmt;
 
+    n = to_integer(n);
     fmt = rb_usascii_str_new2("T%H:%M:%S");
     if (f_gt_p(n, INT2FIX(0))) {
 	VALUE argv[3];

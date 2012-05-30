@@ -20,6 +20,7 @@ module Psych
         @st       = {}
         @ss       = ss
         @options  = options
+        @coders   = []
 
         @dispatch_cache = Hash.new do |h,klass|
           method = "visit_#{(klass.name || '').split('::').join('_')}"
@@ -159,13 +160,13 @@ module Psych
       end
 
       def visit_Regexp o
-        @emitter.scalar o.inspect, nil, '!ruby/regexp', false, false, Nodes::Scalar::ANY
+        register o, @emitter.scalar(o.inspect, nil, '!ruby/regexp', false, false, Nodes::Scalar::ANY)
       end
 
       def visit_DateTime o
         formatted = format_time o.to_time
         tag = '!ruby/object:DateTime'
-        @emitter.scalar formatted, nil, tag, false, false, Nodes::Scalar::ANY
+        register o, @emitter.scalar(formatted, nil, tag, false, false, Nodes::Scalar::ANY)
       end
 
       def visit_Time o
@@ -174,7 +175,7 @@ module Psych
       end
 
       def visit_Rational o
-        @emitter.start_mapping(nil, '!ruby/object:Rational', false, Nodes::Mapping::BLOCK)
+        register o, @emitter.start_mapping(nil, '!ruby/object:Rational', false, Nodes::Mapping::BLOCK)
 
         [
           'denominator', o.denominator.to_s,
@@ -187,7 +188,7 @@ module Psych
       end
 
       def visit_Complex o
-        @emitter.start_mapping(nil, '!ruby/object:Complex', false, Nodes::Mapping::BLOCK)
+        register o, @emitter.start_mapping(nil, '!ruby/object:Complex', false, Nodes::Mapping::BLOCK)
 
         ['real', o.real.to_s, 'image', o.imag.to_s].each do |m|
           @emitter.scalar m, nil, nil, true, false, Nodes::Scalar::ANY
@@ -212,6 +213,10 @@ module Psych
         else
           @emitter.scalar o.to_s, nil, nil, true, false, Nodes::Scalar::ANY
         end
+      end
+
+      def visit_BigDecimal o
+        @emitter.scalar o._dump, nil, '!ruby/object:BigDecimal', false, false, Nodes::Scalar::ANY
       end
 
       def binary? string
@@ -241,9 +246,15 @@ module Psych
         ivars = find_ivars o
 
         if ivars.empty?
+          unless o.class == ::String
+            tag = "!ruby/string:#{o.class}"
+          end
           @emitter.scalar str, nil, tag, plain, quote, style
         else
-          @emitter.start_mapping nil, '!str', false, Nodes::Mapping::BLOCK
+          maptag = '!ruby/string'
+          maptag << ":#{o.class}" unless o.class == ::String
+
+          @emitter.start_mapping nil, maptag, false, Nodes::Mapping::BLOCK
           @emitter.scalar 'str', nil, nil, true, false, Nodes::Scalar::ANY
           @emitter.scalar str, nil, tag, plain, quote, style
 
@@ -255,16 +266,16 @@ module Psych
 
       def visit_Module o
         raise TypeError, "can't dump anonymous module: #{o}" unless o.name
-        @emitter.scalar o.name, nil, '!ruby/module', false, false, Nodes::Scalar::SINGLE_QUOTED
+        register o, @emitter.scalar(o.name, nil, '!ruby/module', false, false, Nodes::Scalar::SINGLE_QUOTED)
       end
 
       def visit_Class o
         raise TypeError, "can't dump anonymous class: #{o}" unless o.name
-        @emitter.scalar o.name, nil, '!ruby/class', false, false, Nodes::Scalar::SINGLE_QUOTED
+        register o, @emitter.scalar(o.name, nil, '!ruby/class', false, false, Nodes::Scalar::SINGLE_QUOTED)
       end
 
       def visit_Range o
-        @emitter.start_mapping nil, '!ruby/range', false, Nodes::Mapping::BLOCK
+        register o, @emitter.start_mapping(nil, '!ruby/range', false, Nodes::Mapping::BLOCK)
         ['begin', o.begin, 'end', o.end, 'excl', o.exclude_end?].each do |m|
           accept m
         end
@@ -297,9 +308,13 @@ module Psych
       end
 
       def visit_Array o
-        register o, @emitter.start_sequence(nil, nil, true, Nodes::Sequence::BLOCK)
-        o.each { |c| accept c }
-        @emitter.end_sequence
+        if o.class == ::Array
+          register o, @emitter.start_sequence(nil, nil, true, Nodes::Sequence::BLOCK)
+          o.each { |c| accept c }
+          @emitter.end_sequence
+        else
+          visit_array_subclass o
+        end
       end
 
       def visit_NilClass o
@@ -311,6 +326,39 @@ module Psych
       end
 
       private
+      def visit_array_subclass o
+        tag = "!ruby/array:#{o.class}"
+        if o.instance_variables.empty?
+          node = @emitter.start_sequence(nil, tag, false, Nodes::Sequence::BLOCK)
+          register o, node
+          o.each { |c| accept c }
+          @emitter.end_sequence
+        else
+          node = @emitter.start_mapping(nil, tag, false, Nodes::Sequence::BLOCK)
+          register o, node
+
+          # Dump the internal list
+          accept 'internal'
+          @emitter.start_sequence(nil, nil, true, Nodes::Sequence::BLOCK)
+          o.each { |c| accept c }
+          @emitter.end_sequence
+
+          # Dump the ivars
+          accept 'ivars'
+          @emitter.start_mapping(nil, nil, true, Nodes::Sequence::BLOCK)
+          o.instance_variables.each do |ivar|
+            accept ivar
+            accept o.instance_variable_get ivar
+          end
+          @emitter.end_mapping
+
+          @emitter.end_mapping
+        end
+      end
+
+      def dump_list o
+      end
+
       # '%:z' was no defined until 1.9.3
       if RUBY_VERSION < '1.9.3'
         def format_time time
@@ -359,6 +407,7 @@ module Psych
       end
 
       def dump_coder o
+        @coders << o
         tag = Psych.dump_tags[o.class]
         unless tag
           klass = o.class == Object ? nil : o.class.name

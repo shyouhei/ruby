@@ -1,5 +1,5 @@
 require 'test/unit'
-require 'stringio'
+require_relative 'envutil'
 
 class TestM17N < Test::Unit::TestCase
   def assert_encoding(encname, actual, message=nil)
@@ -21,17 +21,6 @@ class TestM17N < Test::Unit::TestCase
     enc = Encoding.find(enc) if String === enc
     assert_equal(enc, actual.encoding, message)
     assert_equal(a(bytes), a(actual), message)
-  end
-
-  def assert_warning(pat, mesg=nil)
-    begin
-      org_stderr = $stderr
-      $stderr = StringIO.new(warn = '')
-      yield
-    ensure
-      $stderr = org_stderr
-    end
-    assert_match(pat, warn, mesg)
   end
 
   def assert_regexp_generic_encoding(r)
@@ -254,6 +243,49 @@ class TestM17N < Test::Unit::TestCase
                      s.dup.force_encoding(enc).inspect)
       end
     end
+  end
+
+  def test_object_utf16_32_inspect
+    orig_int = Encoding.default_internal
+    orig_ext = Encoding.default_external
+    Encoding.default_internal = nil
+    Encoding.default_external = Encoding::UTF_8
+    o = Object.new
+    [Encoding::UTF_16BE, Encoding::UTF_16LE, Encoding::UTF_32BE, Encoding::UTF_32LE].each do |e|
+      o.instance_eval "def inspect;'abc'.encode('#{e}');end"
+      assert_raise(Encoding::CompatibilityError) { [o].inspect }
+    end
+  ensure
+    Encoding.default_internal = orig_int
+    Encoding.default_external = orig_ext
+  end
+
+  def test_object_inspect_external
+    orig_v, $VERBOSE = $VERBOSE, false
+    orig_int, Encoding.default_internal = Encoding.default_internal, nil
+    orig_ext = Encoding.default_external
+    o = Object.new
+
+    Encoding.default_external = Encoding::UTF_16BE
+    def o.inspect
+      "abc"
+    end
+    assert_nothing_raised(Encoding::CompatibilityError) { [o].inspect }
+
+    def o.inspect
+      "abc".encode(Encoding.default_external)
+    end
+    assert_raise(Encoding::CompatibilityError) { [o].inspect }
+
+    Encoding.default_external = Encoding::US_ASCII
+    def o.inspect
+      "\u3042"
+    end
+    assert_raise(Encoding::CompatibilityError) { [o].inspect }
+  ensure
+    Encoding.default_internal = orig_int
+    Encoding.default_external = orig_ext
+    $VERBOSE = orig_v
   end
 
   def test_str_dump
@@ -930,6 +962,15 @@ class TestM17N < Test::Unit::TestCase
     assert_equal("\u{439}", "a\u{439}bcdefghijklmnop"[1, 1][0, 1], bug2379)
   end
 
+  def test_str_aref_force_encoding
+    bug5836 = '[ruby-core:41896]'
+    Encoding.list.each do |enc|
+      next unless enc.ascii_compatible?
+      s = "abc".force_encoding(enc)
+      assert_equal("", s[3, 1], bug5836)
+    end
+  end
+
   def test_aset
     s = e("\xa3\xb0\xa3\xb1\xa3\xb2\xa3\xb3\xa3\xb4")
     assert_raise(Encoding::CompatibilityError){s["\xb0\xa3"] = "foo"}
@@ -1137,6 +1178,7 @@ class TestM17N < Test::Unit::TestCase
 
   def test_str_concat
     assert_equal(1, "".concat(0xA2).size)
+    assert_equal(Encoding::ASCII_8BIT, "".force_encoding("US-ASCII").concat(0xA2).encoding)
     assert_equal("A\x84\x31\xA4\x39".force_encoding("GB18030"),
                  "A".force_encoding("GB18030") << 0x8431A439)
   end
@@ -1196,6 +1238,14 @@ class TestM17N < Test::Unit::TestCase
       2206368128.chr(Encoding::UTF_8)
     }
     assert_not_match(/-\d+ out of char range/, e.message)
+
+    assert_raise(RangeError){ 0x80.chr("US-ASCII") }
+    assert_raise(RangeError){ 0x80.chr("SHIFT_JIS") }
+    assert_raise(RangeError){ 0xE0.chr("SHIFT_JIS") }
+    assert_raise(RangeError){ 0x100.chr("SHIFT_JIS") }
+    assert_raise(RangeError){ 0xA0.chr("EUC-JP") }
+    assert_raise(RangeError){ 0x100.chr("EUC-JP") }
+    assert_raise(RangeError){ 0xA1A0.chr("EUC-JP") }
   end
 
   def test_marshal
@@ -1207,8 +1257,8 @@ class TestM17N < Test::Unit::TestCase
   def test_env
     locale_encoding = Encoding.find("locale")
     ENV.each {|k, v|
-      assert_equal(locale_encoding, k.encoding)
-      assert_equal(locale_encoding, v.encoding)
+      assert_equal(locale_encoding, k.encoding, k)
+      assert_equal(locale_encoding, v.encoding, v)
     }
   end
 
@@ -1360,6 +1410,14 @@ class TestM17N < Test::Unit::TestCase
     assert_equal(true, s.valid_encoding?)
     s << "\xff".force_encoding("utf-16be")
     assert_equal(false, s.valid_encoding?, bug4018)
+
+    bug6190 = '[ruby-core:43557]'
+    s = "\xe9"
+    s = s.encode("utf-8", "utf-8")
+    assert_equal(false, s.valid_encoding?, bug6190)
+    s = "\xe9"
+    s.encode!("utf-8", "utf-8")
+    assert_equal(false, s.valid_encoding?, bug6190)
   end
 
   def test_getbyte

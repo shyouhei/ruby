@@ -21,6 +21,9 @@
 
 #if defined(__cplusplus)
 extern "C" {
+#if 0
+} /* satisfy cc-mode */
+#endif
 #endif
 
 #ifndef HAVE_LABS
@@ -120,6 +123,12 @@ extern VALUE rb_cBigDecimal;
 #define VP_SIGN_POSITIVE_INFINITE  3 /* Positive infinite number */
 #define VP_SIGN_NEGATIVE_INFINITE -3 /* Negative infinite number */
 
+#ifdef __GNUC__
+#define	FLEXIBLE_ARRAY_SIZE 0
+#else
+#define	FLEXIBLE_ARRAY_SIZE 1
+#endif
+
 /*
  * VP representation
  *  r = 0.xxxxxxxxx *BASE**exponent
@@ -144,7 +153,7 @@ typedef struct {
                      *         -3 : Negative infinite number
                      */
     short  flag;    /* Not used in vp_routines,space for user.  */
-    BDIGIT frac[1]; /* Pointer to array of fraction part.       */
+    BDIGIT frac[FLEXIBLE_ARRAY_SIZE]; /* Array of fraction part. */
 } Real;
 
 /*
@@ -191,6 +200,7 @@ VP_EXPORT int VpIsNegDoubleZero(double v);
 VP_EXPORT size_t VpNumOfChars(Real *vp,const char *pszFmt);
 VP_EXPORT size_t VpInit(BDIGIT BaseVal);
 VP_EXPORT void *VpMemAlloc(size_t mb);
+VP_EXPORT void *VpMemRealloc(void *ptr, size_t mb);
 VP_EXPORT void VpFree(Real *pv);
 VP_EXPORT Real *VpAlloc(size_t mx, const char *szVal);
 VP_EXPORT size_t VpAsgn(Real *c, Real *a, int isw);
@@ -273,6 +283,9 @@ VP_EXPORT int VPrint(FILE *fp,const char *cntl_chr,Real *a);
 #endif /* BIGDECIMAL_DEBUG */
 
 #if defined(__cplusplus)
+#if 0
+{ /* satisfy cc-mode */
+#endif
 }  /* extern "C" { */
 #endif
 #endif /* RUBY_BIG_DECIMAL_H */

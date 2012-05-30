@@ -183,6 +183,7 @@ typedef	struct __sFILE {
 	struct	__sbuf _bf;	/* the buffer (at least 1 byte, if !NULL) */
 	size_t	_lbfsize;	/* 0 or -_bf._size, for inline putc */
 	int	(*vwrite)(/* struct __sFILE*, struct __suio * */);
+	char	*(*vextra)(/* struct __sFILE*, size_t, void*, long*, int */);
 } FILE;
 
 
@@ -206,20 +207,20 @@ typedef	struct __sFILE {
 #define	EOF	(-1)
 
 
-#define	__sfeof(p)	(((p)->_flags & __SEOF) != 0)
-#define	__sferror(p)	(((p)->_flags & __SERR) != 0)
-#define	__sclearerr(p)	((void)((p)->_flags &= ~(__SERR|__SEOF)))
-#define	__sfileno(p)	((p)->_file)
+#define	BSD__sfeof(p)	(((p)->_flags & __SEOF) != 0)
+#define	BSD__sferror(p)	(((p)->_flags & __SERR) != 0)
+#define	BSD__sclearerr(p)	((void)((p)->_flags &= ~(__SERR|__SEOF)))
+#define	BSD__sfileno(p)	((p)->_file)
 
 #undef feof
 #undef ferror
 #undef clearerr
-#define	feof(p)		__sfeof(p)
-#define	ferror(p)	__sferror(p)
-#define	clearerr(p)	__sclearerr(p)
+#define	feof(p)		BSD__sfeof(p)
+#define	ferror(p)	BSD__sferror(p)
+#define	clearerr(p)	BSD__sclearerr(p)
 
 #ifndef _ANSI_SOURCE
-#define	fileno(p)	__sfileno(p)
+#define	fileno(p)	BSD__sfileno(p)
 #endif
 
 
@@ -745,7 +746,16 @@ reswitch:	switch (ch) {
 		case 'z':
 #endif
 		case 'l':
+#ifdef _HAVE_SANE_QUAD_
+			if (*fmt == 'l') {
+				fmt++;
+				flags |= QUADINT;
+			} else {
+				flags |= LONGINT;
+			}
+#else
 			flags |= LONGINT;
+#endif
 			goto rflag;
 #ifdef _HAVE_SANE_QUAD_
 #if SIZEOF_PTRDIFF_T == SIZEOF_LONG_LONG
@@ -784,11 +794,40 @@ reswitch:	switch (ch) {
 			size = 1;
 			sign = '\0';
 			break;
+		case 'i':
+#ifdef _HAVE_SANE_QUAD_
+# define INTPTR_MASK (QUADINT|LONGINT|SHORTINT)
+#else
+# define INTPTR_MASK (LONGINT|SHORTINT)
+#endif
+#if defined _HAVE_SANE_QUAD_ && SIZEOF_VOIDP == SIZEOF_LONG_LONG
+# define INTPTR_FLAG QUADINT
+#elif SIZEOF_VOIDP == SIZEOF_LONG
+# define INTPTR_FLAG LONGINT
+#else
+# define INTPTR_FLAG 0
+#endif
+			if (fp->vextra && (flags & INTPTR_MASK) == INTPTR_FLAG) {
+				FLUSH();
+#if defined _HAVE_SANE_QUAD_ && SIZEOF_VOIDP == SIZEOF_LONG_LONG
+				uqval = va_arg(ap, u_quad_t);
+				cp = (*fp->vextra)(fp, sizeof(uqval), &uqval, &fieldsz, sign);
+#else
+				ulval = va_arg(ap, u_long);
+				cp = (*fp->vextra)(fp, sizeof(ulval), &ulval, &fieldsz, sign);
+#endif
+				sign = '\0';
+				if (!cp) goto error;
+				if (prec < 0) goto long_len;
+				size = fieldsz < prec ? (int)fieldsz : prec;
+				break;
+			}
+			goto decimal;
 		case 'D':
 			flags |= LONGINT;
 			/*FALLTHROUGH*/
 		case 'd':
-		case 'i':
+		decimal:
 #ifdef _HAVE_SANE_QUAD_
 			if (flags & QUADINT) {
 				uqval = va_arg(ap, quad_t);
@@ -1158,7 +1197,7 @@ long_len:
 done:
 	FLUSH();
 error:
-	return (__sferror(fp) ? EOF : ret);
+	return (BSD__sferror(fp) ? EOF : ret);
 	/* NOTREACHED */
 }
 
@@ -1260,6 +1299,7 @@ ruby_vsnprintf(char *str, size_t n, const char *fmt, va_list ap)
 	f._bf._base = f._p = (unsigned char *)str;
 	f._bf._size = f._w = n - 1;
 	f.vwrite = BSD__sfvwrite;
+	f.vextra = 0;
 	ret = (int)BSD_vfprintf(&f, fmt, ap);
 	*f._p = 0;
 	return (ret);
@@ -1280,6 +1320,7 @@ ruby_snprintf(char *str, size_t n, char const *fmt, ...)
 	f._bf._base = f._p = (unsigned char *)str;
 	f._bf._size = f._w = n - 1;
 	f.vwrite = BSD__sfvwrite;
+	f.vextra = 0;
 	ret = (int)BSD_vfprintf(&f, fmt, ap);
 	*f._p = 0;
 	va_end(ap);

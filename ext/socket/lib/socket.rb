@@ -16,6 +16,12 @@ class Addrinfo
       raise ArgumentError, "no address specified"
     elsif Addrinfo === args.first
       raise ArgumentError, "too many arguments" if args.length != 1
+      addrinfo = args.first
+      if (self.pfamily != addrinfo.pfamily) ||
+         (self.socktype != addrinfo.socktype)
+        raise ArgumentError, "Addrinfo type mismatch"
+      end
+      addrinfo
     elsif self.ip?
       raise ArgumentError, "IP address needs host and port but #{args.length} arguments given" if args.length != 2
       host, port = args

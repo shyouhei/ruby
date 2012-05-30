@@ -610,7 +610,7 @@ class TestArray < Test::Unit::TestCase
 
     bug2545 = '[ruby-core:27366]'
     a = @cls[ 5, 6, 7, 8, 9, 10 ]
-    assert_equal(9, a.delete_if {|i| break i if i > 8; i < 7})
+    assert_equal(9, a.delete_if {|i| break i if i > 8; assert_equal(a[0], i) || true if i < 7})
     assert_equal(@cls[7, 8, 9, 10], a, bug2545)
   end
 
@@ -1098,7 +1098,7 @@ class TestArray < Test::Unit::TestCase
 
     bug2545 = '[ruby-core:27366]'
     a = @cls[ 5, 6, 7, 8, 9, 10 ]
-    assert_equal(9, a.reject! {|i| break i if i > 8; i < 7})
+    assert_equal(9, a.reject! {|i| break i if i > 8; assert_equal(a[0], i) || true if i < 7})
     assert_equal(@cls[7, 8, 9, 10], a, bug2545)
   end
 
@@ -2108,9 +2108,7 @@ class TestArray < Test::Unit::TestCase
   end
 
   def test_combination2
-    assert_nothing_raised do
-      (0..100).to_a.combination(50) { break }
-    end
+    assert_equal(:called, (0..100).to_a.combination(50) { break :called }, "[ruby-core:29240] ... must be yielded even if 100C50 > signed integer")
   end
 
   def test_product2

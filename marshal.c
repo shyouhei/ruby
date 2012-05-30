@@ -506,8 +506,12 @@ w_uclass(VALUE obj, VALUE super, struct dump_arg *arg)
 }
 
 static int
-w_obj_each(ID id, VALUE value, struct dump_call_arg *arg)
+w_obj_each(st_data_t key, st_data_t val, st_data_t a)
 {
+    ID id = (ID)key;
+    VALUE value = (VALUE)val;
+    struct dump_call_arg *arg = (struct dump_call_arg *)a;
+
     if (id == rb_id_encoding()) return ST_CONTINUE;
     if (id == rb_intern("E")) return ST_CONTINUE;
     w_symbol(id, arg->arg);
@@ -1021,7 +1025,7 @@ r_byte(struct load_arg *arg)
 {
     int c;
 
-    if (TYPE(arg->src) == T_STRING) {
+    if (RB_TYPE_P(arg->src, T_STRING)) {
 	if (RSTRING_LEN(arg->src) > arg->offset) {
 	    c = (unsigned char)RSTRING_PTR(arg->src)[arg->offset++];
 	}
@@ -1095,7 +1099,7 @@ r_bytes0(long len, struct load_arg *arg)
     VALUE str;
 
     if (len == 0) return rb_str_new(0, 0);
-    if (TYPE(arg->src) == T_STRING) {
+    if (RB_TYPE_P(arg->src, T_STRING)) {
 	if (RSTRING_LEN(arg->src) - arg->offset >= len) {
 	    str = rb_str_new(RSTRING_PTR(arg->src)+arg->offset, len);
 	    arg->offset += len;
@@ -1139,16 +1143,16 @@ r_symlink(struct load_arg *arg)
     st_data_t id;
     long num = r_long(arg);
 
-    if (st_lookup(arg->symbols, num, &id)) {
-	return (ID)id;
+    if (!st_lookup(arg->symbols, num, &id)) {
+	rb_raise(rb_eArgError, "bad symbol");
     }
-    rb_raise(rb_eArgError, "bad symbol");
+    return (ID)id;
 }
 
 static ID
 r_symreal(struct load_arg *arg, int ivar)
 {
-    volatile VALUE s = r_bytes(arg);
+    VALUE s = r_bytes(arg);
     ID id;
     int idx = -1;
     st_index_t n = arg->symbols->num_entries;
@@ -1161,8 +1165,7 @@ r_symreal(struct load_arg *arg, int ivar)
 	    idx = id2encidx(id, r_object(arg));
 	}
     }
-    if (idx < 0) idx = rb_usascii_encindex();
-    rb_enc_associate_index(s, idx);
+    if (idx > 0) rb_enc_associate_index(s, idx);
     id = rb_intern_str(s);
     st_insert(arg->symbols, (st_data_t)n, (st_data_t)id);
 
@@ -1176,6 +1179,8 @@ r_symbol(struct load_arg *arg)
 
   again:
     switch ((type = r_byte(arg))) {
+      default:
+	rb_raise(rb_eArgError, "dump format error for symbol(0x%x)", type);
       case TYPE_IVAR:
 	ivar = 1;
 	goto again;
@@ -1186,9 +1191,6 @@ r_symbol(struct load_arg *arg)
 	    rb_raise(rb_eArgError, "dump format error (symlink with encoding)");
 	}
 	return r_symlink(arg);
-      default:
-	rb_raise(rb_eArgError, "dump format error for symbol(0x%x)", type);
-	break;
     }
 }
 

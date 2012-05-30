@@ -38,7 +38,7 @@ control_frame_dump(rb_thread_t *th, rb_control_frame_t *cfp)
     VALUE tmp;
 
     if (cfp->block_iseq != 0 && BUILTIN_TYPE(cfp->block_iseq) != T_NODE) {
-	biseq_name = "";	/* RSTRING(cfp->block_iseq->name)->ptr; */
+	biseq_name = "";	/* RSTRING(cfp->block_iseq->location.name)->ptr; */
     }
 
     if (lfp < 0 || (size_t)lfp > th->stack_size) {
@@ -110,10 +110,10 @@ control_frame_dump(rb_thread_t *th, rb_control_frame_t *cfp)
 	}
 	else {
 	    pc = cfp->pc - cfp->iseq->iseq_encoded;
-	    iseq_name = RSTRING_PTR(cfp->iseq->name);
+	    iseq_name = RSTRING_PTR(cfp->iseq->location.name);
 	    line = rb_vm_get_sourceline(cfp);
 	    if (line) {
-		snprintf(posbuf, MAX_POSBUF, "%s:%d", RSTRING_PTR(cfp->iseq->filename), line);
+		snprintf(posbuf, MAX_POSBUF, "%s:%d", RSTRING_PTR(cfp->iseq->location.filename), line);
 	    }
 	}
     }
@@ -271,7 +271,7 @@ vm_stack_dump_each(rb_thread_t *th, rb_control_frame_t *cfp)
     else {
 	argc = iseq->argc;
 	local_size = iseq->local_size;
-	name = RSTRING_PTR(iseq->name);
+	name = RSTRING_PTR(iseq->location.name);
     }
 
     /* stack trace header */
@@ -572,26 +572,11 @@ rb_vmdebug_thread_dump_state(VALUE self)
     return Qnil;
 }
 
-static int
-bugreport_backtrace(void *arg, VALUE file, int line, VALUE method)
-{
-    const char *filename = NIL_P(file) ? "ruby" : RSTRING_PTR(file);
-    if (!*(int *)arg) {
-	fprintf(stderr, "-- Ruby level backtrace information "
-		"----------------------------------------\n");
-	*(int *)arg = 1;
-    }
-    if (NIL_P(method)) {
-	fprintf(stderr, "%s:%d:in unknown method\n", filename, line);
-    }
-    else {
-	fprintf(stderr, "%s:%d:in `%s'\n", filename, line, RSTRING_PTR(method));
-    }
-    return 0;
-}
-
 #if defined(__FreeBSD__) && defined(__OPTIMIZE__)
 #undef HAVE_BACKTRACE
+#endif
+#ifndef HAVE_BACKTRACE
+#define HAVE_BACKTRACE 0
 #endif
 #if HAVE_BACKTRACE
 # include <execinfo.h>
@@ -771,17 +756,24 @@ dump_thread(void *arg)
 }
 #endif
 
+void rb_backtrace_print_as_bugreport(void);
+
 void
 rb_vm_bugreport(void)
 {
-    rb_vm_t *vm = GET_VM();
+#ifdef __linux__
+# define PROC_MAPS_NAME "/proc/self/maps"
+#endif
+#ifdef PROC_MAPS_NAME
+    enum {other_runtime_info = 1};
+#else
+    enum {other_runtime_info = 0};
+#endif
+    const rb_vm_t *const vm = GET_VM();
     if (vm) {
-	int i = 0;
 	SDR();
-
-	if (rb_backtrace_each(bugreport_backtrace, &i)) {
-	    fputs("\n", stderr);
-	}
+	rb_backtrace_print_as_bugreport();
+	fputs("\n", stderr);
     }
 
 #if HAVE_BACKTRACE || defined(_WIN32)
@@ -823,29 +815,37 @@ rb_vm_bugreport(void)
     fprintf(stderr, "\n");
 #endif /* HAVE_BACKTRACE */
 
-    fprintf(stderr, "-- Other runtime information "
-	    "-----------------------------------------------\n\n");
-    {
+    if (other_runtime_info || vm) {
+	fprintf(stderr, "-- Other runtime information "
+		"-----------------------------------------------\n\n");
+    }
+    if (vm) {
 	int i;
+	VALUE name;
 
-	fprintf(stderr, "* Loaded script: %s\n", StringValueCStr(vm->progname));
+	name = vm->progname;
+	fprintf(stderr, "* Loaded script: %s\n", StringValueCStr(name));
 	fprintf(stderr, "\n");
 	fprintf(stderr, "* Loaded features:\n\n");
 	for (i=0; i<RARRAY_LEN(vm->loaded_features); i++) {
-	    fprintf(stderr, " %4d %s\n", i, StringValueCStr(RARRAY_PTR(vm->loaded_features)[i]));
+	    name = RARRAY_PTR(vm->loaded_features)[i];
+	    fprintf(stderr, " %4d %s\n", i, StringValueCStr(name));
 	}
 	fprintf(stderr, "\n");
+    }
 
-#if __linux__
+    {
+#ifdef PROC_MAPS_NAME
 	{
-	    FILE *fp = fopen("/proc/self/maps", "r");
+	    FILE *fp = fopen(PROC_MAPS_NAME, "r");
 	    if (fp) {
 		fprintf(stderr, "* Process memory map:\n\n");
 
 		while (!feof(fp)) {
 		    char buff[0x100];
 		    size_t rn = fread(buff, 1, 0x100, fp);
-		    fwrite(buff, 1, rn, stderr);
+		    if (fwrite(buff, 1, rn, stderr) != rn)
+			break;
 		}
 
 		fclose(fp);

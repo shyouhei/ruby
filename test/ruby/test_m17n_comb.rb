@@ -1,5 +1,4 @@
 require 'test/unit'
-require 'stringio'
 require_relative 'allpairs'
 
 class TestM17NComb < Test::Unit::TestCase
@@ -21,62 +20,6 @@ class TestM17NComb < Test::Unit::TestCase
     enc = Encoding.find(enc) if String === enc
     assert_equal(enc, actual.encoding, message)
     assert_equal(a(bytes), a(actual), message)
-  end
-
-  def assert_warning(pat, mesg=nil)
-    begin
-      org_stderr = $stderr
-      $stderr = StringIO.new(warn = '')
-      yield
-    ensure
-      $stderr = org_stderr
-    end
-    assert_match(pat, warn, mesg)
-  end
-
-  def assert_regexp_generic_encoding(r)
-    assert(!r.fixed_encoding?)
-    %w[ASCII-8BIT EUC-JP Shift_JIS UTF-8].each {|ename|
-      # "\xc2\xa1" is a valid sequence for ASCII-8BIT, EUC-JP, Shift_JIS and UTF-8.
-      assert_nothing_raised { r =~ "\xc2\xa1".force_encoding(ename) }
-    }
-  end
-
-  def assert_regexp_fixed_encoding(r)
-    assert(r.fixed_encoding?)
-    %w[ASCII-8BIT EUC-JP Shift_JIS UTF-8].each {|ename|
-      enc = Encoding.find(ename)
-      if enc == r.encoding
-        assert_nothing_raised { r =~ "\xc2\xa1".force_encoding(enc) }
-      else
-        assert_raise(ArgumentError) { r =~ "\xc2\xa1".force_encoding(enc) }
-      end
-    }
-  end
-
-  def assert_regexp_generic_ascii(r)
-    assert_encoding("ASCII-8BIT", r.encoding)
-    assert_regexp_generic_encoding(r)
-  end
-
-  def assert_regexp_fixed_ascii8bit(r)
-    assert_encoding("ASCII-8BIT", r.encoding)
-    assert_regexp_fixed_encoding(r)
-  end
-
-  def assert_regexp_fixed_eucjp(r)
-    assert_encoding("EUC-JP", r.encoding)
-    assert_regexp_fixed_encoding(r)
-  end
-
-  def assert_regexp_fixed_sjis(r)
-    assert_encoding("Shift_JIS", r.encoding)
-    assert_regexp_fixed_encoding(r)
-  end
-
-  def assert_regexp_fixed_utf8(r)
-    assert_encoding("UTF-8", r.encoding)
-    assert_regexp_fixed_encoding(r)
   end
 
   STRINGS = [
@@ -1291,6 +1234,20 @@ class TestM17NComb < Test::Unit::TestCase
       t = enccall(s1, :tr, s2, s3)
       assert_operator(s1.length, :>=, t.length, desc)
     }
+  end
+
+  def test_tr_sjis
+    expected = "\x83}\x83~\x83\x80\x83\x81\x83\x82".force_encoding(Encoding::SJIS)
+    source = "\xCF\xD0\xD1\xD2\xD3".force_encoding(Encoding::SJIS)
+    from = "\xCF-\xD3".force_encoding(Encoding::SJIS)
+    to = "\x83}-\x83\x82".force_encoding(Encoding::SJIS)
+    assert_equal(expected, source.tr(from, to))
+
+    expected = "\x84}\x84~\x84\x80\x84\x81\x84\x82".force_encoding(Encoding::SJIS)
+    source = "\x84M\x84N\x84O\x84P\x84Q".force_encoding(Encoding::SJIS)
+    from = "\x84@-\x84`".force_encoding(Encoding::SJIS)
+    to = "\x84p-\x84\x91".force_encoding(Encoding::SJIS)
+    assert_equal(expected, source.tr(from, to))
   end
 
   def test_tr_s

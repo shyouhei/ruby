@@ -7,7 +7,7 @@ module Test
         undef autorun
       end
 
-      alias orig_run_suite _run_suite
+      alias orig_run_suite mini_run_suite
       undef _run_suite
       undef _run_suites
       undef run
@@ -35,7 +35,7 @@ module Test
         th = Thread.new do
           begin
             while buf = (self.verbose ? i.gets : i.read(5))
-              @stdout.puts "p #{[buf].pack("m").gsub("\n","")}"
+              @stdout.puts "p #{[buf].pack("m0")}"
             end
           rescue IOError
           rescue Errno::EPIPE
@@ -69,7 +69,7 @@ module Test
         result << suite.name
 
         begin
-          @stdout.puts "done #{[Marshal.dump(result)].pack("m").gsub("\n","")}"
+          @stdout.puts "done #{[Marshal.dump(result)].pack("m0")}"
         rescue Errno::EPIPE; end
         return result
       ensure
@@ -88,10 +88,16 @@ module Test
 
         @old_loadpath = []
         begin
-          @stdout = increment_io(STDOUT)
-          @stdin = increment_io(STDIN)
+          begin
+            @stdout = increment_io(STDOUT)
+            @stdin = increment_io(STDIN)
+          rescue
+            exit 2
+          end
+          exit 2 unless @stdout && @stdin
+
           @stdout.sync = true
-          @stdout.puts "ready"
+          @stdout.puts "ready!"
           while buf = @stdin.gets
             case buf.chomp
             when /^loadpath (.+?)$/
@@ -106,7 +112,7 @@ module Test
               begin
                 require $1
               rescue LoadError
-                @stdout.puts "after #{[Marshal.dump([$1, $!])].pack("m").gsub("\n","")}"
+                @stdout.puts "after #{[Marshal.dump([$1, $!])].pack("m0")}"
                 @stdout.puts "ready"
                 next
               end
@@ -130,12 +136,12 @@ module Test
         rescue Errno::EPIPE
         rescue Exception => e
           begin
-            @stdout.puts "bye #{[Marshal.dump(e)].pack("m").gsub("\n","")}"
+            @stdout.puts "bye #{[Marshal.dump(e)].pack("m0")}" if @stdout
           rescue Errno::EPIPE;end
           exit
         ensure
-          @stdin.close
-          @stdout.close
+          @stdin.close if @stdin
+          @stdout.close if @stdout
         end
       end
     end

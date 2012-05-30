@@ -287,7 +287,8 @@ strio_unimpl(int argc, VALUE *argv, VALUE self)
 {
     StringIO(self);
     rb_notimplement();
-    return Qnil;		/* not reached */
+
+    UNREACHABLE;
 }
 
 /*
@@ -505,7 +506,7 @@ static VALUE
 strio_reopen(int argc, VALUE *argv, VALUE self)
 {
     rb_io_taint_check(self);
-    if (argc == 1 && TYPE(*argv) != T_STRING) {
+    if (argc == 1 && !RB_TYPE_P(*argv, T_STRING)) {
 	return strio_copy(self, *argv);
     }
     strio_init(argc, argv, StringIO(self));
@@ -806,7 +807,7 @@ strio_ungetbyte(VALUE self, VALUE c)
 static VALUE
 strio_readchar(VALUE self)
 {
-    VALUE c = strio_getc(self);
+    VALUE c = rb_funcall2(self, rb_intern("getc"), 0, 0);
     if (NIL_P(c)) rb_eof_error();
     return c;
 }
@@ -820,7 +821,7 @@ strio_readchar(VALUE self)
 static VALUE
 strio_readbyte(VALUE self)
 {
-    VALUE c = strio_getbyte(self);
+    VALUE c = rb_funcall2(self, rb_intern("getbyte"), 0, 0);
     if (NIL_P(c)) rb_eof_error();
     return c;
 }
@@ -930,7 +931,7 @@ strio_getline(int argc, VALUE *argv, struct StringIO *ptr)
 	break;
 
       case 1:
-	if (!NIL_P(str) && TYPE(str) != T_STRING) {
+	if (!NIL_P(str) && !RB_TYPE_P(str, T_STRING)) {
 	    VALUE tmp = rb_check_string_type(str);
 	    if (NIL_P(tmp)) {
 		limit = NUM2LONG(str);
@@ -1037,7 +1038,7 @@ strio_gets(int argc, VALUE *argv, VALUE self)
 static VALUE
 strio_readline(int argc, VALUE *argv, VALUE self)
 {
-    VALUE line = strio_gets(argc, argv, self);
+    VALUE line = rb_funcall2(self, rb_intern("gets"), argc, argv);
     if (NIL_P(line)) rb_eof_error();
     return line;
 }
@@ -1123,7 +1124,7 @@ strio_write(VALUE self, VALUE str)
     rb_encoding *enc, *enc2;
 
     RB_GC_GUARD(str);
-    if (TYPE(str) != T_STRING)
+    if (!RB_TYPE_P(str, T_STRING))
 	str = rb_obj_as_string(str);
     enc = rb_enc_get(ptr->string);
     enc2 = rb_enc_get(str);
@@ -1209,7 +1210,7 @@ strio_putc(VALUE self, VALUE ch)
 
 /*
  * call-seq:
- *   strio.read([length [, buffer]])    -> string, buffer, or nil
+ *   strio.read([length [, outbuf]])    -> string, outbuf, or nil
  *
  * See IO#read.
  */
@@ -1288,14 +1289,14 @@ strio_read(int argc, VALUE *argv, VALUE self)
 static VALUE
 strio_sysread(int argc, VALUE *argv, VALUE self)
 {
-    VALUE val = strio_read(argc, argv, self);
+    VALUE val = rb_funcall2(self, rb_intern("read"), argc, argv);
     if (NIL_P(val)) {
 	rb_eof_error();
     }
     return val;
 }
 
-#define strio_syswrite strio_write
+#define strio_syswrite rb_io_write
 
 /*
  * call-seq:
@@ -1341,7 +1342,7 @@ strio_truncate(VALUE self, VALUE len)
     long l = NUM2LONG(len);
     long plen = RSTRING_LEN(string);
     if (l < 0) {
-	error_inval("negative legnth");
+	error_inval("negative length");
     }
     rb_str_resize(string, l);
     if (plen < l) {
@@ -1459,25 +1460,13 @@ Init_stringio()
     rb_define_method(StringIO, "getc", strio_getc, 0);
     rb_define_method(StringIO, "ungetc", strio_ungetc, 1);
     rb_define_method(StringIO, "ungetbyte", strio_ungetbyte, 1);
-    rb_define_method(StringIO, "readchar", strio_readchar, 0);
     rb_define_method(StringIO, "getbyte", strio_getbyte, 0);
-    rb_define_method(StringIO, "readbyte", strio_readbyte, 0);
     rb_define_method(StringIO, "gets", strio_gets, -1);
-    rb_define_method(StringIO, "readline", strio_readline, -1);
     rb_define_method(StringIO, "readlines", strio_readlines, -1);
     rb_define_method(StringIO, "read", strio_read, -1);
-    rb_define_method(StringIO, "sysread", strio_sysread, -1);
-    rb_define_method(StringIO, "readpartial", strio_sysread, -1);
-    rb_define_method(StringIO, "read_nonblock", strio_sysread, -1);
 
     rb_define_method(StringIO, "write", strio_write, 1);
-    rb_define_method(StringIO, "<<", strio_addstr, 1);
-    rb_define_method(StringIO, "print", strio_print, -1);
-    rb_define_method(StringIO, "printf", strio_printf, -1);
     rb_define_method(StringIO, "putc", strio_putc, 1);
-    rb_define_method(StringIO, "puts", strio_puts, -1);
-    rb_define_method(StringIO, "syswrite", strio_syswrite, 1);
-    rb_define_method(StringIO, "write_nonblock", strio_syswrite, 1);
 
     rb_define_method(StringIO, "isatty", strio_isatty, 0);
     rb_define_method(StringIO, "tty?", strio_isatty, 0);
@@ -1490,4 +1479,25 @@ Init_stringio()
     rb_define_method(StringIO, "external_encoding", strio_external_encoding, 0);
     rb_define_method(StringIO, "internal_encoding", strio_internal_encoding, 0);
     rb_define_method(StringIO, "set_encoding", strio_set_encoding, -1);
+
+    {
+	VALUE mReadable = rb_define_module_under(rb_cIO, "readable");
+	rb_define_method(mReadable, "readchar", strio_readchar, 0);
+	rb_define_method(mReadable, "readbyte", strio_readbyte, 0);
+	rb_define_method(mReadable, "readline", strio_readline, -1);
+	rb_define_method(mReadable, "sysread", strio_sysread, -1);
+	rb_define_method(mReadable, "readpartial", strio_sysread, -1);
+	rb_define_method(mReadable, "read_nonblock", strio_sysread, -1);
+	rb_include_module(StringIO, mReadable);
+    }
+    {
+	VALUE mWritable = rb_define_module_under(rb_cIO, "writable");
+	rb_define_method(mWritable, "<<", strio_addstr, 1);
+	rb_define_method(mWritable, "print", strio_print, -1);
+	rb_define_method(mWritable, "printf", strio_printf, -1);
+	rb_define_method(mWritable, "puts", strio_puts, -1);
+	rb_define_method(mWritable, "syswrite", strio_syswrite, 1);
+	rb_define_method(mWritable, "write_nonblock", strio_syswrite, 1);
+	rb_include_module(StringIO, mWritable);
+    }
 }

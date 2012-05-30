@@ -7,10 +7,7 @@
 #
 # See PStore for documentation.
 
-
-require "fileutils"
 require "digest/md5"
-require "thread"
 
 #
 # PStore implements a file based persistence mechanism based on a Hash.  User
@@ -141,8 +138,8 @@ class PStore
   # Raises PStore::Error if the calling code is not in a PStore#transaction or
   # if the code is in a read-only PStore#transaction.
   #
-  def in_transaction_wr()
-    in_transaction()
+  def in_transaction_wr
+    in_transaction
     raise PStore::Error, "in read-only transaction" if @rdonly
   end
   private :in_transaction, :in_transaction_wr
@@ -200,7 +197,7 @@ class PStore
   # be read-only.  It will raise PStore::Error if called at any other time.
   #
   def []=(name, value)
-    in_transaction_wr()
+    in_transaction_wr
     @table[name] = value
   end
   #
@@ -210,7 +207,7 @@ class PStore
   # be read-only.  It will raise PStore::Error if called at any other time.
   #
   def delete(name)
-    in_transaction_wr()
+    in_transaction_wr
     @table.delete name
   end
 
@@ -310,7 +307,7 @@ class PStore
   #
   # Note that PStore does not support nested transactions.
   #
-  def transaction(read_only = false, &block)  # :yields:  pstore
+  def transaction(read_only = false)  # :yields:  pstore
     value = nil
     raise PStore::Error, "nested transaction" if !@thread_safe && @lock.locked?
     @lock.synchronize do
@@ -388,9 +385,7 @@ class PStore
     if read_only
       begin
         table = load(file)
-        if !table.is_a?(Hash)
-          raise Error, "PStore file seems to be corrupted."
-        end
+        raise Error, "PStore file seems to be corrupted." unless table.is_a?(Hash)
       rescue EOFError
         # This seems to be a newly-created file.
         table = {}
@@ -402,14 +397,12 @@ class PStore
         # This seems to be a newly-created file.
         table = {}
         checksum = empty_marshal_checksum
-        size = empty_marshal_data.size
+        size = empty_marshal_data.bytesize
       else
         table = load(data)
         checksum = Digest::MD5.digest(data)
-        size = data.size
-        if !table.is_a?(Hash)
-          raise Error, "PStore file seems to be corrupted."
-        end
+        size = data.bytesize
+        raise Error, "PStore file seems to be corrupted." unless table.is_a?(Hash)
       end
       data.replace(EMPTY_STRING)
       [table, checksum, size]
@@ -417,44 +410,17 @@ class PStore
   end
 
   def on_windows?
-    is_windows = RUBY_PLATFORM =~ /mswin/  ||
-                 RUBY_PLATFORM =~ /mingw/  ||
-                 RUBY_PLATFORM =~ /bccwin/ ||
-                 RUBY_PLATFORM =~ /wince/
+    is_windows = RUBY_PLATFORM =~ /mswin|mingw|bccwin|wince/
     self.class.__send__(:define_method, :on_windows?) do
       is_windows
     end
     is_windows
   end
 
-  # Check whether Marshal.dump supports the 'canonical' option. This option
-  # makes sure that Marshal.dump always dumps data structures in the same order.
-  # This is important because otherwise, the checksums that we generate may differ.
-  def marshal_dump_supports_canonical_option?
-    begin
-      Marshal.dump(nil, -1, true)
-      result = true
-    rescue
-      result = false
-    end
-    self.class.instance_method(:marshal_dump_supports_canonical_option?)
-    self.class.__send__(:define_method, :marshal_dump_supports_canonical_option?) do
-      result
-    end
-    result
-  end
-
   def save_data(original_checksum, original_file_size, file)
-    # We only want to save the new data if the size or checksum has changed.
-    # This results in less filesystem calls, which is good for performance.
-    if marshal_dump_supports_canonical_option?
-      new_data = Marshal.dump(@table, -1, true)
-    else
-      new_data = dump(@table)
-    end
-    new_checksum = Digest::MD5.digest(new_data)
+    new_data = dump(@table)
 
-    if new_data.size != original_file_size || new_checksum != original_checksum
+    if new_data.bytesize != original_file_size || Digest::MD5.digest(new_data) != original_checksum
       if @ultra_safe && !on_windows?
         # Windows doesn't support atomic file renames.
         save_data_with_atomic_file_rename_strategy(new_data, file)
@@ -484,8 +450,8 @@ class PStore
 
   def save_data_with_fast_strategy(data, file)
     file.rewind
-    file.truncate(0)
     file.write(data)
+    file.truncate(data.bytesize)
   end
 
 

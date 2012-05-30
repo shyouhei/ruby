@@ -64,25 +64,16 @@ rb_struct_members(VALUE s)
 static VALUE
 rb_struct_s_members_m(VALUE klass)
 {
-    VALUE members, ary;
-    VALUE *p, *pend;
+    VALUE members = rb_struct_s_members(klass);
 
-    members = rb_struct_s_members(klass);
-    ary = rb_ary_new2(RARRAY_LEN(members));
-    p = RARRAY_PTR(members); pend = p + RARRAY_LEN(members);
-    while (p < pend) {
-	rb_ary_push(ary, *p);
-	p++;
-    }
-
-    return ary;
+    return rb_ary_dup(members);
 }
 
 /*
  *  call-seq:
  *     struct.members    -> array
  *
- *  Returns an array of strings representing the names of the instance
+ *  Returns an array of symbols representing the names of the instance
  *  variables.
  *
  *     Customer = Struct.new(:name, :address, :zip)
@@ -113,7 +104,8 @@ rb_struct_getmember(VALUE obj, ID id)
 	}
     }
     rb_name_error(id, "%s is not struct member", rb_id2name(id));
-    return Qnil;		/* not reached */
+
+    UNREACHABLE;
 }
 
 static VALUE
@@ -175,7 +167,8 @@ rb_struct_set(VALUE obj, VALUE val)
     }
     rb_name_error(rb_frame_this_func(), "`%s' is not a struct member",
 		  rb_id2name(rb_frame_this_func()));
-    return Qnil;		/* not reached */
+
+    UNREACHABLE;
 }
 
 static VALUE
@@ -584,6 +577,31 @@ rb_struct_to_a(VALUE s)
     return rb_ary_new4(RSTRUCT_LEN(s), RSTRUCT_PTR(s));
 }
 
+/*
+ *  call-seq:
+ *     struct.to_h     -> hash
+ *
+ *  Returns the values for this instance as a hash with keys
+ *  corresponding to the instance variable name.
+ *
+ *     Customer = Struct.new(:name, :address, :zip)
+ *     joe = Customer.new("Joe Smith", "123 Maple, Anytown NC", 12345)
+ *     joe.to_h[:address]   #=> "123 Maple, Anytown NC"
+ */
+
+static VALUE
+rb_struct_to_h(VALUE s)
+{
+    VALUE h = rb_hash_new();
+    VALUE members = rb_struct_members(s);
+    long i;
+
+    for (i=0; i<RSTRUCT_LEN(s); i++) {
+	rb_hash_aset(h, rb_ary_entry(members, i), RSTRUCT_PTR(s)[i]);
+    }
+    return h;
+}
+
 /* :nodoc: */
 VALUE
 rb_struct_init_copy(VALUE copy, VALUE s)
@@ -617,7 +635,8 @@ rb_struct_aref_id(VALUE s, ID id)
 	}
     }
     rb_name_error(id, "no member '%s' in struct", rb_id2name(id));
-    return Qnil;		/* not reached */
+
+    UNREACHABLE;
 }
 
 /*
@@ -681,6 +700,8 @@ rb_struct_aset_id(VALUE s, ID id, VALUE val)
 	}
     }
     rb_name_error(id, "no member '%s' in struct", rb_id2name(id));
+
+    UNREACHABLE;
 }
 
 /*
@@ -776,9 +797,7 @@ rb_struct_select(int argc, VALUE *argv, VALUE s)
     VALUE result;
     long i;
 
-    if (argc > 0) {
-	rb_raise(rb_eArgError, "wrong number of arguments (%d for 0)", argc);
-    }
+    rb_check_arity(argc, 0, 0);
     RETURN_ENUMERATOR(s, 0, 0);
     result = rb_ary_new();
     for (i = 0; i < RSTRUCT_LEN(s); i++) {
@@ -958,6 +977,7 @@ Init_Struct(void)
     rb_define_method(rb_cStruct, "inspect", rb_struct_inspect, 0);
     rb_define_alias(rb_cStruct,  "to_s", "inspect");
     rb_define_method(rb_cStruct, "to_a", rb_struct_to_a, 0);
+    rb_define_method(rb_cStruct, "to_h", rb_struct_to_h, 0);
     rb_define_method(rb_cStruct, "values", rb_struct_to_a, 0);
     rb_define_method(rb_cStruct, "size", rb_struct_size, 0);
     rb_define_method(rb_cStruct, "length", rb_struct_size, 0);

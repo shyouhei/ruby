@@ -51,7 +51,6 @@ y.tab.c
 /configure
 /doc/capi
 /enc.mk
-/enc/trans/*.c
 /encdb.h
 /exts.mk
 /goruby
@@ -84,6 +83,7 @@ y.tab.c
 /tmp
 /transdb.h
 /uncommon.mk
+/verconf.h
 /web
 /yasmdata.rb
 
@@ -96,17 +96,9 @@ y.tab.c
 # /ext/
 /ext/extinit.c
 
-# /ext/dl/
-/ext/dl/*.func
-
 # /ext/dl/callback/
-/ext/dl/callback/*.func
 /ext/dl/callback/callback-*.c
 /ext/dl/callback/callback.c
-
-# /ext/iconv/
-/ext/iconv/config.charset
-/ext/iconv/iconv.rb
 
 # /ext/ripper/
 /ext/ripper/eventids1.c

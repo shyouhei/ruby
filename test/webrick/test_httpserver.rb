@@ -115,10 +115,10 @@ class TestWEBrickHTTPServer < Test::Unit::TestCase
       host3  = httpd(addr1, port1, name2, alias1),
       host4  = httpd(addr1, port2, name1, nil),
       host5  = httpd(addr1, port2, name2, alias1),
-      host6  = httpd(addr1, port2, name3, alias2),
+               httpd(addr1, port2, name3, alias2),
       host7  = httpd(addr2, nil,   name1, nil),
       host8  = httpd(addr2, nil,   name2, alias1),
-      host9  = httpd(addr2, nil,   name3, alias2),
+               httpd(addr2, nil,   name3, alias2),
       host10 = httpd(local, nil,   nil,   nil),
       host11 = httpd(nil,   port3, nil,   nil),
     ].sort_by{ rand }
@@ -235,7 +235,7 @@ class TestWEBrickHTTPServer < Test::Unit::TestCase
       }
       server.virtual_host(WEBrick::HTTPServer.new(vhost_config))
 
-      true while server.status != :Running
+      Thread.pass while server.status != :Running
       assert_equal(started, 1, log.call)
       assert_equal(stopped, 0, log.call)
       assert_equal(accepted, 0, log.call)
@@ -256,6 +256,70 @@ class TestWEBrickHTTPServer < Test::Unit::TestCase
     }
     assert_equal(started, 1)
     assert_equal(stopped, 1)
+  end
+
+  # This class is needed by test_response_io_with_chunked_set method
+  class EventManagerForChunkedResponseTest
+    def initialize
+      @listeners = []
+    end
+    def add_listener( &block )
+      @listeners << block
+    end
+    def raise_str_event( str )
+      @listeners.each{ |e| e.call( :str, str ) }
+    end
+    def raise_close_event()
+      @listeners.each{ |e| e.call( :cls ) }
+    end
+  end
+  def test_response_io_with_chunked_set
+    evt_man = EventManagerForChunkedResponseTest.new
+    t = Thread.new do
+      begin
+        config = {
+          :ServerName => "localhost"
+        }
+        TestWEBrick.start_httpserver(config) do |server, addr, port, log|
+          body_strs = [ 'aaaaaa', 'bb', 'cccc' ]
+          server.mount_proc( "/", ->( req, res ){
+            # Test for setting chunked...
+            res.chunked = true
+            r,w = IO.pipe
+            evt_man.add_listener do |type,str|
+              type == :cls ? ( w.close ) : ( w << str )
+            end
+            res.body = r
+          } )
+          Thread.pass while server.status != :Running
+          http = Net::HTTP.new(addr, port)
+          req  = Net::HTTP::Get.new("/")
+          http.request(req) do |res|
+            i = 0
+            evt_man.raise_str_event( body_strs[i] )
+            res.read_body do |s|
+              assert_equal( body_strs[i], s )
+              i += 1
+              if i < body_strs.length
+                evt_man.raise_str_event( body_strs[i] )
+              else
+                evt_man.raise_close_event()
+              end
+            end
+            assert_equal( body_strs.length, i )
+          end
+        end
+      rescue => err
+        flunk( 'exception raised in thread: ' + err.to_s )
+      end
+    end
+    if t.join( 3 ).nil?
+      evt_man.raise_close_event()
+      flunk( 'timeout' )
+      if t.join( 1 ).nil?
+        Thread.kill t
+      end
+    end
   end
 
   def test_response_io_without_chunked_set
@@ -292,7 +356,7 @@ class TestWEBrickHTTPServer < Test::Unit::TestCase
       :RequestHandler => Proc.new{|req, res| requested += 1 },
     }
     TestWEBrick.start_httpserver(config){|server, addr, port, log|
-      true while server.status != :Running
+      Thread.pass while server.status != :Running
 
       http = Net::HTTP.new(addr, port)
       req = Net::HTTP::Get.new("/")

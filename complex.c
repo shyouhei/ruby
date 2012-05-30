@@ -887,7 +887,7 @@ nucomp_expt(VALUE self, VALUE other)
 		    if (r)
 			break;
 
-		    x = f_complex_new2(CLASS_OF(self),
+		    x = nucomp_s_new_internal(CLASS_OF(self),
 				       f_sub(f_mul(dat->real, dat->real),
 					     f_mul(dat->imag, dat->imag)),
 				       f_mul(f_mul(TWO, dat->real), dat->imag));
@@ -1173,7 +1173,7 @@ nucomp_eql_p(VALUE self, VALUE other)
 inline static VALUE
 f_signbit(VALUE x)
 {
-#if defined(HAVE_SIGNBIT) && defined(__GNUC__) && defined(__sun__) && \
+#if defined(HAVE_SIGNBIT) && defined(__GNUC__) && defined(__sun) && \
     !defined(signbit)
     extern int signbit(double);
 #endif
@@ -1260,6 +1260,8 @@ nucomp_marshal_load(VALUE self, VALUE a)
 {
     get_dat1(self);
     Check_Type(a, T_ARRAY);
+    if (RARRAY_LEN(a) != 2)
+	rb_raise(rb_eArgError, "marshaled complex must have an array whose length is 2 but %ld", RARRAY_LEN(a));
     dat->real = RARRAY_PTR(a)[0];
     dat->imag = RARRAY_PTR(a)[1];
     rb_copy_generic_ivar(self, a);
@@ -1374,7 +1376,7 @@ nucomp_rationalize(int argc, VALUE *argv, VALUE self)
        rb_raise(rb_eRangeError, "can't convert %s into Rational",
                 StringValuePtr(s));
     }
-    return rb_funcall(dat->real, rb_intern("rationalize"), argc, argv);
+    return rb_funcall2(dat->real, rb_intern("rationalize"), argc, argv);
 }
 
 /*
@@ -1981,6 +1983,9 @@ Init_Complex(void)
     rb_define_method(rb_cFloat, "angle", float_arg, 0);
     rb_define_method(rb_cFloat, "phase", float_arg, 0);
 
+    /*
+     * The imaginary unit.
+     */
     rb_define_const(rb_cComplex, "I",
 		    f_complex_new_bang2(rb_cComplex, ZERO, ONE));
 }

@@ -79,7 +79,6 @@ require 'thread'
 # same Tempfile object from multiple threads then you should protect it with a
 # mutex.
 class Tempfile < DelegateClass(File)
-  MAX_TRY = 10  # :nodoc:
   include Dir::Tmpname
 
   # call-seq:
@@ -127,6 +126,9 @@ class Tempfile < DelegateClass(File)
   # If Tempfile.new cannot find a unique filename within a limited
   # number of tries, then it will raise an exception.
   def initialize(basename, *rest)
+    if block_given?
+      warn "Tempfile.new doesn't call the given block."
+    end
     @data = []
     @clean_proc = Remover.new(@data)
     ObjectSpace.define_finalizer(self, @clean_proc)
@@ -141,10 +143,8 @@ class Tempfile < DelegateClass(File)
       else
         opts = perm
       end
-      self.class.locking(tmpname) do
-        @data[1] = @tmpfile = File.open(tmpname, mode, opts)
-        @data[0] = @tmpname = tmpname
-      end
+      @data[1] = @tmpfile = File.open(tmpname, mode, opts)
+      @data[0] = @tmpname = tmpname
       @mode = mode & ~(File::CREAT|File::EXCL)
       perm or opts.freeze
       @opts = opts
@@ -162,9 +162,12 @@ class Tempfile < DelegateClass(File)
   end
 
   def _close    # :nodoc:
-    @tmpfile.close if @tmpfile
-    @tmpfile = nil
-    @data[1] = nil if @data
+    begin
+      @tmpfile.close if @tmpfile
+    ensure
+      @tmpfile = nil
+      @data[1] = nil if @data
+    end
   end
   protected :_close
 
@@ -224,18 +227,17 @@ class Tempfile < DelegateClass(File)
   #                    # to do so again.
   #   end
   def unlink
-    # keep this order for thread safeness
     return unless @tmpname
     begin
-      if File.exist?(@tmpname)
-        File.unlink(@tmpname)
-      end
-      # remove tmpname from remover
-      @data[0] = @data[2] = nil
-      @tmpname = nil
+      File.unlink(@tmpname)
+    rescue Errno::ENOENT
     rescue Errno::EACCES
       # may not be able to unlink on Windows; just ignore
+      return
     end
+    # remove tmpname from remover
+    @data[0] = @data[1] = nil
+    @tmpname = nil
   end
   alias delete unlink
 
@@ -267,20 +269,22 @@ class Tempfile < DelegateClass(File)
     end
 
     def call(*args)
-      if @pid == $$
-        path, tmpfile = *@data
+      return if @pid != $$
 
-        STDERR.print "removing ", path, "..." if $DEBUG
+      path, tmpfile = *@data
 
-        tmpfile.close if tmpfile
+      STDERR.print "removing ", path, "..." if $DEBUG
 
-        # keep this order for thread safeness
-        if path
-          File.unlink(path) if File.exist?(path)
+      tmpfile.close if tmpfile
+
+      if path
+        begin
+          File.unlink(path)
+        rescue Errno::ENOENT
         end
-
-        STDERR.print "done\n" if $DEBUG
       end
+
+      STDERR.print "done\n" if $DEBUG
     end
   end
   # :startdoc:
@@ -292,7 +296,7 @@ class Tempfile < DelegateClass(File)
     #
     # If a block is given, then a Tempfile object will be constructed,
     # and the block is run with said object as argument. The Tempfile
-    # oject will be automatically closed after the block terminates.
+    # object will be automatically closed after the block terminates.
     # The call returns the value of the block.
     #
     # In any case, all arguments (+*args+) will be passed to Tempfile.new.
@@ -320,26 +324,6 @@ class Tempfile < DelegateClass(File)
       else
         tempfile
       end
-    end
-
-    # :stopdoc:
-
-    # yields with locking for +tmpname+ and returns the result of the
-    # block.
-    def locking(tmpname)
-      lock = tmpname + '.lock'
-      mkdir(lock)
-      yield
-    ensure
-      rmdir(lock) if lock
-    end
-
-    def mkdir(*args)
-      Dir.mkdir(*args)
-    end
-
-    def rmdir(*args)
-      Dir.rmdir(*args)
     end
   end
 end

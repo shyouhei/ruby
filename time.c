@@ -845,6 +845,7 @@ static VALUE obj2vint(VALUE obj);
 static int month_arg(VALUE arg);
 static void validate_utc_offset(VALUE utc_offset);
 static void validate_vtm(struct vtm *vtm);
+static int obj2subsecx(VALUE obj, VALUE *subsecx);
 
 static VALUE time_gmtime(VALUE);
 static VALUE time_localtime(VALUE);
@@ -1799,7 +1800,7 @@ localtimew(wideval_t timew, struct vtm *result)
 struct time_object {
     wideval_t timew; /* time_t value * TIME_SCALE.  possibly Rational. */
     struct vtm vtm;
-    int gmt;
+    int gmt; /* 0:utc 1:localtime 2:fixoff */
     int tm_got;
 };
 
@@ -1820,7 +1821,10 @@ struct time_object {
      (tobj)->vtm.utc_offset = (off), \
      (tobj)->vtm.zone = NULL)
 
-#define TIME_COPY_GMT(tobj1, tobj2) ((tobj1)->gmt = (tobj2)->gmt)
+#define TIME_COPY_GMT(tobj1, tobj2) \
+    ((tobj1)->gmt = (tobj2)->gmt, \
+     (tobj1)->vtm.utc_offset = (tobj2)->vtm.utc_offset, \
+     (tobj1)->vtm.zone = (tobj2)->vtm.zone)
 
 static VALUE time_get_tm(VALUE, struct time_object *);
 #define MAKE_TM(time, tobj) \
@@ -2107,18 +2111,27 @@ utc_offset_arg(VALUE arg)
 {
     VALUE tmp;
     if (!NIL_P(tmp = rb_check_string_type(arg))) {
-        int n;
+        int n = 0;
         char *s = RSTRING_PTR(tmp);
-        if (!rb_enc_str_asciicompat_p(tmp) ||
-            RSTRING_LEN(tmp) != 6 ||
-            (s[0] != '+' && s[0] != '-') ||
-            !ISDIGIT(s[1]) ||
-            !ISDIGIT(s[2]) ||
-            s[3] != ':' ||
-            !ISDIGIT(s[4]) ||
-            !ISDIGIT(s[5]))
+        if (!rb_enc_str_asciicompat_p(tmp)) {
+	  invalid_utc_offset:
             rb_raise(rb_eArgError, "\"+HH:MM\" or \"-HH:MM\" expected for utc_offset");
-        n = (s[1] * 10 + s[2] - '0' * 11) * 3600;
+	}
+	switch (RSTRING_LEN(tmp)) {
+	  case 9:
+	    if (s[6] != ':') goto invalid_utc_offset;
+	    if (!ISDIGIT(s[7]) || !ISDIGIT(s[8])) goto invalid_utc_offset;
+	    n += (s[7] * 10 + s[8] - '0' * 11);
+	  case 6:
+	    if (s[0] != '+' && s[0] != '-') goto invalid_utc_offset;
+	    if (!ISDIGIT(s[1]) || !ISDIGIT(s[2])) goto invalid_utc_offset;
+	    if (s[3] != ':') goto invalid_utc_offset;
+	    if (!ISDIGIT(s[4]) || !ISDIGIT(s[5])) goto invalid_utc_offset;
+	    break;
+	  default:
+	    goto invalid_utc_offset;
+	}
+        n += (s[1] * 10 + s[2] - '0' * 11) * 3600;
         n += (s[4] * 10 + s[5] - '0' * 11) * 60;
         if (s[0] == '-')
             n = -n;
@@ -2153,15 +2166,8 @@ time_init_1(int argc, VALUE *argv, VALUE time)
 
     vtm.min  = NIL_P(v[4]) ? 0 : obj2int(v[4]);
 
-    vtm.sec = 0;
     vtm.subsecx = INT2FIX(0);
-    if (!NIL_P(v[5])) {
-        VALUE sec = num_exact(v[5]);
-        VALUE subsec;
-        divmodv(sec, INT2FIX(1), &sec, &subsec);
-        vtm.sec = NUM2INT(sec);
-        vtm.subsecx = w2v(rb_time_magnify(v2w(subsec)));
-    }
+    vtm.sec  = NIL_P(v[5]) ? 0 : obj2subsecx(v[5], &vtm.subsecx);
 
     vtm.isdst = -1;
     vtm.utc_offset = Qnil;
@@ -2492,6 +2498,8 @@ time_s_now(VALUE klass)
  *  <i>seconds_with_frac</i> and <i>microseconds_with_frac</i>
  *  can be Integer, Float, Rational, or other Numeric.
  *  non-portable feature allows the offset to be negative on some systems.
+ *
+ *  If a numeric argument is given, the result is in local time.
  *
  *     Time.at(0)            #=> 1969-12-31 18:00:00 -0600
  *     Time.at(Time.at(0))   #=> 1969-12-31 18:00:00 -0600
@@ -4285,7 +4293,7 @@ time_to_a(VALUE time)
 
 #define SMALLBUF 100
 static size_t
-rb_strftime_alloc(char **buf, const char *format, rb_encoding *enc,
+rb_strftime_alloc(char **buf, VALUE formatv, const char *format, rb_encoding *enc,
                   struct vtm *vtm, wideval_t timew, int gmt)
 {
     size_t size, len, flen;
@@ -4323,6 +4331,7 @@ rb_strftime_alloc(char **buf, const char *format, rb_encoding *enc,
 	if (len > 0) break;
 	xfree(*buf);
 	if (size >= 1024 * flen) {
+	    if (!NIL_P(formatv)) rb_sys_fail_str(formatv);
 	    rb_sys_fail(format);
 	    break;
 	}
@@ -4340,7 +4349,7 @@ strftimev(const char *fmt, VALUE time, rb_encoding *enc)
 
     GetTimeval(time, tobj);
     MAKE_TM(time, tobj);
-    len = rb_strftime_alloc(&buf, fmt, enc, &tobj->vtm, tobj->timew, TIME_UTC_P(tobj));
+    len = rb_strftime_alloc(&buf, Qnil, fmt, enc, &tobj->vtm, tobj->timew, TIME_UTC_P(tobj));
     str = rb_enc_str_new(buf, len, enc);
     if (buf != buffer) xfree(buf);
     return str;
@@ -4413,16 +4422,20 @@ strftimev(const char *fmt, VALUE time, rb_encoding *enc)
  *
  *      %L - Millisecond of the second (000..999)
  *      %N - Fractional seconds digits, default is 9 digits (nanosecond)
- *              %3N  millisecond (3 digits)
- *              %6N  microsecond (6 digits)
- *              %9N  nanosecond (9 digits)
- *              %12N picosecond (12 digits)
+ *              %3N  milli second (3 digits)
+ *              %6N  micro second (6 digits)
+ *              %9N  nano second (9 digits)
+ *              %12N pico second (12 digits)
+ *              %15N femto second (15 digits)
+ *              %18N atto second (18 digits)
+ *              %21N zepto second (21 digits)
+ *              %24N yocto second (24 digits)
  *
  *    Time zone:
  *      %z - Time zone as hour and minute offset from UTC (e.g. +0900)
  *              %:z - hour and minute offset from UTC with a colon (e.g. +09:00)
  *              %::z - hour, minute and second offset from UTC (e.g. +09:00:00)
- *      %Z - Time zone abbreviation name
+ *      %Z - Time zone abbreviation name or something similar information.
  *
  *    Weekday:
  *      %A - The full weekday name (``Sunday'')
@@ -4558,7 +4571,8 @@ time_strftime(VALUE time, VALUE format)
 
 	str = rb_str_new(0, 0);
 	while (p < pe) {
-	    len = rb_strftime_alloc(&buf, p, enc, &tobj->vtm, tobj->timew, TIME_UTC_P(tobj));
+	    len = rb_strftime_alloc(&buf, format, p, enc,
+				    &tobj->vtm, tobj->timew, TIME_UTC_P(tobj));
 	    rb_str_cat(str, buf, len);
 	    p += strlen(p);
 	    if (buf != buffer) {
@@ -4571,7 +4585,7 @@ time_strftime(VALUE time, VALUE format)
 	return str;
     }
     else {
-	len = rb_strftime_alloc(&buf, RSTRING_PTR(format), enc,
+	len = rb_strftime_alloc(&buf, format, RSTRING_PTR(format), enc,
 				&tobj->vtm, tobj->timew, TIME_UTC_P(tobj));
     }
     str = rb_enc_str_new(buf, len, enc);
@@ -4846,6 +4860,12 @@ time_load(VALUE klass, VALUE str)
  *  with each other -- times that are apparently equal when displayed may be
  *  different when compared.
  *
+ *  Since Ruby 1.9.2, Time implementation uses a signed 63 bit integer, Bignum or Rational.
+ *  The integer is a number of nanoseconds since the _Epoch_ which can
+ *  represent 1823-11-12 to 2116-02-20.
+ *  When Bignum or Rational is used (before 1823, after 2116, under nanosecond),
+ *  Time works slower than the integer is used.
+ *
  *  = Examples
  *
  *  All of these examples were done using the EST timezone which is GMT-5.
@@ -4882,7 +4902,7 @@ time_load(VALUE klass, VALUE str)
  *    t = Time.new(1993, 02, 24, 12, 0, 0, "+09:00")
  *
  *  Was that a monday?
- *  
+ *
  *    t.monday? #=> false
  *
  *  What year was that again?
@@ -4897,7 +4917,7 @@ time_load(VALUE klass, VALUE str)
  *
  *    t + (60*60*24*365) #=> 1994-02-24 12:00:00 +0900
  *
- *  How many second was that from the Unix Epoc?
+ *  How many second was that from the Unix Epoch?
  *
  *    t.to_i #=> 730522800
  *
@@ -4905,7 +4925,7 @@ time_load(VALUE klass, VALUE str)
  *
  *    t1 = Time.new(2010)
  *    t2 = Time.new(2011)
- *    
+ *
  *    t1 == t2 #=> false
  *    t1 == t1 #=> true
  *    t1 <  t2 #=> true

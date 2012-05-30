@@ -23,6 +23,12 @@ class TestResolvDNS < Test::Unit::TestCase
   end
 
   def test_query_ipv4_address
+    begin
+      OpenSSL
+    rescue LoadError
+      skip 'autoload problem. see [ruby-dev:45021][Bug #5786]'
+    end if defined?(OpenSSL)
+
     with_udp('127.0.0.1', 0) {|u|
       _, server_port, _, server_address = u.addr
       begin
@@ -102,6 +108,32 @@ class TestResolvDNS < Test::Unit::TestCase
       ensure
         th.join
       end
+    }
+  end
+
+  def test_query_ipv4_address_timeout
+    with_udp('127.0.0.1', 0) {|u|
+      _, port , _, host = u.addr
+      start = nil
+      rv = Resolv::DNS.open(:nameserver_port => [[host, port]]) {|dns|
+        dns.timeouts = 0.1
+        start = Time.now
+        dns.getresources("foo.example.org", Resolv::DNS::Resource::IN::A)
+      }
+      t2 = Time.now
+      diff = t2 - start
+      assert rv.empty?, "unexpected: #{rv.inspect} (expected empty)"
+      assert_operator 0.1, :<=, diff
+
+      rv = Resolv::DNS.open(:nameserver_port => [[host, port]]) {|dns|
+        dns.timeouts = [ 0.1, 0.2 ]
+        start = Time.now
+        dns.getresources("foo.example.org", Resolv::DNS::Resource::IN::A)
+      }
+      t2 = Time.now
+      diff = t2 - start
+      assert rv.empty?, "unexpected: #{rv.inspect} (expected empty)"
+      assert_operator 0.3, :<=, diff
     }
   end
 

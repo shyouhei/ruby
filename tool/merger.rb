@@ -44,21 +44,23 @@ def version
   return v, p
 end
 
-def interactive str
+def interactive str, editfile = nil
   loop do
     yield
-    STDERR.puts str
+    STDERR.puts "#{str} ([y]es|[a]bort|[r]etry#{'|[e]dit' if editfile})"
     case STDIN.gets
     when /\Aa/i then exit
     when /\Ar/i then redo
     when /\Ay/i then break
+    when /\Ae/i then system(ENV["EDITOR"], editfile)
     else exit
     end
   end
 end
 
 def version_up
-  d = Date.today
+  d = DateTime.now
+  d = d.new_offset(Rational(9,24)) # we need server locale (i.e. japanese) time
   system *%w'svn revert version.h'
   v, p = version
 
@@ -104,14 +106,14 @@ def tag intv_p = false
   z = 'v' + x + '_' + p
   w = $repos + 'tags/' + z
   if intv_p
-    interactive "OK? svn cp -m \"add tag #{z}\" #{y} #{w} ([y]es|[a]bort|[r]etry)" do
+    interactive "OK? svn cp -m \"add tag #{z}\" #{y} #{w}" do
     end
   end
   system *%w'svn cp -m' + ["add tag #{z}"] + [y, w]
 end
 
 def default_merge_branch
-  /branches\/ruby_1_8_/ =~ IO.binread(".svn/entries", 100) ? 'branches/ruby_1_8' : 'trunk'
+  %r{^URL: .*/branches/ruby_1_8_} =~ `svn info` ? 'branches/ruby_1_8' : 'trunk'
 end
 
 case ARGV[0]
@@ -124,6 +126,8 @@ when nil, "-h", "--help"
   help
   exit
 else
+  system 'svn up'
+
   q = $repos + (ARGV[1] || default_merge_branch)
   revs = ARGV[0].split /,\s*/
   log = ''
@@ -131,9 +135,9 @@ else
 
   revs.each do |rev|
     case rev
-    when /\A\d+:\d+\z/
+    when /\Ar?\d+:r?\d+\z/
       r = ['-r', rev]
-    when /\A\d+\z/
+    when /\Ar?\d+\z/
       r = ['-c', rev]
     when nil then
       puts "#$0 revision"
@@ -150,7 +154,7 @@ else
     if log_svn.empty?
       log_svn = IO.popen %w'svn log ' + r + [q] do |f|
         f.read
-      end
+      end.sub(/\A-+\nr.*\n/, '').sub(/\n-+\n\z/, '').gsub(/^(?=\S)/, "\t")
     end
 
     a = %w'svn merge --accept=postpone' + r + [q]
@@ -178,22 +182,17 @@ else
   f.write log_svn
   f.flush
   f.close
-  f.open # avoid gc
 
-  interactive 'conflicts resolved? (y:yes, a:abort, r:retry, otherwise abort)' do
-    f.rewind
-    IO.popen('-', 'wb') do |g|
-      if g
-        g << `svn stat`
-        g << "\n\n"
-        g << f.read
-        g << "\n\n"
-        g << `svn diff --diff-cmd=diff -x -upw`
-      else
-        exec 'less'
-      end
+  interactive 'conflicts resolved?', f.path do
+    IO.popen(ENV["PAGER"] || "less", "w") do |g|
+      g << `svn stat`
+      g << "\n\n"
+      f.open
+      g << f.read
+      f.close
+      g << "\n\n"
+      g << `svn diff --diff-cmd=diff -x -upw`
     end
-    Process.waitall
   end
 
   if system *%w'svn ci -F' + [f.path]

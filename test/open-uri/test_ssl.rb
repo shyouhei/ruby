@@ -1,13 +1,18 @@
 require 'test/unit'
 require 'open-uri'
-require 'openssl'
 require 'stringio'
 require 'webrick'
-require 'webrick/https'
+begin
+  require 'openssl'
+  require 'webrick/https'
+rescue LoadError
+end
 require 'webrick/httpproxy'
 
 class TestOpenURISSL < Test::Unit::TestCase
+end
 
+class TestOpenURISSL
   NullLog = Object.new
   def NullLog.<<(arg)
   end
@@ -26,10 +31,13 @@ class TestOpenURISSL < Test::Unit::TestCase
         :Port => 0})
       _, port, _, host = srv.listeners[0].addr
       begin
-        th = srv.start
+        srv.start
         yield srv, dr, "https://#{host}:#{port}"
       ensure
         srv.shutdown
+        until srv.status == :Stop
+          sleep 0.1
+        end
       end
     }
   end
@@ -48,7 +56,7 @@ class TestOpenURISSL < Test::Unit::TestCase
     with_https {|srv, dr, url|
       cacert_filename = "#{dr}/cacert.pem"
       open(cacert_filename, "w") {|f| f << CA_CERT }
-      open("#{dr}/data", "w") {|f| f << "ddd" }
+      srv.mount_proc("/data", lambda { |req, res| res.body = "ddd" } )
       open("#{url}/data", :ssl_ca_cert => cacert_filename) {|f|
         assert_equal("200", f.status[0])
         assert_equal("ddd", f.read)
@@ -77,8 +85,8 @@ class TestOpenURISSL < Test::Unit::TestCase
         :Port => 0})
       _, p_port, _, p_host = prxy.listeners[0].addr
       begin
-        th = prxy.start
-        open("#{dr}/proxy", "w") {|f| f << "proxy" }
+        prxy.start
+        srv.mount_proc("/proxy", lambda { |req, res| res.body = "proxy" } )
         open("#{url}/proxy", :proxy=>"http://#{p_host}:#{p_port}/", :ssl_ca_cert => cacert_filename) {|f|
           assert_equal("200", f.status[0])
           assert_equal("proxy", f.read)
@@ -93,11 +101,14 @@ class TestOpenURISSL < Test::Unit::TestCase
         sio.truncate(0); sio.rewind
       ensure
         prxy.shutdown
+        until prxy.status == :Stop
+          sleep 0.1
+        end
       end
     }
   end
 
-end
+end if defined?(OpenSSL)
 
 # mkdir demoCA demoCA/private demoCA/newcerts
 # touch demoCA/index.txt

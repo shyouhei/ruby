@@ -312,6 +312,10 @@ Rubyが用意している関数を用いてください．
   rb_ary_shift(VALUE ary)
   rb_ary_unshift(VALUE ary, VALUE val)
 
+  rb_ary_cat(VALUE ary, const VALUE *ptr, long len)
+
+    配列aryにptrからlen個のオブジェクトを追加する．
+
 2．Rubyの機能を使う
 
 原理的にRubyで書けることはCでも書けます．RubyそのものがCで記
@@ -496,12 +500,14 @@ IDとは変数名，メソッド名を表す整数です．Rubyの中では
 
   rb_to_id(VALUE symbol)
   rb_check_id(volatile VALUE *name)
+  rb_check_id_cstr(const char *name, long len, rb_encoding *enc)
 
 もし引数がシンボルでも文字列でもなければ、to_strメソッドで文
-字列に変換しようとします．後者の関数はその変換結果を*nameに保
+字列に変換しようとします．第二の関数はその変換結果を*nameに保
 存し,その名前が既知のシンボルでない場合は0を返します．この関
 数が0以外を返した場合は*nameは常にシンボルか文字列であり、0を
-返した場合は常に文字列です．
+返した場合は常に文字列です．第三の関数はRubyの文字列ではなく
+NUL終端されたCの文字列を使います．
 
 2.2.3 CからRubyのメソッドを呼び出す
 
@@ -1336,12 +1342,24 @@ VALUE rb_protect(VALUE (*func) (VALUE), VALUE arg, int *state)
   関数funcをargを引数として実行し, 例外が発生しなければその戻
   り値を返す．例外が発生した場合は, *stateに非0をセットして
   Qnilを返す．
+  rb_jump_tag()を呼ばずに捕捉した例外を無視する場合には，
+  rb_set_errinfo(Qnil)でエラー情報をクリアしなければならない．
 
 void rb_jump_tag(int state)
 
   rb_protect()やrb_eval_string_protect()で捕捉された例外を再
   送する．stateはそれらの関数から返された値でなければならない．
   この関数は直接の呼び出し元に戻らない．
+
+void rb_iter_break()
+
+  現在の最も内側のブロックを終了する．この関数は直接の呼び出
+  し元に戻らない．
+
+void rb_iter_break_value(VALUE value)
+
+  現在の最も内側のブロックをvalueで終了する．ブロックは引数で
+  与えられたvalueを返す．この関数は直接の呼び出し元に戻らない．
 
 ** 例外・エラー
 

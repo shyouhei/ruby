@@ -704,14 +704,20 @@ def citrus_decode_mapsrc(ces, csid, mapsrcs)
   mapsrcs.split(',').each do |mapsrc|
     path = [$srcdir]
     mode = nil
-    if mapsrc.rindex('UCS', 0)
+    if mapsrc.rindex(/UCS(?:@[A-Z]+)?/, 0)
       mode = :from_ucs
-      from = mapsrc[4..-1]
+      from = mapsrc[$&.size+1..-1]
       path << SUBDIR.find{|x| from.rindex(x, 0) }
     else
       mode = :to_ucs
       path << SUBDIR.find{|x| mapsrc.rindex(x, 0) }
     end
+    if /\bUCS@(BMP|SMP|SIP|TIP|SSP)\b/ =~ mapsrc
+      plane = {"BMP"=>0, "SMP"=>1, "SIP"=>2, "TIP"=>3, "SSP"=>14}[$1]
+    else
+      plane = 0
+    end
+    plane <<= 16
     path << mapsrc.gsub(':', '@')
     path = File.join(*path)
     path << ".src"
@@ -730,14 +736,14 @@ def citrus_decode_mapsrc(ces, csid, mapsrcs)
           when /0x(\w+)\s*-\s*0x(\w+)\s*=\s*INVALID/
             # Citrus OOB_MODE
           when /(0x\w+)\s*=\s*(0x\w+)/
-            table.push << [$1.hex, citrus_cstomb(ces, csid, $2.hex)]
+            table.push << [plane | $1.hex, citrus_cstomb(ces, csid, $2.hex)]
           else
             raise "unknown notation '%s'"% l
           end
         when :to_ucs
           case l
           when /(0x\w+)\s*=\s*(0x\w+)/
-            table.push << [citrus_cstomb(ces, csid, $1.hex), $2.hex]
+            table.push << [citrus_cstomb(ces, csid, $1.hex), plane | $2.hex]
           else
             raise "unknown notation '%s'"% l
           end
@@ -753,13 +759,13 @@ def import_ucm(path)
   from_ucs = []
   File.foreach(File.join($srcdir, "ucm", path)) do |line|
     uc, bs, fb = nil
-    if /^<U(\h+)>\s*([\+\hx\\]+)\s*\|(\d)/ =~ line
+    if /^<U([0-9a-fA-F]+)>\s*([\+0-9a-fA-Fx\\]+)\s*\|(\d)/ =~ line
       uc = $1.hex
       bs = $2.delete('x\\')
       fb = $3.to_i
       next if uc < 128 && uc == bs.hex
-    elsif /^([<U\h>+]+)\s*([\+\hx\\]+)\s*\|(\d)/ =~ line
-      uc = $1.scan(/\h+>/).map(&:hex).pack("U*").unpack("H*")[0]
+    elsif /^([<U0-9a-fA-F>+]+)\s*([\+0-9a-fA-Fx\\]+)\s*\|(\d)/ =~ line
+      uc = $1.scan(/[0-9a-fA-F]+>/).map(&:hex).pack("U*").unpack("H*")[0]
       bs = $2.delete('x\\')
       fb = $3.to_i
     end
@@ -919,6 +925,10 @@ ValidEncoding = {
   'CP51932'     => '{00-7f}
                     {a1-fe}{a1-fe}
                     8e{a1-fe}',
+  'EUC-JP-2004' => '{00-7f}
+                    {a1-fe}{a1-fe}
+                    8e{a1-fe}
+                    8f{a1-fe}{a1-fe}',
   'Shift_JIS'   => '{00-7f}
                     {81-9f,e0-fc}{40-7e,80-fc}
                     {a1-df}',

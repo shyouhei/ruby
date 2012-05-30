@@ -286,15 +286,23 @@ rb_mod_nesting(void)
 /*
  *  call-seq:
  *     Module.constants   -> array
+ *     Module.constants(inherited)   -> array
  *
- *  Returns an array of the names of all constants defined in the
- *  system. This list includes the names of all modules and classes.
+ *  In the first form, returns an array of the names of all
+ *  constants accessible from the point of call.
+ *  This list includes the names of all modules and classes
+ *  defined in the global scope.
  *
- *     p Module.constants.sort[1..5]
+ *     Module.constants.first(4)
+ *        # => [:ARGF, :ARGV, :ArgumentError, :Array]
  *
- *  <em>produces:</em>
+ *     Module.constants.include?(:SEEK_SET)   # => false
  *
- *     ["ARGV", "ArgumentError", "Array", "Bignum", "Binding"]
+ *     class IO
+ *       Module.constants.include?(:SEEK_SET) # => true
+ *     end
+ *
+ *  The second form calls the instance method +constants+.
  */
 
 static VALUE
@@ -379,7 +387,7 @@ setup_exception(rb_thread_t *th, int tag, volatile VALUE mesg)
 	else {
 	    at = get_backtrace(mesg);
 	    if (NIL_P(at)) {
-		at = rb_make_backtrace();
+		at = rb_vm_backtrace_object();
 		if (OBJ_FROZEN(mesg)) {
 		    mesg = rb_obj_dup(mesg);
 		}
@@ -508,7 +516,8 @@ rb_f_raise(int argc, VALUE *argv)
 	}
     }
     rb_raise_jump(rb_make_exception(argc, argv));
-    return Qnil;		/* not reached */
+
+    UNREACHABLE;
 }
 
 static VALUE
@@ -547,7 +556,7 @@ make_exception(int argc, VALUE *argv, int isstr)
 	}
 	break;
       default:
-	rb_raise(rb_eArgError, "wrong number of arguments (%d for 0..3)", argc);
+	rb_check_arity(argc, 0, 3);
 	break;
     }
     if (argc > 0) {
@@ -881,10 +890,7 @@ rb_mod_mix_into(int argc, VALUE *argv, VALUE klass)
     st_table *const_tbl = 0, *method_tbl = 0;
     int i = 0;
 
-    if (argc < 1 || argc > 3) {
-      wrong_args:
-	rb_raise(rb_eArgError, "wrong number of arguments (%d for 1)", argc);
-    }
+    rb_check_arity(argc, 1, 3);
     module = argv[i++];
 
     switch (TYPE(module)) {
@@ -914,7 +920,7 @@ rb_mod_mix_into(int argc, VALUE *argv, VALUE klass)
 	}
 	methods = tmp;
     }
-    if (i < argc) goto wrong_args;
+    if (i < argc) rb_raise(rb_eArgError, "wrong arguments");
     if (!NIL_P(constants)) {
 	VALUE hash = rb_hash_new();
 	for (i = 0; i < RARRAY_LEN(constants); ++i) {
@@ -1007,9 +1013,7 @@ rb_obj_extend(int argc, VALUE *argv, VALUE obj)
 {
     int i;
 
-    if (argc == 0) {
-	rb_raise(rb_eArgError, "wrong number of arguments (at least 1)");
-    }
+    rb_check_arity(argc, 1, UNLIMITED_ARGUMENTS);
     for (i = 0; i < argc; i++)
 	Check_Type(argv[i], T_MODULE);
     while (argc--) {
@@ -1054,7 +1058,7 @@ errinfo_place(rb_thread_t *th)
 		return &cfp->dfp[-2];
 	    }
 	    else if (cfp->iseq->type == ISEQ_TYPE_ENSURE &&
-		     TYPE(cfp->dfp[-2]) != T_NODE &&
+		     !RB_TYPE_P(cfp->dfp[-2], T_NODE) &&
 		     !FIXNUM_P(cfp->dfp[-2])) {
 		return &cfp->dfp[-2];
 	    }

@@ -16,14 +16,15 @@ class TestSetTraceFunc < Test::Unit::TestCase
 
   def test_c_call
     events = []
-    eval <<-EOF.gsub(/^.*?: /, "")
+    name = "#{self.class}\##{__method__}"
+    eval <<-EOF.gsub(/^.*?: /, ""), nil, name
      1: set_trace_func(Proc.new { |event, file, lineno, mid, binding, klass|
-     2:   events << [event, lineno, mid, klass]
+     2:   events << [event, lineno, mid, klass] if file == name
      3: })
      4: x = 1 + 1
      5: set_trace_func(nil)
     EOF
-    assert_equal(["c-return", 3, :set_trace_func, Kernel],
+    assert_equal(["c-return", 1, :set_trace_func, Kernel],
                  events.shift)
     assert_equal(["line", 4, __method__, self.class],
                  events.shift)
@@ -40,9 +41,10 @@ class TestSetTraceFunc < Test::Unit::TestCase
 
   def test_call
     events = []
-    eval <<-EOF.gsub(/^.*?: /, "")
+    name = "#{self.class}\##{__method__}"
+    eval <<-EOF.gsub(/^.*?: /, ""), nil, name
      1: set_trace_func(Proc.new { |event, file, lineno, mid, binding, klass|
-     2:   events << [event, lineno, mid, klass]
+     2:   events << [event, lineno, mid, klass] if file == name
      3: })
      4: def add(x, y)
      5:   x + y
@@ -50,7 +52,7 @@ class TestSetTraceFunc < Test::Unit::TestCase
      7: x = add(1, 1)
      8: set_trace_func(nil)
     EOF
-    assert_equal(["c-return", 3, :set_trace_func, Kernel],
+    assert_equal(["c-return", 1, :set_trace_func, Kernel],
                  events.shift)
     assert_equal(["line", 4, __method__, self.class],
                  events.shift)
@@ -79,9 +81,10 @@ class TestSetTraceFunc < Test::Unit::TestCase
 
   def test_class
     events = []
-    eval <<-EOF.gsub(/^.*?: /, "")
+    name = "#{self.class}\##{__method__}"
+    eval <<-EOF.gsub(/^.*?: /, ""), nil, name
      1: set_trace_func(Proc.new { |event, file, lineno, mid, binding, klass|
-     2:   events << [event, lineno, mid, klass]
+     2:   events << [event, lineno, mid, klass] if file == name
      3: })
      4: class Foo
      5:   def bar
@@ -90,7 +93,7 @@ class TestSetTraceFunc < Test::Unit::TestCase
      8: x = Foo.new.bar
      9: set_trace_func(nil)
     EOF
-    assert_equal(["c-return", 3, :set_trace_func, Kernel],
+    assert_equal(["c-return", 1, :set_trace_func, Kernel],
                  events.shift)
     assert_equal(["line", 4, __method__, self.class],
                  events.shift)
@@ -131,9 +134,10 @@ class TestSetTraceFunc < Test::Unit::TestCase
 
   def test_return # [ruby-dev:38701]
     events = []
-    eval <<-EOF.gsub(/^.*?: /, "")
+    name = "#{self.class}\##{__method__}"
+    eval <<-EOF.gsub(/^.*?: /, ""), nil, name
      1: set_trace_func(Proc.new { |event, file, lineno, mid, binding, klass|
-     2:   events << [event, lineno, mid, klass]
+     2:   events << [event, lineno, mid, klass] if file == name
      3: })
      4: def foo(a)
      5:   return if a
@@ -143,7 +147,7 @@ class TestSetTraceFunc < Test::Unit::TestCase
      9: foo(false)
     10: set_trace_func(nil)
     EOF
-    assert_equal(["c-return", 3, :set_trace_func, Kernel],
+    assert_equal(["c-return", 1, :set_trace_func, Kernel],
                  events.shift)
     assert_equal(["line", 4, __method__, self.class],
                  events.shift)
@@ -176,9 +180,10 @@ class TestSetTraceFunc < Test::Unit::TestCase
 
   def test_return2 # [ruby-core:24463]
     events = []
-    eval <<-EOF.gsub(/^.*?: /, "")
+    name = "#{self.class}\##{__method__}"
+    eval <<-EOF.gsub(/^.*?: /, ""), nil, name
      1: set_trace_func(Proc.new { |event, file, lineno, mid, binding, klass|
-     2:   events << [event, lineno, mid, klass]
+     2:   events << [event, lineno, mid, klass] if file == name
      3: })
      4: def foo
      5:   a = 5
@@ -187,7 +192,7 @@ class TestSetTraceFunc < Test::Unit::TestCase
      8: foo
      9: set_trace_func(nil)
     EOF
-    assert_equal(["c-return", 3, :set_trace_func, Kernel],
+    assert_equal(["c-return", 1, :set_trace_func, Kernel],
                  events.shift)
     assert_equal(["line", 4, __method__, self.class],
                  events.shift)
@@ -214,9 +219,10 @@ class TestSetTraceFunc < Test::Unit::TestCase
 
   def test_raise
     events = []
-    eval <<-EOF.gsub(/^.*?: /, "")
+    name = "#{self.class}\##{__method__}"
+    eval <<-EOF.gsub(/^.*?: /, ""), nil, name
      1: set_trace_func(Proc.new { |event, file, lineno, mid, binding, klass|
-     2:   events << [event, lineno, mid, klass]
+     2:   events << [event, lineno, mid, klass] if file == name
      3: })
      4: begin
      5:   raise TypeError, "error"
@@ -224,7 +230,7 @@ class TestSetTraceFunc < Test::Unit::TestCase
      7: end
      8: set_trace_func(nil)
     EOF
-    assert_equal(["c-return", 3, :set_trace_func, Kernel],
+    assert_equal(["c-return", 1, :set_trace_func, Kernel],
                  events.shift)
     assert_equal(["line", 4, __method__, self.class],
                  events.shift)
@@ -244,10 +250,6 @@ class TestSetTraceFunc < Test::Unit::TestCase
                  events.shift)
     assert_equal(["c-return", 5, :backtrace, Exception],
                  events.shift)
-    assert_equal(["c-call", 5, :set_backtrace, Exception],
-                 events.shift)
-    assert_equal(["c-return", 5, :set_backtrace, Exception],
-                 events.shift)
     assert_equal(["raise", 5, :test_raise, TestSetTraceFunc],
                  events.shift)
     assert_equal(["c-return", 5, :raise, Kernel],
@@ -265,15 +267,16 @@ class TestSetTraceFunc < Test::Unit::TestCase
 
   def test_break # [ruby-core:27606] [Bug #2610]
     events = []
-    eval <<-EOF.gsub(/^.*?: /, "")
+    name = "#{self.class}\##{__method__}"
+    eval <<-EOF.gsub(/^.*?: /, ""), nil, name
      1: set_trace_func(Proc.new { |event, file, lineno, mid, binding, klass|
-     2:   events << [event, lineno, mid, klass]
+     2:   events << [event, lineno, mid, klass] if file == name
      3: })
      4: [1,2,3].any? {|n| n}
      8: set_trace_func(nil)
     EOF
 
-    [["c-return", 3, :set_trace_func, Kernel],
+    [["c-return", 1, :set_trace_func, Kernel],
      ["line", 4, __method__, self.class],
      ["c-call", 4, :any?, Enumerable],
      ["c-call", 4, :each, Array],
@@ -306,7 +309,8 @@ class TestSetTraceFunc < Test::Unit::TestCase
 
     th = Thread.new do
       th = Thread.current
-      eval <<-EOF.gsub(/^.*?: /, "")
+      name = "#{self.class}\##{__method__}"
+      eval <<-EOF.gsub(/^.*?: /, ""), nil, name
        1: th.set_trace_func(prc)
        2: th.add_trace_func(prc2)
        3: class ThreadTraceInnerClass
@@ -357,17 +361,18 @@ class TestSetTraceFunc < Test::Unit::TestCase
 
   def test_trace_defined_method
     events = []
-    eval <<-EOF.gsub(/^.*?: /, "")
+    name = "#{self.class}\##{__method__}"
+    eval <<-EOF.gsub(/^.*?: /, ""), nil, name
      1: class FooBar; define_method(:foobar){}; end
      2: fb = FooBar.new
      3: set_trace_func(Proc.new { |event, file, lineno, mid, binding, klass|
-     4:   events << [event, lineno, mid, klass]
+     4:   events << [event, lineno, mid, klass] if file == name
      5: })
      6: fb.foobar
      7: set_trace_func(nil)
     EOF
 
-    [["c-return", 5, :set_trace_func, Kernel],
+    [["c-return", 3, :set_trace_func, Kernel],
      ["line", 6, __method__, self.class],
      ["call", 6, :foobar, FooBar],
      ["return", 6, :foobar, FooBar],

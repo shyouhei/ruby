@@ -161,7 +161,7 @@ rb_to_encoding_index(VALUE enc)
 
 /* Returns encoding index or UNSPECIFIED_ENCODING */
 static int
-str_to_encindex(VALUE enc)
+str_find_encindex(VALUE enc)
 {
     int idx;
 
@@ -170,6 +170,13 @@ str_to_encindex(VALUE enc)
 	rb_raise(rb_eArgError, "invalid name encoding (non ASCII)");
     }
     idx = rb_enc_find_index(StringValueCStr(enc));
+    return idx;
+}
+
+static int
+str_to_encindex(VALUE enc)
+{
+    int idx = str_find_encindex(enc);
     if (idx < 0) {
 	rb_raise(rb_eArgError, "unknown encoding name - %s", RSTRING_PTR(enc));
     }
@@ -187,6 +194,16 @@ rb_to_encoding(VALUE enc)
 {
     if (enc_check_encoding(enc) >= 0) return RDATA(enc)->data;
     return str_to_encoding(enc);
+}
+
+rb_encoding *
+rb_find_encoding(VALUE enc)
+{
+    int idx;
+    if (enc_check_encoding(enc) >= 0) return RDATA(enc)->data;
+    idx = str_find_encindex(enc);
+    if (idx < 0) return NULL;
+    return rb_enc_from_index(idx);
 }
 
 void
@@ -759,6 +776,7 @@ rb_enc_compatible(VALUE str1, VALUE str2)
 {
     int idx1, idx2;
     rb_encoding *enc1, *enc2;
+    int isstr1, isstr2;
 
     idx1 = rb_enc_get_index(str1);
     idx2 = rb_enc_get_index(str2);
@@ -772,33 +790,38 @@ rb_enc_compatible(VALUE str1, VALUE str2)
     enc1 = rb_enc_from_index(idx1);
     enc2 = rb_enc_from_index(idx2);
 
-    if (BUILTIN_TYPE(str2) == T_STRING && RSTRING_LEN(str2) == 0)
+    isstr2 = RB_TYPE_P(str2, T_STRING);
+    if (isstr2 && RSTRING_LEN(str2) == 0)
 	return enc1;
-    if (BUILTIN_TYPE(str1) == T_STRING && RSTRING_LEN(str1) == 0)
+    isstr1 = RB_TYPE_P(str1, T_STRING);
+    if (isstr1 && RSTRING_LEN(str1) == 0)
 	return (rb_enc_asciicompat(enc1) && rb_enc_str_asciionly_p(str2)) ? enc1 : enc2;
     if (!rb_enc_asciicompat(enc1) || !rb_enc_asciicompat(enc2)) {
 	return 0;
     }
 
     /* objects whose encoding is the same of contents */
-    if (BUILTIN_TYPE(str2) != T_STRING && idx2 == ENCINDEX_US_ASCII)
+    if (!isstr2 && idx2 == ENCINDEX_US_ASCII)
 	return enc1;
-    if (BUILTIN_TYPE(str1) != T_STRING && idx1 == ENCINDEX_US_ASCII)
+    if (!isstr1 && idx1 == ENCINDEX_US_ASCII)
 	return enc2;
 
-    if (BUILTIN_TYPE(str1) != T_STRING) {
+    if (!isstr1) {
 	VALUE tmp = str1;
 	int idx0 = idx1;
 	str1 = str2;
 	str2 = tmp;
 	idx1 = idx2;
 	idx2 = idx0;
+	idx0 = isstr1;
+	isstr1 = isstr2;
+	isstr2 = idx0;
     }
-    if (BUILTIN_TYPE(str1) == T_STRING) {
+    if (isstr1) {
 	int cr1, cr2;
 
 	cr1 = rb_enc_str_coderange(str1);
-	if (BUILTIN_TYPE(str2) == T_STRING) {
+	if (isstr2) {
 	    cr2 = rb_enc_str_coderange(str2);
 	    if (cr1 != cr2) {
 		/* may need to handle ENC_CODERANGE_BROKEN */
@@ -806,7 +829,6 @@ rb_enc_compatible(VALUE str1, VALUE str2)
 		if (cr2 == ENC_CODERANGE_7BIT) return enc1;
 	    }
 	    if (cr2 == ENC_CODERANGE_7BIT) {
-		if (idx1 == ENCINDEX_ASCII) return enc2;
 		return enc1;
 	    }
 	}
@@ -900,12 +922,11 @@ rb_enc_codepoint_len(const char *p, const char *e, int *len_p, rb_encoding *enc)
     if (e <= p)
         rb_raise(rb_eArgError, "empty string");
     r = rb_enc_precise_mbclen(p, e, enc);
-    if (MBCLEN_CHARFOUND_P(r)) {
-	if (len_p) *len_p = MBCLEN_CHARFOUND_LEN(r);
-        return rb_enc_mbc_to_codepoint(p, e, enc);
-    }
-    else
+    if (!MBCLEN_CHARFOUND_P(r)) {
 	rb_raise(rb_eArgError, "invalid byte sequence in %s", rb_enc_name(enc));
+    }
+    if (len_p) *len_p = MBCLEN_CHARFOUND_LEN(r);
+    return rb_enc_mbc_to_codepoint(p, e, enc);
 }
 
 #undef rb_enc_codepoint
@@ -1083,7 +1104,7 @@ enc_find(VALUE klass, VALUE enc)
  *
  * If the objects are non-strings their encodings are compatible when they
  * have an encoding and:
- * * Either encoding is US ASCII compatible
+ * * Either encoding is US-ASCII compatible
  * * One of the encodings is a 7-bit encoding
  *
  */
@@ -1317,7 +1338,7 @@ rb_enc_set_default_external(VALUE encoding)
  *
  * Sets default external encoding.  You should not set
  * Encoding::default_external in ruby code as strings created before changing
- * the value may have a different encoding from strings created after thevalue
+ * the value may have a different encoding from strings created after the value
  * was changed., instead you should use <tt>ruby -E</tt> to invoke ruby with
  * the correct default_external.
  *
@@ -1446,9 +1467,12 @@ rb_locale_charmap(VALUE klass)
 #if defined NO_LOCALE_CHARMAP
     return rb_usascii_str_new2("ASCII-8BIT");
 #elif defined _WIN32 || defined __CYGWIN__
-    const char *nl_langinfo_codeset(void);
-    const char *codeset = nl_langinfo_codeset();
+    const char *codeset = 0;
     char cp[sizeof(int) * 3 + 4];
+# ifdef __CYGWIN__
+    const char *nl_langinfo_codeset(void);
+    codeset = nl_langinfo_codeset();
+# endif
     if (!codeset) {
 	UINT codepage = GetConsoleCP();
 	if(!codepage) codepage = GetACP();
@@ -1594,6 +1618,206 @@ rb_enc_aliases(VALUE klass)
     st_foreach(enc_table.names, rb_enc_aliases_enc_i, (st_data_t)aliases);
     return aliases[0];
 }
+
+/*
+ * An Encoding instance represents a character encoding usable in Ruby. It is
+ * defined as a constant under the Encoding namespace. It has a name and
+ * optionally, aliases:
+ *
+ *   Encoding::ISO_8859_1.name
+ *   #=> #<Encoding:ISO-8859-1>
+ *
+ *   Encoding::ISO_8859_1.names
+ *   #=> ["ISO-8859-1", "ISO8859-1"]
+ *
+ * Ruby methods dealing with encodings return or accept Encoding instances as
+ * arguments (when a method accepts an Encoding instance as an argument, it
+ * can be passed an Encoding name or alias instead).
+ *
+ *   "some string".encoding
+ *   #=> #<Encoding:UTF-8>
+ *
+ *   string = "some string".encode(Encoding::ISO_8859_1)
+ *   #=> "some string"
+ *   string.encoding
+ *   #=> #<Encoding:ISO-8859-1>
+ *
+ *   "some string".encode "ISO-8859-1"
+ *   #=> "some string"
+ *
+ * <code>Encoding::ASCII_8BIT</code> is a special encoding that is usually
+ * used for a byte string, not a character string. But as the name insists,
+ * its characters in the range of ASCII are considered as ASCII characters.
+ * This is useful when you use ASCII-8BIT characters with other ASCII
+ * compatible characters.
+ *
+ * == Changing an encoding
+ *
+ * The associated Encoding of a String can be changed in two different ways.
+ *
+ * First, it is possible to set the Encoding of a string to a new Encoding
+ * without changing the internal byte representation of the string, with
+ * String#force_encoding. This is how you can tell Ruby the correct encoding
+ * of a string.
+ *
+ *   string
+ *   #=> "R\xC3\xA9sum\xC3\xA9"
+ *   string.encoding
+ *   #=> #<Encoding:ISO-8859-1>
+ *   string.force_encoding(Encoding::UTF-8)
+ *   #=> "R\u00E9sum\u00E9"
+ *
+ * Second, it is possible to transcode a string, i.e. translate its internal
+ * byte representation to another encoding. Its associated encoding is also
+ * set to the other encoding. See String#encode for the various forms of
+ * transcoding, and the Encoding::Converter class for additional control over
+ * the transcoding process.
+ *
+ *   string
+ *   #=> "R\u00E9sum\u00E9"
+ *   string.encoding
+ *   #=> #<Encoding:UTF-8>
+ *   string = string.encode!(Encoding::ISO_8859_1)
+ *   #=> "R\xE9sum\xE9"
+ *   string.encoding
+ *   #=> #<Encoding::ISO-8859-1>
+ *
+ * == Script encoding
+ *
+ * All Ruby script code has an associated Encoding which any String literal
+ * created in the source code will be associated to.
+ *
+ * The default script encoding is <code>Encoding::US-ASCII</code>, but it can
+ * be changed by a magic comment on the first line of the source code file (or
+ * second line, if there is a shebang line on the first). The comment must
+ * contain the word <code>coding</code> or <code>encoding</code>, followed
+ * by a colon, space and the Encoding name or alias:
+ *
+ *   # encoding: UTF-8
+ *
+ *   "some string".encoding
+ *   #=> #<Encoding:UTF-8>
+ *
+ * The <code>__ENCODING__</code> keyword returns the script encoding of the file
+ * which the keyword is written:
+ *
+ *   # encoding: ISO-8859-1
+ *
+ *   __ENCODING__
+ *   #=> #<Encoding:ISO-8859-1>
+ *
+ * <code>ruby -K</code> will change the default locale encoding, but this is
+ * not recommended. Ruby source files should declare its script encoding by a
+ * magic comment even when they only depend on US-ASCII strings or regular
+ * expressions.
+ *
+ * == Locale encoding
+ *
+ * The default encoding of the environment. Usually derived from locale.
+ *
+ * see Encoding.locale_charmap, Encoding.find('locale')
+ *
+ * == Filesystem encoding
+ *
+ * The default encoding of strings from the filesystem of the environment.
+ * This is used for strings of file names or paths.
+ *
+ * see Encoding.find('filesystem')
+ *
+ * == External encoding
+ *
+ * Each IO object has an external encoding which indicates the encoding that
+ * Ruby will use to read its data. By default Ruby sets the external encoding
+ * of an IO object to the default external encoding. The default external
+ * encoding is set by locale encoding or the interpreter <code>-E</code> option.
+ * Encoding.default_external returns the current value of the external
+ * encoding.
+ *
+ *   ENV["LANG"]
+ *   #=> "UTF-8"
+ *   Encoding.default_external
+ *   #=> #<Encoding:UTF-8>
+ *
+ *   $ ruby -E ISO-8859-1 -e "p Encoding.default_external"
+ *   #<Encoding:ISO-8859-1>
+ *
+ *   $ LANG=C ruby -e 'p Encoding.default_external'
+ *   #<Encoding:US-ASCII>
+ *
+ * The default external encoding may also be set through
+ * Encoding.default_external=, but you should not do this as strings created
+ * before and after the change will have inconsistent encodings.  Instead use
+ * <code>ruby -E</code> to invoke ruby with the correct external encoding.
+ *
+ * When you know that the actual encoding of the data of an IO object is not
+ * the default external encoding, you can reset its external encoding with
+ * IO#set_encoding or set it at IO object creation (see IO.new options).
+ *
+ * == Internal encoding
+ *
+ * To process the data of an IO object which has an encoding different
+ * from its external encoding, you can set its internal encoding. Ruby will use
+ * this internal encoding to transcode the data when it is read from the IO
+ * object.
+ *
+ * Conversely, when data is written to the IO object it is transcoded from the
+ * internal encoding to the external encoding of the IO object.
+ *
+ * The internal encoding of an IO object can be set with
+ * IO#set_encoding or at IO object creation (see IO.new options).
+ *
+ * The internal encoding is optional and when not set, the Ruby default
+ * internal encoding is used. If not explicitly set this default internal
+ * encoding is +nil+ meaning that by default, no transcoding occurs.
+ *
+ * The default internal encoding can be set with the interpreter option
+ * <code>-E</code>. Encoding.default_internal returns the current internal
+ * encoding.
+ *
+ *    $ ruby -e 'p Encoding.default_internal'
+ *    nil
+ *
+ *    $ ruby -E ISO-8859-1:UTF-8 -e "p [Encoding.default_external, \
+ *      Encoding.default_internal]"
+ *    [#<Encoding:ISO-8859-1>, #<Encoding:UTF-8>]
+ *
+ * The default internal encoding may also be set through
+ * Encoding.default_internal=, but you should not do this as strings created
+ * before and after the change will have inconsistent encodings.  Instead use
+ * <code>ruby -E</code> to invoke ruby with the correct internal encoding.
+ *
+ * == IO encoding example
+ *
+ * In the following example a UTF-8 encoded string "R\u00E9sum\u00E9" is transcoded for
+ * output to ISO-8859-1 encoding, then read back in and transcoded to UTF-8:
+ *
+ *   string = "R\u00E9sum\u00E9"
+ *   
+ *   open("transcoded.txt", "w:ISO-8859-1") do |io|
+ *     io.write(string)
+ *   end
+ *   
+ *   puts "raw text:"
+ *   p File.binread("transcoded.txt")
+ *   puts
+ *   
+ *   open("transcoded.txt", "r:ISO-8859-1:UTF-8") do |io|
+ *     puts "transcoded text:"
+ *     p io.read
+ *   end
+ *
+ * While writing the file, the internal encoding is not specified as it is
+ * only necessary for reading.  While reading the file both the internal and
+ * external encoding must be specified to obtain the correct result.
+ *   
+ *   $ ruby t.rb 
+ *   raw text:
+ *   "R\xE9sum\xE9"
+ *
+ *   transcoded text:
+ *   "R\u00E9sum\u00E9"
+ *   
+ */
 
 void
 Init_Encoding(void)

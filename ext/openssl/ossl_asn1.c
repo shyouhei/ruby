@@ -149,11 +149,16 @@ num_to_asn1integer(VALUE obj, ASN1_INTEGER *ai)
 ASN1_INTEGER *
 num_to_asn1integer(VALUE obj, ASN1_INTEGER *ai)
 {
-    BIGNUM *bn = GetBNPtr(obj);
+    BIGNUM *bn;
+   
+    if (NIL_P(obj)) 
+	ossl_raise(rb_eTypeError, "Can't convert nil into Integer");
 
-    if (!(ai = BN_to_ASN1_INTEGER(bn, ai))) {
+    bn = GetBNPtr(obj);
+
+    if (!(ai = BN_to_ASN1_INTEGER(bn, ai)))
 	ossl_raise(eOSSLError, NULL);
-    }
+
     return ai;
 }
 #endif
@@ -219,6 +224,9 @@ static ID sivVALUE, sivTAG, sivTAG_CLASS, sivTAGGING, sivINFINITE_LENGTH, sivUNU
 static ASN1_BOOLEAN
 obj_to_asn1bool(VALUE obj)
 {
+    if (NIL_P(obj))
+	ossl_raise(rb_eTypeError, "Can't convert nil into Boolean");
+
 #if OPENSSL_VERSION_NUMBER < 0x00907000L
      return RTEST(obj) ? 0xff : 0x100;
 #else
@@ -331,7 +339,7 @@ obj_to_asn1derstr(VALUE obj)
  * DER to Ruby converters
  */
 static VALUE
-decode_bool(unsigned char* der, int length)
+decode_bool(unsigned char* der, long length)
 {
     int val;
     const unsigned char *p;
@@ -344,7 +352,7 @@ decode_bool(unsigned char* der, int length)
 }
 
 static VALUE
-decode_int(unsigned char* der, int length)
+decode_int(unsigned char* der, long length)
 {
     ASN1_INTEGER *ai;
     const unsigned char *p;
@@ -363,7 +371,7 @@ decode_int(unsigned char* der, int length)
 }
 
 static VALUE
-decode_bstr(unsigned char* der, int length, long *unused_bits)
+decode_bstr(unsigned char* der, long length, long *unused_bits)
 {
     ASN1_BIT_STRING *bstr;
     const unsigned char *p;
@@ -384,7 +392,7 @@ decode_bstr(unsigned char* der, int length, long *unused_bits)
 }
 
 static VALUE
-decode_enum(unsigned char* der, int length)
+decode_enum(unsigned char* der, long length)
 {
     ASN1_ENUMERATED *ai;
     const unsigned char *p;
@@ -403,7 +411,7 @@ decode_enum(unsigned char* der, int length)
 }
 
 static VALUE
-decode_null(unsigned char* der, int length)
+decode_null(unsigned char* der, long length)
 {
     ASN1_NULL *null;
     const unsigned char *p;
@@ -417,7 +425,7 @@ decode_null(unsigned char* der, int length)
 }
 
 static VALUE
-decode_obj(unsigned char* der, int length)
+decode_obj(unsigned char* der, long length)
 {
     ASN1_OBJECT *obj;
     const unsigned char *p;
@@ -446,7 +454,7 @@ decode_obj(unsigned char* der, int length)
 }
 
 static VALUE
-decode_time(unsigned char* der, int length)
+decode_time(unsigned char* der, long length)
 {
     ASN1_TIME *time;
     const unsigned char *p;
@@ -465,7 +473,7 @@ decode_time(unsigned char* der, int length)
 }
 
 static VALUE
-decode_eoc(unsigned char *der, int length)
+decode_eoc(unsigned char *der, long length)
 {
     if (length != 2 || !(der[0] == 0x00 && der[1] == 0x00))
 	ossl_raise(eASN1Error, NULL);
@@ -777,7 +785,7 @@ ossl_asn1data_to_der(VALUE self)
 }
 
 static VALUE
-int_ossl_asn1_decode0_prim(unsigned char **pp, long length, int hlen, int tag,
+int_ossl_asn1_decode0_prim(unsigned char **pp, long length, long hlen, int tag,
 			   VALUE tc, long *num_read)
 {
     VALUE value, asn1data;
@@ -869,7 +877,7 @@ int_ossl_asn1_decode0_cons(unsigned char **pp, long max_len, long length,
 	rb_ary_push(ary, value);
 	if (length > 0)
 	    length -= inner_read;
-	
+
 	if (infinite &&
 	    NUM2INT(ossl_asn1_get_tag(value)) == V_ASN1_EOC &&
 	    SYM2ID(ossl_asn1_get_tag_class(value)) == sUNIVERSAL) {
@@ -922,8 +930,8 @@ ossl_asn1_decode0(unsigned char **pp, long length, long *offset, int depth,
 {
     unsigned char *start, *p;
     const unsigned char *p0;
-    long len = 0, inner_read = 0, off = *offset;
-    int hlen, tag, tc, j;
+    long len = 0, inner_read = 0, off = *offset, hlen;
+    int tag, tc, j;
     VALUE asn1data, tag_class;
 
     p = *pp;
@@ -1901,6 +1909,10 @@ do{\
 
     OSSL_ASN1_DEFINE_CLASS(EndOfContent, Data);
 
+
+#if 0
+    cASN1ObjectId = rb_define_class_under(mASN1, "ObjectId", cASN1Primitive);  /* let rdoc know */
+#endif
     rb_define_singleton_method(cASN1ObjectId, "register", ossl_asn1obj_s_register, 3);
     rb_define_method(cASN1ObjectId, "sn", ossl_asn1obj_get_sn, 0);
     rb_define_method(cASN1ObjectId, "ln", ossl_asn1obj_get_ln, 0);
@@ -1932,7 +1944,7 @@ do{\
     rb_hash_aset(class_tag_map, cASN1GeneralizedTime, INT2NUM(V_ASN1_GENERALIZEDTIME));
     rb_hash_aset(class_tag_map, cASN1GraphicString, INT2NUM(V_ASN1_GRAPHICSTRING));
     rb_hash_aset(class_tag_map, cASN1ISO64String, INT2NUM(V_ASN1_ISO64STRING));
-    rb_hash_aset(class_tag_map, cASN1GeneralString, INT2NUM(INT2NUM(V_ASN1_GENERALSTRING)));
+    rb_hash_aset(class_tag_map, cASN1GeneralString, INT2NUM(V_ASN1_GENERALSTRING));
     rb_hash_aset(class_tag_map, cASN1UniversalString, INT2NUM(V_ASN1_UNIVERSALSTRING));
     rb_hash_aset(class_tag_map, cASN1BMPString, INT2NUM(V_ASN1_BMPSTRING));
     rb_global_variable(&class_tag_map);

@@ -36,7 +36,7 @@ typedef unsigned long st_data_t;
 #elif SIZEOF_LONG_LONG == SIZEOF_VOIDP
 typedef unsigned LONG_LONG st_data_t;
 #else
-# error ---->> st.c requires sizeof(void*) == sizeof(long) to be compiled. <<----
+# error ---->> st.c requires sizeof(void*) == sizeof(long) or sizeof(LONG_LONG) to be compiled. <<----
 #endif
 #define ST_DATA_T_DEFINED
 
@@ -91,8 +91,16 @@ struct st_table {
     __extension__
 #endif
     st_index_t num_entries : ST_INDEX_BITS - 1;
-    struct st_table_entry **bins;
-    struct st_table_entry *head, *tail;
+    union {
+	struct {
+	    struct st_table_entry **bins;
+	    struct st_table_entry *head, *tail;
+	} big;
+	struct {
+	    struct st_packed_entry *entries;
+	    st_index_t real_entries;
+	} packed;
+    } as;
 };
 
 #define st_is_member(table,key) st_lookup((table),(key),(st_data_t *)0)
@@ -113,7 +121,10 @@ int st_insert(st_table *, st_data_t, st_data_t);
 int st_insert2(st_table *, st_data_t, st_data_t, st_data_t (*)(st_data_t));
 int st_lookup(st_table *, st_data_t, st_data_t *);
 int st_get_key(st_table *, st_data_t, st_data_t *);
+typedef int st_update_callback_func(st_data_t *key, st_data_t *value, st_data_t arg, int existing);
+int st_update(st_table *table, st_data_t key, st_update_callback_func *func, st_data_t arg);
 int st_foreach(st_table *, int (*)(ANYARGS), st_data_t);
+int st_foreach_check(st_table *, int (*)(ANYARGS), st_data_t, st_data_t);
 int st_reverse_foreach(st_table *, int (*)(ANYARGS), st_data_t);
 void st_add_direct(st_table *, st_data_t, st_data_t);
 void st_free_table(st_table *);

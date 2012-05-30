@@ -11,7 +11,7 @@
 #
 # f.zero:: returns 0.0
 # f.one:: returns 1.0
-# f.two:: returns 1.0
+# f.two:: returns 2.0
 # f.ten:: returns 10.0
 #
 # f.eps:: returns the convergence criterion (epsilon value) used to determine whether two values are considered equal. If |a-b| < epsilon, the two values are considered equal.
@@ -53,6 +53,7 @@ module Jacobian
     until ok>0 do
       s = f.zero
       deriv = []
+      nRetry += 1
       if(nRetry>100) then
         raise "Singular Jacobian matrix. No change at x[" + i.to_s + "]"
       end

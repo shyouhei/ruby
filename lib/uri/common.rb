@@ -208,7 +208,7 @@ module URI
     #
     def parse(uri)
       scheme, userinfo, host, port,
-        registry, path, opaque, query, fragment = self.split(uri)
+        registry, path, opaque, query, fragment = self.split(self.escape(uri))
 
       if scheme && URI.scheme_list.include?(scheme.upcase)
         URI.scheme_list[scheme.upcase].new(scheme, userinfo, host, port,

@@ -37,5 +37,7 @@ class URI::TestParser < Test::Unit::TestCase
     u1.path = '/%uDCBA'
     assert_equal(['http', nil, 'a', URI::HTTP.default_port, '/%uDCBA', nil, nil],
 		 uri_to_ary(u1))
+    u2 = p1.parse('http://foo:foo,<@foo.com:8080')
+    assert_equal(['http',nil, 'foo', 'foo,<', nil,'foo.com', nil,'8080'],uri_to_ary(u2))
   end
 end

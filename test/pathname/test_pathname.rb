@@ -41,6 +41,9 @@ class TestPathname < Test::Unit::TestCase
   DOSISH_DRIVE_LETTER = File.dirname("A:") == "A:."
   DOSISH_UNC = File.dirname("//") == "//"
 
+  class SuperPathname < Pathname
+  end
+
   def cleanpath_aggressive(path)
     Pathname.new(path).cleanpath.to_s
   end
@@ -213,6 +216,10 @@ class TestPathname < Test::Unit::TestCase
 
   defassert(:plus, 'a//b/d//e', 'a//b/c', '../d//e')
 
+  define_assertion(:plus) {
+    assert_instance_of(SuperPathname, SuperPathname.new('a') + 'b')
+  }
+
   def test_parent
     assert_equal(Pathname("."), Pathname("a").parent)
   end
@@ -307,6 +314,10 @@ class TestPathname < Test::Unit::TestCase
   defassert_raise(:relative_path_from, ArgumentError, ".", "/")
   defassert_raise(:relative_path_from, ArgumentError, "a", "..")
   defassert_raise(:relative_path_from, ArgumentError, ".", "..")
+
+  define_assertion(:relative_path_from) {
+    assert_instance_of(SuperPathname, SuperPathname.new('a').relative_path_from(SuperPathname.new('b')))
+  }
 
   def with_tmpchdir(base=nil)
     Dir.mktmpdir(base) {|d|

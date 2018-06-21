@@ -129,6 +129,12 @@ with all sufficient information, see the ChangeLog file or Redmine
 
   * String#split yields each substring to the block if given. [Feature #4780]
 
+* TracePoint
+
+  * New methods:
+
+    * TracePoint#parameters [Feature #14694]
+
 === Stdlib updates (outstanding ones only)
 
 * ERB
@@ -149,6 +155,20 @@ with all sufficient information, see the ChangeLog file or Redmine
   * New method:
 
     * Matrix#antisymmetric?
+
+* Net
+
+  * New method:
+
+    * Add write_timeout keyword argument to Net::BufferedIO.new. [Feature #13396]
+
+    * Add Net::BufferedIO#write_timeout, Net::BufferedIO#write_timeout=,
+      Net::HTTP#write_timeout, and Net::HTTP#write_timeout=. [Feature #13396]
+
+  * New constant:
+
+    * Add Net::HTTPClientException to deprecate Net::HTTPServerException,
+      whose name is misleading. [Bug #14688]
 
 * REXML
 

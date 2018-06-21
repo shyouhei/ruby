@@ -1171,6 +1171,7 @@ VALUE rb_complex_plus(VALUE, VALUE);
 VALUE rb_complex_mul(VALUE, VALUE);
 VALUE rb_complex_abs(VALUE x);
 VALUE rb_complex_sqrt(VALUE x);
+VALUE rb_dbl_complex_polar(double abs, double ang);
 
 /* cont.c */
 VALUE rb_obj_is_fiber(VALUE);
@@ -1189,7 +1190,6 @@ void Init_ext(void);
 
 /* encoding.c */
 ID rb_id_encoding(void);
-void rb_gc_mark_encodings(void);
 #ifdef RUBY_ENCODING_H
 rb_encoding *rb_enc_get_from_index(int index);
 rb_encoding *rb_enc_check_str(VALUE str1, VALUE str2);
@@ -1460,6 +1460,8 @@ VALUE rb_int_lshift(VALUE x, VALUE y);
 VALUE rb_int_div(VALUE x, VALUE y);
 VALUE rb_int_abs(VALUE num);
 VALUE rb_int_odd_p(VALUE num);
+int rb_int_positive_p(VALUE num);
+int rb_int_negative_p(VALUE num);
 
 static inline VALUE
 rb_num_compare_with_zero(VALUE num, ID mid)

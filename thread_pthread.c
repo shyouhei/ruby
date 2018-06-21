@@ -73,8 +73,7 @@ gvl_acquire_common(rb_vm_t *vm)
 {
     if (vm->gvl.acquired) {
 
-	vm->gvl.waiting++;
-	if (vm->gvl.waiting == 1) {
+	if (!vm->gvl.waiting++) {
 	    /*
 	     * Wake up timer thread iff timer thread is slept.
 	     * When timer thread is polling mode, we don't want to
@@ -87,7 +86,7 @@ gvl_acquire_common(rb_vm_t *vm)
             rb_native_cond_wait(&vm->gvl.cond, &vm->gvl.lock);
 	}
 
-	vm->gvl.waiting--;
+	--vm->gvl.waiting;
 
 	if (vm->gvl.need_yield) {
 	    vm->gvl.need_yield = 0;
@@ -1608,9 +1607,10 @@ rb_thread_create_timer_thread(void)
 #endif
 	    return;
 	}
-
+#if USE_SLEEPY_TIMER_THREAD
 	/* validate pipe on this process */
 	timer_thread_pipe.owner_process = getpid();
+#endif
 	timer_thread.created = 1;
     }
 }

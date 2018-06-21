@@ -7,6 +7,15 @@ rescue LoadError
 end
 
 class TestIO_Console < Test::Unit::TestCase
+  # FreeBSD seems to hang on TTOU when running parallel tests
+  # tested on FreeBSD 11.x
+  def set_winsize_setup
+    @old_ttou = trap(:TTOU, 'IGNORE') if RUBY_PLATFORM =~ /freebsd/i
+  end
+
+  def set_winsize_teardown
+    trap(:TTOU, @old_ttou) if @old_ttou
+  end
 end
 
 defined?(PTY) and defined?(IO.console) and TestIO_Console.class_eval do
@@ -255,6 +264,7 @@ defined?(PTY) and defined?(IO.console) and TestIO_Console.class_eval do
   end
 
   def test_set_winsize_invalid_dev
+    set_winsize_setup
     [IO::NULL, __FILE__].each do |path|
       open(path) do |io|
         begin
@@ -267,6 +277,8 @@ defined?(PTY) and defined?(IO.console) and TestIO_Console.class_eval do
         assert_raise(ArgumentError) {io.winsize = [0, 0, 0]}
       end
     end
+  ensure
+    set_winsize_teardown
   end
 
   unless IO.console
@@ -322,6 +334,7 @@ defined?(IO.console) and TestIO_Console.class_eval do
     end
 
     def test_set_winsize_console
+      set_winsize_setup
       s = IO.console.winsize
       assert_nothing_raised(TypeError) {IO.console.winsize = s}
       bug = '[ruby-core:82741] [Bug #13888]'
@@ -329,6 +342,8 @@ defined?(IO.console) and TestIO_Console.class_eval do
       assert_equal([s[0], s[1]+1], IO.console.winsize, bug)
       IO.console.winsize = s
       assert_equal(s, IO.console.winsize, bug)
+    ensure
+      set_winsize_teardown
     end
 
     def test_close

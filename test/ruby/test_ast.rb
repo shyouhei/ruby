@@ -72,7 +72,7 @@ class TestAst < Test::Unit::TestCase
 
     def validate_range0(node)
       beg_pos, end_pos = node.beg_pos, node.end_pos
-      children = node.children.compact
+      children = node.children.grep(RubyVM::AST)
 
       return true if children.empty?
       # These NODE_D* has NODE_ARRAY as nd_next->nd_next whose last locations
@@ -100,7 +100,7 @@ class TestAst < Test::Unit::TestCase
 
     def validate_not_cared0(node)
       beg_pos, end_pos = node.beg_pos, node.end_pos
-      children = node.children.compact
+      children = node.children.grep(RubyVM::AST)
 
       @errors << { type: :first_lineno, node: node } if beg_pos.lineno == 0
       @errors << { type: :first_column, node: node } if beg_pos.column == -1
@@ -134,20 +134,76 @@ class TestAst < Test::Unit::TestCase
   def test_column_with_long_heredoc_identifier
     term = "A"*257
     ast = RubyVM::AST.parse("<<-#{term}\n""ddddddd\n#{term}\n")
-    node = ast.children[1]
+    node = ast.children[2]
     assert_equal("NODE_STR", node.type)
     assert_equal(0, node.first_column)
   end
 
   def test_column_of_heredoc
-    node = RubyVM::AST.parse("<<-SRC\nddddddd\nSRC\n").children[1]
+    node = RubyVM::AST.parse("<<-SRC\nddddddd\nSRC\n").children[2]
     assert_equal("NODE_STR", node.type)
     assert_equal(0, node.first_column)
     assert_equal(6, node.last_column)
 
-    node = RubyVM::AST.parse("<<SRC\nddddddd\nSRC\n").children[1]
+    node = RubyVM::AST.parse("<<SRC\nddddddd\nSRC\n").children[2]
     assert_equal("NODE_STR", node.type)
     assert_equal(0, node.first_column)
     assert_equal(5, node.last_column)
+  end
+
+  def test_parse_raises_syntax_error
+    assert_raise(SyntaxError) { RubyVM::AST.parse("end") }
+  end
+
+  def test_parse_file_raises_syntax_error
+    Tempfile.create(%w"test_ast .rb") do |f|
+      f.puts "end"
+      f.close
+      path = f.path
+      assert_in_out_err(%W[- #{path}], "#{<<-"begin;"}\n#{<<-"end;"}", /keyword_end/, [], success: true)
+      begin;
+        path = ARGV[0]
+        begin
+          RubyVM::AST.parse_file(path)
+        rescue SyntaxError => e
+          puts e.message
+        end
+      end;
+    end
+  end
+
+  def test_scope_local_variables
+    node = RubyVM::AST.parse("x = 0")
+    lv, _, body = *node.children
+    assert_equal([:x], lv)
+    assert_equal("NODE_LASGN", body.type)
+  end
+
+  def test_call
+    node = RubyVM::AST.parse("nil.foo")
+    _, _, body = *node.children
+    assert_equal("NODE_CALL", body.type)
+    recv, mid, args = body.children
+    assert_equal("NODE_NIL", recv.type)
+    assert_equal(:foo, mid)
+    assert_nil(args)
+  end
+
+  def test_fcall
+    node = RubyVM::AST.parse("foo()")
+    _, _, body = *node.children
+    assert_equal("NODE_FCALL", body.type)
+    mid, args = body.children
+    assert_equal(:foo, mid)
+    assert_nil(args)
+  end
+
+  def test_vcall
+    node = RubyVM::AST.parse("foo")
+    _, _, body = *node.children
+    assert_equal("NODE_VCALL", body.type)
+    mid, args = body.children
+    assert_equal(:foo, mid)
+    assert_nil(args)
   end
 end

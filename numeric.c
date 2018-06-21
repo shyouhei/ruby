@@ -296,6 +296,18 @@ int_neg_p(VALUE num)
 }
 
 int
+rb_int_positive_p(VALUE num)
+{
+    return int_pos_p(num);
+}
+
+int
+rb_int_negative_p(VALUE num)
+{
+    return int_neg_p(num);
+}
+
+int
 rb_num_negative_p(VALUE num)
 {
     return rb_num_negative_int_p(num);
@@ -1264,7 +1276,7 @@ rb_float_pow(VALUE x, VALUE y)
 	dx = RFLOAT_VALUE(x);
 	dy = RFLOAT_VALUE(y);
 	if (dx < 0 && dy != round(dy))
-	    return num_funcall1(rb_complex_raw1(x), idPow, y);
+	    return rb_dbl_complex_polar(pow(-dx, dy), dy);
     }
     else {
 	return rb_num_coerce_bin(x, y, idPow);
@@ -3962,8 +3974,10 @@ fix_pow(VALUE x, VALUE y)
 	    else
 		return INT2FIX(-1);
 	}
-	if (b < 0)
-	    return num_funcall1(rb_rational_raw1(x), idPow, y);
+	if (b < 0) {
+	    if (a == 0) rb_num_zerodiv();
+	    return rb_rational_raw(INT2FIX(1), rb_int_pow(x, LONG2NUM(-b)));
+	}
 
 	if (b == 0) return INT2FIX(1);
 	if (b == 1) return x;
@@ -3979,8 +3993,10 @@ fix_pow(VALUE x, VALUE y)
 	    if (int_even_p(y)) return INT2FIX(1);
 	    else return INT2FIX(-1);
 	}
-	if (rb_num_negative_int_p(y))
-	    return num_funcall1(rb_rational_raw1(x), idPow, y);
+	if (BIGNUM_NEGATIVE_P(y)) {
+	    if (a == 0) rb_num_zerodiv();
+	    return rb_rational_raw(INT2FIX(1), rb_int_pow(x, rb_big_uminus(y)));
+	}
 	if (a == 0) return INT2FIX(0);
 	x = rb_int2big(FIX2LONG(x));
 	return rb_big_pow(x, y);
@@ -3994,7 +4010,7 @@ fix_pow(VALUE x, VALUE y)
 	if (a == 1) return DBL2NUM(1.0);
 	{
 	    if (a < 0 && dy != round(dy))
-		return num_funcall1(rb_complex_raw1(x), idPow, y);
+		return rb_dbl_complex_polar(pow(-(double)a, dy), dy);
 	    return DBL2NUM(pow((double)a, dy));
 	}
     }

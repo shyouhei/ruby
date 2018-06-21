@@ -92,8 +92,13 @@ static VALUE sym_on_blocking;
 static VALUE sym_never;
 static ID id_locals;
 
-static void sleep_timespec(rb_thread_t *, struct timespec, int spurious_check);
-static void sleep_forever(rb_thread_t *th, int nodeadlock, int spurious_check);
+enum SLEEP_FLAGS {
+    SLEEP_DEADLOCKABLE = 0x1,
+    SLEEP_SPURIOUS_CHECK = 0x2
+};
+
+static void sleep_timespec(rb_thread_t *, struct timespec, unsigned int fl);
+static void sleep_forever(rb_thread_t *th, unsigned int fl);
 static void rb_thread_sleep_deadly_allow_spurious_wakeup(void);
 static int rb_threadptr_dead(rb_thread_t *th);
 static void rb_check_deadlock(rb_vm_t *vm);
@@ -235,6 +240,21 @@ timeval_for(struct timeval *tv, const struct timespec *ts)
         return tv;
     }
     return 0;
+}
+
+static void
+timeout_prepare(struct timespec **tsp,
+            struct timespec *ts, struct timespec *end,
+            const struct timeval *timeout)
+{
+    if (timeout) {
+        getclockofday(end);
+        timespec_add(end, timespec_for(ts, timeout));
+        *tsp = ts;
+    }
+    else {
+	*tsp = 0;
+    }
 }
 
 #if THREAD_DEBUG
@@ -1135,24 +1155,25 @@ double2timespec(struct timespec *ts, double d)
 }
 
 static void
-sleep_forever(rb_thread_t *th, int deadlockable, int spurious_check)
+sleep_forever(rb_thread_t *th, unsigned int fl)
 {
     enum rb_thread_status prev_status = th->status;
-    enum rb_thread_status status = deadlockable ? THREAD_STOPPED_FOREVER : THREAD_STOPPED;
+    enum rb_thread_status status;
 
+    status  = fl & SLEEP_DEADLOCKABLE ? THREAD_STOPPED_FOREVER : THREAD_STOPPED;
     th->status = status;
     RUBY_VM_CHECK_INTS_BLOCKING(th->ec);
     while (th->status == status) {
-	if (deadlockable) {
+	if (fl & SLEEP_DEADLOCKABLE) {
 	    th->vm->sleeper++;
 	    rb_check_deadlock(th->vm);
 	}
 	native_sleep(th, 0);
-	if (deadlockable) {
+	if (fl & SLEEP_DEADLOCKABLE) {
 	    th->vm->sleeper--;
 	}
 	RUBY_VM_CHECK_INTS_BLOCKING(th->ec);
-	if (!spurious_check)
+	if (!(fl & SLEEP_SPURIOUS_CHECK))
 	    break;
     }
     th->status = prev_status;
@@ -1238,7 +1259,7 @@ timespec_update_expire(struct timespec *ts, const struct timespec *end)
 }
 
 static void
-sleep_timespec(rb_thread_t *th, struct timespec ts, int spurious_check)
+sleep_timespec(rb_thread_t *th, struct timespec ts, unsigned int fl)
 {
     struct timespec end;
     enum rb_thread_status prev_status = th->status;
@@ -1252,7 +1273,7 @@ sleep_timespec(rb_thread_t *th, struct timespec ts, int spurious_check)
 	RUBY_VM_CHECK_INTS_BLOCKING(th->ec);
 	if (timespec_update_expire(&ts, &end))
 	    break;
-	if (!spurious_check)
+	if (!(fl & SLEEP_SPURIOUS_CHECK))
 	    break;
     }
     th->status = prev_status;
@@ -1262,21 +1283,21 @@ void
 rb_thread_sleep_forever(void)
 {
     thread_debug("rb_thread_sleep_forever\n");
-    sleep_forever(GET_THREAD(), FALSE, TRUE);
+    sleep_forever(GET_THREAD(), SLEEP_SPURIOUS_CHECK);
 }
 
 void
 rb_thread_sleep_deadly(void)
 {
     thread_debug("rb_thread_sleep_deadly\n");
-    sleep_forever(GET_THREAD(), TRUE, TRUE);
+    sleep_forever(GET_THREAD(), SLEEP_DEADLOCKABLE|SLEEP_SPURIOUS_CHECK);
 }
 
 static void
 rb_thread_sleep_deadly_allow_spurious_wakeup(void)
 {
     thread_debug("rb_thread_sleep_deadly_allow_spurious_wakeup\n");
-    sleep_forever(GET_THREAD(), TRUE, FALSE);
+    sleep_forever(GET_THREAD(), SLEEP_DEADLOCKABLE);
 }
 
 void
@@ -1286,7 +1307,7 @@ rb_thread_wait_for(struct timeval time)
     struct timespec ts;
 
     timespec_for(&ts, &time);
-    sleep_timespec(th, ts, 1);
+    sleep_timespec(th, ts, SLEEP_SPURIOUS_CHECK);
 }
 
 /*
@@ -3824,26 +3845,15 @@ do_select(int n, rb_fdset_t *const readfds, rb_fdset_t *const writefds,
     rb_fdset_t MAYBE_UNUSED(orig_read);
     rb_fdset_t MAYBE_UNUSED(orig_write);
     rb_fdset_t MAYBE_UNUSED(orig_except);
-    struct timespec end;
-    struct timespec *tsp = 0;
-    struct timespec ts
-#if defined(__GNUC__) && (__GNUC__ == 7 || __GNUC__ == 8)
-        = {0, 0}
-#endif
-        ;
+    struct timespec ts, end, *tsp;
     rb_thread_t *th = GET_THREAD();
 
+    timeout_prepare(&tsp, &ts, &end, timeout);
 #define do_select_update() \
     (restore_fdset(readfds, &orig_read), \
      restore_fdset(writefds, &orig_write), \
      restore_fdset(exceptfds, &orig_except), \
      TRUE)
-
-    if (timeout) {
-        getclockofday(&end);
-        timespec_add(&end, timespec_for(&ts, timeout));
-        tsp = &ts;
-    }
 
 #define fd_init_copy(f) \
     (f##fds) ? rb_fd_init_copy(&orig_##f, f##fds) : rb_fd_no_init(&orig_##f)
@@ -3982,17 +3992,10 @@ rb_wait_for_single_fd(int fd, int events, struct timeval *timeout)
 {
     struct pollfd fds;
     int result = 0, lerrno;
-    struct timespec ts;
-    struct timespec end;
-    struct timespec *tsp = 0;
+    struct timespec ts, end, *tsp;
     rb_thread_t *th = GET_THREAD();
 
-    if (timeout) {
-        getclockofday(&end);
-        timespec_add(&end, timespec_for(&ts, timeout));
-        tsp = &ts;
-    }
-
+    timeout_prepare(&tsp, &ts, &end, timeout);
     fds.fd = fd;
     fds.events = (short)events;
 

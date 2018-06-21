@@ -94,7 +94,6 @@ struct iseq_compile_data {
     VALUE for_iseq;
     struct iseq_compile_data_ensure_node_stack *ensure_node_stack;
     int loopval_popped;	/* used by NODE_BREAK */
-    int cached_const;
     struct iseq_compile_data_storage *storage_head;
     struct iseq_compile_data_storage *storage_current;
     int last_line;
@@ -144,7 +143,9 @@ VALUE iseq_ibf_dump(const rb_iseq_t *iseq, VALUE opt);
 void ibf_load_iseq_complete(rb_iseq_t *iseq);
 const rb_iseq_t *iseq_ibf_load(VALUE str);
 VALUE iseq_ibf_load_extra_data(VALUE str);
+#if VM_INSN_INFO_TABLE_IMPL == 2
 unsigned int *rb_iseq_insns_info_decode_positions(const struct rb_iseq_constant_body *body);
+#endif
 
 RUBY_SYMBOL_EXPORT_BEGIN
 

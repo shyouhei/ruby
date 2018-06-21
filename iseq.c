@@ -118,15 +118,7 @@ rb_iseq_free(const rb_iseq_t *iseq)
 static VALUE
 rb_vm_insn_addr2insn2(const void *addr)
 {
-    VALUE insn;
-    const void * const *table = rb_vm_get_insns_address_table();
-
-    for (insn = 0; insn < VM_INSTRUCTION_SIZE; insn++) {
-	if (table[insn] == addr) {
-	    return insn;
-	}
-    }
-    rb_bug("rb_vm_insn_addr2insn: invalid insn address: %p", addr);
+    return (VALUE)rb_vm_insn_addr2insn(addr);
 }
 #endif
 
@@ -501,16 +493,16 @@ rb_iseq_insns_info_encode_positions(const rb_iseq_t *iseq)
 #endif
 }
 
+#if VM_INSN_INFO_TABLE_IMPL == 2
 unsigned int *
 rb_iseq_insns_info_decode_positions(const struct rb_iseq_constant_body *body)
 {
-#if VM_INSN_INFO_TABLE_IMPL == 2
     int size = body->insns_info.size;
     int max_pos = body->iseq_size;
     struct succ_index_table *sd = body->insns_info.succ_index_table;
     return succ_index_table_invert(max_pos, sd, size);
-#endif
 }
+#endif
 
 static VALUE
 finish_iseq_build(rb_iseq_t *iseq)

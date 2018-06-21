@@ -20,7 +20,7 @@ extensible.
 *   Dynamic Loading of Object Files (on some architectures)
 *   Highly Portable (works on many Unix-like/POSIX compatible platforms as
     well as Windows, macOS, Haiku, etc.) cf.
-    https://bugs.ruby-lang.org/projects/ruby-trunk/wiki/SupportedPlatforms
+    https://github.com/ruby/ruby/blob/trunk/doc/contributing.rdoc#platform-maintainers
 
 
 ## How to get Ruby
@@ -29,10 +29,6 @@ For a complete list of ways to install Ruby, including using third-party tools
 like rvm, see:
 
 https://www.ruby-lang.org/en/downloads/
-
-The Ruby distribution files can be found on the following FTP site:
-
-ftp://ftp.ruby-lang.org/pub/ruby/
 
 The trunk of the Ruby source tree can be checked out with the following
 command:

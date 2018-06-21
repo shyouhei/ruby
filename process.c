@@ -7184,7 +7184,7 @@ make_clock_result(struct timetick *ttp,
 }
 
 #ifdef __APPLE__
-static mach_timebase_info_data_t *
+static const mach_timebase_info_data_t *
 get_mach_timebase_info(void)
 {
     static mach_timebase_info_data_t sTimebaseInfo;
@@ -7194,6 +7194,14 @@ get_mach_timebase_info(void)
     }
 
     return &sTimebaseInfo;
+}
+
+double
+ruby_real_ms_time(void)
+{
+    const mach_timebase_info_data_t *info = get_mach_timebase_info();
+    uint64_t t = mach_absolute_time();
+    return (double)t * info->numer / info->denom / 1e6;
 }
 #endif
 
@@ -7340,8 +7348,9 @@ rb_clock_gettime(int argc, VALUE *argv)
     if (SYMBOL_P(clk_id)) {
         /*
          * Non-clock_gettime clocks are provided by symbol clk_id.
-         *
-         * gettimeofday is always available on platforms supported by Ruby.
+         */
+#ifdef HAVE_GETTIMEOFDAY
+        /*
          * GETTIMEOFDAY_BASED_CLOCK_REALTIME is used for
          * CLOCK_REALTIME if clock_gettime is not available.
          */
@@ -7356,6 +7365,7 @@ rb_clock_gettime(int argc, VALUE *argv)
             denominators[num_denominators++] = 1000000000;
             goto success;
         }
+#endif
 
 #define RUBY_TIME_BASED_CLOCK_REALTIME ID2SYM(id_TIME_BASED_CLOCK_REALTIME)
         if (clk_id == RUBY_TIME_BASED_CLOCK_REALTIME) {
@@ -7448,7 +7458,7 @@ rb_clock_gettime(int argc, VALUE *argv)
 #ifdef __APPLE__
 #define RUBY_MACH_ABSOLUTE_TIME_BASED_CLOCK_MONOTONIC ID2SYM(id_MACH_ABSOLUTE_TIME_BASED_CLOCK_MONOTONIC)
         if (clk_id == RUBY_MACH_ABSOLUTE_TIME_BASED_CLOCK_MONOTONIC) {
-	    mach_timebase_info_data_t *info = get_mach_timebase_info();
+	    const mach_timebase_info_data_t *info = get_mach_timebase_info();
             uint64_t t = mach_absolute_time();
             tt.count = (int32_t)(t % 1000000000);
             tt.giga_count = t / 1000000000;
@@ -7587,7 +7597,7 @@ rb_clock_getres(int argc, VALUE *argv)
 
 #ifdef RUBY_MACH_ABSOLUTE_TIME_BASED_CLOCK_MONOTONIC
         if (clk_id == RUBY_MACH_ABSOLUTE_TIME_BASED_CLOCK_MONOTONIC) {
-	    mach_timebase_info_data_t *info = get_mach_timebase_info();
+	    const mach_timebase_info_data_t *info = get_mach_timebase_info();
             tt.count = 1;
             tt.giga_count = 0;
             numerators[num_numerators++] = info->numer;

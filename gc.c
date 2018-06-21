@@ -313,7 +313,7 @@ int ruby_rgengc_debug;
 #define GC_ENABLE_LAZY_SWEEP   1
 #endif
 #ifndef CALC_EXACT_MALLOC_SIZE
-#define CALC_EXACT_MALLOC_SIZE 0
+#define CALC_EXACT_MALLOC_SIZE USE_GC_MALLOC_OBJ_INFO_DETAILS
 #endif
 #if defined(HAVE_MALLOC_USABLE_SIZE) || CALC_EXACT_MALLOC_SIZE > 0
 #ifndef MALLOC_ALLOCATED_SIZE
@@ -355,7 +355,9 @@ typedef enum {
 
     /* others */
     GPR_FLAG_IMMEDIATE_SWEEP   = 0x2000,
-    GPR_FLAG_HAVE_FINALIZE     = 0x4000
+    GPR_FLAG_HAVE_FINALIZE     = 0x4000,
+    GPR_FLAG_IMMEDIATE_MARK    = 0x8000,
+    GPR_FLAG_FULL_MARK        = 0x10000
 } gc_profile_record_flag;
 
 typedef struct gc_profile_record {
@@ -848,9 +850,9 @@ static void init_mark_stack(mark_stack_t *stack);
 
 static int ready_to_gc(rb_objspace_t *objspace);
 
-static int garbage_collect(rb_objspace_t *, int full_mark, int immediate_mark, int immediate_sweep, int reason);
+static int garbage_collect(rb_objspace_t *, int reason);
 
-static int  gc_start(rb_objspace_t *objspace, const int full_mark, const int immediate_mark, const unsigned int immediate_sweep, int reason);
+static int  gc_start(rb_objspace_t *objspace, int reason);
 static void gc_rest(rb_objspace_t *objspace);
 static inline void gc_enter(rb_objspace_t *objspace, const char *event);
 static inline void gc_exit(rb_objspace_t *objspace, const char *event);
@@ -859,19 +861,15 @@ static void gc_marks(rb_objspace_t *objspace, int full_mark);
 static void gc_marks_start(rb_objspace_t *objspace, int full);
 static int  gc_marks_finish(rb_objspace_t *objspace);
 static void gc_marks_rest(rb_objspace_t *objspace);
-#if GC_ENABLE_INCREMENTAL_MARK
 static void gc_marks_step(rb_objspace_t *objspace, int slots);
 static void gc_marks_continue(rb_objspace_t *objspace, rb_heap_t *heap);
-#endif
 
 static void gc_sweep(rb_objspace_t *objspace);
 static void gc_sweep_start(rb_objspace_t *objspace);
 static void gc_sweep_finish(rb_objspace_t *objspace);
 static int  gc_sweep_step(rb_objspace_t *objspace, rb_heap_t *heap);
 static void gc_sweep_rest(rb_objspace_t *objspace);
-#if GC_ENABLE_LAZY_SWEEP
 static void gc_sweep_continue(rb_objspace_t *objspace, rb_heap_t *heap);
-#endif
 
 static inline void gc_mark(rb_objspace_t *objspace, VALUE ptr);
 static void gc_mark_ptr(rb_objspace_t *objspace, VALUE ptr);
@@ -1736,20 +1734,16 @@ heap_prepare(rb_objspace_t *objspace, rb_heap_t *heap)
 {
     GC_ASSERT(heap->free_pages == NULL);
 
-#if GC_ENABLE_LAZY_SWEEP
     if (is_lazy_sweeping(heap)) {
 	gc_sweep_continue(objspace, heap);
     }
-#endif
-#if GC_ENABLE_INCREMENTAL_MARK
     else if (is_incremental_marking(objspace)) {
 	gc_marks_continue(objspace, heap);
     }
-#endif
 
     if (heap->free_pages == NULL &&
 	(will_be_incremental_marking(objspace) || heap_increment(objspace, heap) == FALSE) &&
-	gc_start(objspace, FALSE, FALSE, FALSE, GPR_FLAG_NEWOBJ) == FALSE) {
+	gc_start(objspace, GPR_FLAG_NEWOBJ) == FALSE) {
 	rb_memerror();
     }
 }
@@ -1919,7 +1913,7 @@ newobj_slowpath(VALUE klass, VALUE flags, VALUE v1, VALUE v2, VALUE v3, rb_objsp
 	}
 
 	if (ruby_gc_stressful) {
-	    if (!garbage_collect(objspace, FALSE, FALSE, FALSE, GPR_FLAG_NEWOBJ)) {
+	    if (!garbage_collect(objspace, GPR_FLAG_NEWOBJ)) {
 		rb_memerror();
 	    }
 	}
@@ -3762,11 +3756,11 @@ gc_sweep_rest(rb_objspace_t *objspace)
     }
 }
 
-#if GC_ENABLE_LAZY_SWEEP
 static void
 gc_sweep_continue(rb_objspace_t *objspace, rb_heap_t *heap)
 {
     GC_ASSERT(dont_gc == FALSE);
+    if (!GC_ENABLE_LAZY_SWEEP) return;
 
     gc_enter(objspace, "sweep_continue");
 #if USE_RGENGC
@@ -3777,7 +3771,6 @@ gc_sweep_continue(rb_objspace_t *objspace, rb_heap_t *heap)
     gc_sweep_step(objspace, heap);
     gc_exit(objspace, "sweep_continue");
 }
-#endif
 
 static void
 gc_sweep(rb_objspace_t *objspace)
@@ -4857,9 +4850,6 @@ gc_mark_roots(rb_objspace_t *objspace, const char **categoryp)
     MARK_CHECKPOINT("machine_context");
     mark_current_machine_context(objspace, ec);
 
-    MARK_CHECKPOINT("encodings");
-    rb_gc_mark_encodings();
-
     /* mark protected global variables */
     MARK_CHECKPOINT("global_list");
     for (list = global_list; list; list = list->next) {
@@ -5300,8 +5290,8 @@ static int
 gc_verify_heap_pages(rb_objspace_t *objspace)
 {
     int remembered_old_objects = 0;
-    remembered_old_objects = gc_verify_heap_pages_(objspace, &heap_eden->pages);
-    remembered_old_objects = gc_verify_heap_pages_(objspace, &heap_tomb->pages);
+    remembered_old_objects += gc_verify_heap_pages_(objspace, &heap_eden->pages);
+    remembered_old_objects += gc_verify_heap_pages_(objspace, &heap_tomb->pages);
     return remembered_old_objects;
 }
 
@@ -5620,10 +5610,10 @@ gc_marks_finish(rb_objspace_t *objspace)
     return TRUE;
 }
 
-#if GC_ENABLE_INCREMENTAL_MARK
 static void
 gc_marks_step(rb_objspace_t *objspace, int slots)
 {
+#if GC_ENABLE_INCREMENTAL_MARK
     GC_ASSERT(is_marking(objspace));
 
     if (gc_mark_stacked_objects_incremental(objspace, slots)) {
@@ -5633,8 +5623,8 @@ gc_marks_step(rb_objspace_t *objspace, int slots)
 	}
     }
     if (0) fprintf(stderr, "objspace->marked_slots: %d\n", (int)objspace->marked_slots);
-}
 #endif
+}
 
 static void
 gc_marks_rest(rb_objspace_t *objspace)
@@ -5659,19 +5649,19 @@ gc_marks_rest(rb_objspace_t *objspace)
     gc_sweep(objspace);
 }
 
-#if GC_ENABLE_INCREMENTAL_MARK
 static void
 gc_marks_continue(rb_objspace_t *objspace, rb_heap_t *heap)
 {
-    int slots = 0;
-    const char *from;
-
     GC_ASSERT(dont_gc == FALSE);
+#if GC_ENABLE_INCREMENTAL_MARK
 
     gc_enter(objspace, "marks_continue");
 
     PUSH_MARK_FUNC_DATA(NULL);
     {
+        int slots = 0;
+        const char *from;
+
 	if (heap->pooled_pages) {
 	    while (heap->pooled_pages && slots < HEAP_PAGE_OBJ_LIMIT) {
 		struct heap_page *page = heap_move_pooled_pages_to_free_pages(heap);
@@ -5696,8 +5686,8 @@ gc_marks_continue(rb_objspace_t *objspace, rb_heap_t *heap)
     POP_MARK_FUNC_DATA();
 
     gc_exit(objspace, "marks_continue");
-}
 #endif
+}
 
 static void
 gc_marks(rb_objspace_t *objspace, int full_mark)
@@ -6395,7 +6385,7 @@ gc_reset_malloc_info(rb_objspace_t *objspace)
 }
 
 static int
-garbage_collect(rb_objspace_t *objspace, int full_mark, int immediate_mark, int immediate_sweep, int reason)
+garbage_collect(rb_objspace_t *objspace, int reason)
 {
 #if GC_PROFILE_MORE_DETAIL
     objspace->profile.prepare_time = getrusage_time();
@@ -6407,17 +6397,20 @@ garbage_collect(rb_objspace_t *objspace, int full_mark, int immediate_mark, int 
     objspace->profile.prepare_time = getrusage_time() - objspace->profile.prepare_time;
 #endif
 
-    return gc_start(objspace, full_mark, immediate_mark, immediate_sweep, reason);
+    return gc_start(objspace, reason);
 }
 
 static int
-gc_start(rb_objspace_t *objspace, const int full_mark, const int immediate_mark, const unsigned int immediate_sweep, int reason)
+gc_start(rb_objspace_t *objspace, int reason)
 {
-    int do_full_mark = full_mark;
-    objspace->flags.immediate_sweep = immediate_sweep;
+    unsigned int do_full_mark = !!((unsigned)reason & GPR_FLAG_FULL_MARK);
+    unsigned int immediate_mark = (unsigned)reason & GPR_FLAG_IMMEDIATE_MARK;
+
+    /* reason may be clobbered, later, so keep set immediate_sweep here */
+    objspace->flags.immediate_sweep = !!((unsigned)reason & GPR_FLAG_IMMEDIATE_SWEEP);
 
     if (!heap_allocated_pages) return FALSE; /* heap is not ready */
-    if (reason != GPR_FLAG_METHOD && !ready_to_gc(objspace)) return TRUE; /* GC is not allowed */
+    if (!(reason & GPR_FLAG_METHOD) && !ready_to_gc(objspace)) return TRUE; /* GC is not allowed */
 
     GC_ASSERT(gc_mode(objspace) == gc_mode_none);
     GC_ASSERT(!is_lazy_sweeping(heap_eden));
@@ -6471,8 +6464,8 @@ gc_start(rb_objspace_t *objspace, const int full_mark, const int immediate_mark,
 
     if (objspace->flags.immediate_sweep) reason |= GPR_FLAG_IMMEDIATE_SWEEP;
 
-    gc_report(1, objspace, "gc_start(%d, %d, %d, reason: %d) => %d, %d, %d\n",
-	      full_mark, immediate_mark, immediate_sweep, reason,
+    gc_report(1, objspace, "gc_start(reason: %d) => %u, %d, %d\n",
+	      reason,
 	      do_full_mark, !is_incremental_marking(objspace), objspace->flags.immediate_sweep);
 
     objspace->profile.count++;
@@ -6521,9 +6514,6 @@ gc_rest(rb_objspace_t *objspace)
 struct objspace_and_reason {
     rb_objspace_t *objspace;
     int reason;
-    int full_mark;
-    int immediate_mark;
-    int immediate_sweep;
 };
 
 static void
@@ -6635,24 +6625,21 @@ static void *
 gc_with_gvl(void *ptr)
 {
     struct objspace_and_reason *oar = (struct objspace_and_reason *)ptr;
-    return (void *)(VALUE)garbage_collect(oar->objspace, oar->full_mark, oar->immediate_mark, oar->immediate_sweep, oar->reason);
+    return (void *)(VALUE)garbage_collect(oar->objspace, oar->reason);
 }
 
 static int
-garbage_collect_with_gvl(rb_objspace_t *objspace, int full_mark, int immediate_mark, int immediate_sweep, int reason)
+garbage_collect_with_gvl(rb_objspace_t *objspace, int reason)
 {
     if (dont_gc) return TRUE;
     if (ruby_thread_has_gvl_p()) {
-	return garbage_collect(objspace, full_mark, immediate_mark, immediate_sweep, reason);
+	return garbage_collect(objspace, reason);
     }
     else {
 	if (ruby_native_thread_p()) {
 	    struct objspace_and_reason oar;
 	    oar.objspace = objspace;
 	    oar.reason = reason;
-	    oar.full_mark = full_mark;
-	    oar.immediate_mark = immediate_mark;
-	    oar.immediate_sweep = immediate_sweep;
 	    return (int)(VALUE)rb_thread_call_with_gvl(gc_with_gvl, (void *)&oar);
 	}
 	else {
@@ -6698,7 +6685,8 @@ static VALUE
 gc_start_internal(int argc, VALUE *argv, VALUE self)
 {
     rb_objspace_t *objspace = &rb_objspace;
-    int full_mark = TRUE, immediate_mark = TRUE, immediate_sweep = TRUE;
+    int reason = GPR_FLAG_FULL_MARK | GPR_FLAG_IMMEDIATE_MARK |
+                GPR_FLAG_IMMEDIATE_SWEEP | GPR_FLAG_METHOD;
     VALUE opt = Qnil;
     static ID keyword_ids[3];
 
@@ -6715,12 +6703,18 @@ gc_start_internal(int argc, VALUE *argv, VALUE self)
 
 	rb_get_kwargs(opt, keyword_ids, 0, 3, kwvals);
 
-	if (kwvals[0] != Qundef) full_mark = RTEST(kwvals[0]);
-	if (kwvals[1] != Qundef) immediate_mark = RTEST(kwvals[1]);
-	if (kwvals[2] != Qundef) immediate_sweep = RTEST(kwvals[2]);
+	if (kwvals[0] != Qundef && !RTEST(kwvals[0])) {
+            reason &= ~GPR_FLAG_FULL_MARK;
+        }
+	if (kwvals[1] != Qundef && !RTEST(kwvals[1])) {
+            reason &= ~GPR_FLAG_IMMEDIATE_MARK;
+        }
+	if (kwvals[2] != Qundef && !RTEST(kwvals[2])) {
+            reason &= ~GPR_FLAG_IMMEDIATE_SWEEP;
+        }
     }
 
-    garbage_collect(objspace, full_mark, immediate_mark, immediate_sweep, GPR_FLAG_METHOD);
+    garbage_collect(objspace, reason);
     gc_finalize_deferred(objspace);
 
     return Qnil;
@@ -6737,7 +6731,9 @@ void
 rb_gc(void)
 {
     rb_objspace_t *objspace = &rb_objspace;
-    garbage_collect(objspace, TRUE, TRUE, TRUE, GPR_FLAG_CAPI);
+    int reason = GPR_FLAG_FULL_MARK | GPR_FLAG_IMMEDIATE_MARK |
+                GPR_FLAG_IMMEDIATE_SWEEP | GPR_FLAG_CAPI;
+    garbage_collect(objspace, reason);
     gc_finalize_deferred(objspace);
 }
 
@@ -7808,7 +7804,13 @@ static void
 objspace_malloc_gc_stress(rb_objspace_t *objspace)
 {
     if (ruby_gc_stressful && ruby_native_thread_p()) {
-	garbage_collect_with_gvl(objspace, gc_stress_full_mark_after_malloc_p(), TRUE, TRUE, GPR_FLAG_STRESS | GPR_FLAG_MALLOC);
+        int reason = GPR_FLAG_IMMEDIATE_MARK | GPR_FLAG_IMMEDIATE_SWEEP |
+                                     GPR_FLAG_STRESS | GPR_FLAG_MALLOC;
+
+        if (gc_stress_full_mark_after_malloc_p()) {
+            reason |= GPR_FLAG_FULL_MARK;
+        }
+        garbage_collect_with_gvl(objspace, reason);
     }
 }
 
@@ -7835,7 +7837,7 @@ objspace_malloc_increase(rb_objspace_t *objspace, void *mem, size_t new_size, si
 		gc_rest(objspace); /* gc_rest can reduce malloc_increase */
 		goto retry;
 	    }
-	    garbage_collect_with_gvl(objspace, FALSE, FALSE, FALSE, GPR_FLAG_MALLOC);
+	    garbage_collect_with_gvl(objspace, GPR_FLAG_MALLOC);
 	}
     }
 
@@ -7884,13 +7886,27 @@ objspace_malloc_increase(rb_objspace_t *objspace, void *mem, size_t new_size, si
 #endif
 }
 
+struct malloc_obj_info { /* 4 words */
+    size_t size;
+#if USE_GC_MALLOC_OBJ_INFO_DETAILS
+    size_t gen;
+    const char *file;
+    size_t line;
+#endif
+};
+
+#if USE_GC_MALLOC_OBJ_INFO_DETAILS
+const char *ruby_malloc_info_file;
+int ruby_malloc_info_line;
+#endif
+
 static inline size_t
 objspace_malloc_prepare(rb_objspace_t *objspace, size_t size)
 {
     if (size == 0) size = 1;
 
 #if CALC_EXACT_MALLOC_SIZE
-    size += sizeof(size_t);
+    size += sizeof(struct malloc_obj_info);
 #endif
 
     return size;
@@ -7903,8 +7919,18 @@ objspace_malloc_fixup(rb_objspace_t *objspace, void *mem, size_t size)
     objspace_malloc_increase(objspace, mem, size, 0, MEMOP_TYPE_MALLOC);
 
 #if CALC_EXACT_MALLOC_SIZE
-    ((size_t *)mem)[0] = size;
-    mem = (size_t *)mem + 1;
+    {
+        struct malloc_obj_info *info = mem;
+        info->size = size;
+#if USE_GC_MALLOC_OBJ_INFO_DETAILS
+        info->gen = objspace->profile.count;
+        info->file = ruby_malloc_info_file;
+        info->line = info->file ? ruby_malloc_info_line : 0;
+#else
+        info->file = NULL;
+#endif
+        mem = info + 1;
+    }
 #endif
 
     return mem;
@@ -7913,7 +7939,9 @@ objspace_malloc_fixup(rb_objspace_t *objspace, void *mem, size_t size)
 #define TRY_WITH_GC(alloc) do { \
         objspace_malloc_gc_stress(objspace); \
 	if (!(alloc) && \
-	    (!garbage_collect_with_gvl(objspace, TRUE, TRUE, TRUE, GPR_FLAG_MALLOC) || /* full/immediate mark && immediate sweep */ \
+            (!garbage_collect_with_gvl(objspace, GPR_FLAG_FULL_MARK | \
+                GPR_FLAG_IMMEDIATE_MARK | GPR_FLAG_IMMEDIATE_SWEEP | \
+                GPR_FLAG_MALLOC) || \
 	     !(alloc))) { \
 	    ruby_memerror(); \
 	} \
@@ -7960,9 +7988,12 @@ objspace_xrealloc(rb_objspace_t *objspace, void *ptr, size_t new_size, size_t ol
     }
 
 #if CALC_EXACT_MALLOC_SIZE
-    new_size += sizeof(size_t);
-    ptr = (size_t *)ptr - 1;
-    old_size = ((size_t *)ptr)[0];
+    {
+        struct malloc_obj_info *info = (struct malloc_obj_info *)ptr - 1;
+        new_size += sizeof(struct malloc_obj_info);
+        ptr = info;
+        old_size = info->size;
+    }
 #endif
 
     old_size = objspace_malloc_size(objspace, ptr, old_size);
@@ -7970,8 +8001,11 @@ objspace_xrealloc(rb_objspace_t *objspace, void *ptr, size_t new_size, size_t ol
     new_size = objspace_malloc_size(objspace, mem, new_size);
 
 #if CALC_EXACT_MALLOC_SIZE
-    ((size_t *)mem)[0] = new_size;
-    mem = (size_t *)mem + 1;
+    {
+        struct malloc_obj_info *info = mem;
+        info->size = new_size;
+        mem = info + 1;
+    }
 #endif
 
     objspace_malloc_increase(objspace, mem, new_size, old_size, MEMOP_TYPE_REALLOC);
@@ -7979,12 +8013,116 @@ objspace_xrealloc(rb_objspace_t *objspace, void *ptr, size_t new_size, size_t ol
     return mem;
 }
 
+#if CALC_EXACT_MALLOC_SIZE
+#if USE_GC_MALLOC_OBJ_INFO_DETAILS
+
+#define MALLOC_INFO_GEN_SIZE 100
+#define MALLOC_INFO_SIZE_SIZE 10
+static size_t malloc_info_gen_cnt[MALLOC_INFO_GEN_SIZE];
+static size_t malloc_info_gen_size[MALLOC_INFO_GEN_SIZE];
+static size_t malloc_info_size[MALLOC_INFO_SIZE_SIZE+1];
+static st_table *malloc_info_file_table;
+
+static int
+mmalloc_info_file_i(st_data_t key, st_data_t val, st_data_t dmy)
+{
+    const char *file = (void *)key;
+    const size_t *data = (void *)val;
+
+    fprintf(stderr, "%s\t%d\t%d\n", file, (int)data[0], (int)data[1]);
+
+    return ST_CONTINUE;
+}
+
+__attribute__((destructor))
+static void
+malloc_info_show_results(void)
+{
+    int i;
+
+    fprintf(stderr, "* malloc_info gen statistics\n");
+    for (i=0; i<MALLOC_INFO_GEN_SIZE; i++) {
+        if (i == MALLOC_INFO_GEN_SIZE-1) {
+            fprintf(stderr, "more\t%d\t%d\n", (int)malloc_info_gen_cnt[i], (int)malloc_info_gen_size[i]);
+        }
+        else {
+            fprintf(stderr, "%d\t%d\t%d\n", i, (int)malloc_info_gen_cnt[i], (int)malloc_info_gen_size[i]);
+        }
+    }
+
+    fprintf(stderr, "* malloc_info size statistics\n");
+    for (i=0; i<MALLOC_INFO_SIZE_SIZE; i++) {
+        int s = 16 << i;
+        fprintf(stderr, "%d\t%d\n", (int)s, (int)malloc_info_size[i]);
+    }
+    fprintf(stderr, "more\t%d\n", (int)malloc_info_size[i]);
+
+    if (malloc_info_file_table) {
+        fprintf(stderr, "* malloc_info file statistics\n");
+        st_foreach(malloc_info_file_table, mmalloc_info_file_i, 0);
+    }
+}
+#endif
+#endif
+
 static void
 objspace_xfree(rb_objspace_t *objspace, void *ptr, size_t old_size)
 {
 #if CALC_EXACT_MALLOC_SIZE
-    ptr = ((size_t *)ptr) - 1;
-    old_size = ((size_t*)ptr)[0];
+    struct malloc_obj_info *info = (struct malloc_obj_info *)ptr - 1;
+    ptr = info;
+    old_size = info->size;
+
+#if USE_GC_MALLOC_OBJ_INFO_DETAILS
+    {
+        int gen = (int)(objspace->profile.count - info->gen);
+        int gen_index = gen >= MALLOC_INFO_GEN_SIZE ? MALLOC_INFO_GEN_SIZE-1 : gen;
+        int i;
+
+        malloc_info_gen_cnt[gen_index]++;
+        malloc_info_gen_size[gen_index] += info->size;
+
+        for (i=0; i<MALLOC_INFO_SIZE_SIZE; i++) {
+            size_t s = 16 << i;
+            if (info->size <= s) {
+                malloc_info_size[i]++;
+                goto found;
+            }
+        }
+        malloc_info_size[i]++;
+      found:;
+
+        {
+            st_data_t key = (st_data_t)info->file;
+            size_t *data;
+
+            if (malloc_info_file_table == NULL) {
+                malloc_info_file_table = st_init_numtable_with_size(1024);
+            }
+            if (st_lookup(malloc_info_file_table, key, (st_data_t *)&data)) {
+                /* hit */
+            }
+            else {
+                data = malloc(sizeof(size_t) * 2);
+                if (data == NULL) rb_bug("objspace_xfree: can not allocate memory");
+                data[0] = data[1] = 0;
+                st_insert(malloc_info_file_table, key, (st_data_t)data);
+            }
+            data[0] ++;
+            data[1] += info->size;
+        };
+#if 0 /* verbose output */
+        if (gen >= 2) {
+            if (info->file) {
+                fprintf(stderr, "free - size:%d, gen:%d, pos: %s:%d\n", (int)info->size, gen, info->file, (int)info->line);
+            }
+            else {
+                fprintf(stderr, "free - size:%d, gen:%d\n", (int)info->size, gen);
+            }
+        }
+#endif
+    }
+#endif
 #endif
     old_size = objspace_malloc_size(objspace, ptr, old_size);
 
@@ -8000,7 +8138,7 @@ ruby_xmalloc0(size_t size)
 }
 
 void *
-ruby_xmalloc(size_t size)
+ruby_xmalloc_body(size_t size)
 {
     if ((ssize_t)size < 0) {
 	negative_size_allocation_error("too large allocation size");
@@ -8017,7 +8155,7 @@ ruby_malloc_size_overflow(size_t count, size_t elsize)
 }
 
 void *
-ruby_xmalloc2(size_t n, size_t size)
+ruby_xmalloc2_body(size_t n, size_t size)
 {
     return objspace_xmalloc0(&rb_objspace, xmalloc2_size(n, size));
 }
@@ -8033,7 +8171,7 @@ objspace_xcalloc(rb_objspace_t *objspace, size_t size)
 }
 
 void *
-ruby_xcalloc(size_t n, size_t size)
+ruby_xcalloc_body(size_t n, size_t size)
 {
     return objspace_xcalloc(&rb_objspace, xmalloc2_size(n, size));
 }
@@ -8052,7 +8190,7 @@ ruby_sized_xrealloc(void *ptr, size_t new_size, size_t old_size)
 }
 
 void *
-ruby_xrealloc(void *ptr, size_t new_size)
+ruby_xrealloc_body(void *ptr, size_t new_size)
 {
     return ruby_sized_xrealloc(ptr, new_size, 0);
 }
@@ -8071,7 +8209,7 @@ ruby_sized_xrealloc2(void *ptr, size_t n, size_t size, size_t old_n)
 }
 
 void *
-ruby_xrealloc2(void *ptr, size_t n, size_t size)
+ruby_xrealloc2_body(void *ptr, size_t n, size_t size)
 {
     return ruby_sized_xrealloc2(ptr, n, size, 0);
 }
@@ -8101,13 +8239,16 @@ ruby_mimmalloc(size_t size)
 {
     void *mem;
 #if CALC_EXACT_MALLOC_SIZE
-    size += sizeof(size_t);
+    size += sizeof(struct malloc_obj_info);
 #endif
     mem = malloc(size);
 #if CALC_EXACT_MALLOC_SIZE
     /* set 0 for consistency of allocated_size/allocations */
-    ((size_t *)mem)[0] = 0;
-    mem = (size_t *)mem + 1;
+    {
+        struct malloc_obj_info *info = mem;
+        info->size = 0;
+        mem = info + 1;
+    }
 #endif
     return mem;
 }
@@ -8115,11 +8256,11 @@ ruby_mimmalloc(size_t size)
 void
 ruby_mimfree(void *ptr)
 {
-    size_t *mem = (size_t *)ptr;
 #if CALC_EXACT_MALLOC_SIZE
-    mem = mem - 1;
+    struct malloc_obj_info *info = (struct malloc_obj_info *)ptr - 1;
+    ptr = info;
 #endif
-    free(mem);
+    free(ptr);
 }
 
 void *
@@ -9741,3 +9882,70 @@ Init_GC(void)
 	OBJ_FREEZE(opts);
     }
 }
+
+#ifdef ruby_xmalloc
+#undef ruby_xmalloc
+#endif
+#ifdef ruby_xmalloc2
+#undef ruby_xmalloc2
+#endif
+#ifdef ruby_xcalloc
+#undef ruby_xcalloc
+#endif
+#ifdef ruby_xrealloc
+#undef ruby_xrealloc
+#endif
+#ifdef ruby_xrealloc2
+#undef ruby_xrealloc2
+#endif
+
+void *
+ruby_xmalloc(size_t size)
+{
+#if USE_GC_MALLOC_OBJ_INFO_DETAILS
+    ruby_malloc_info_file = __FILE__;
+    ruby_malloc_info_line = __LINE__;
+#endif
+    return ruby_xmalloc_body(size);
+}
+
+void *
+ruby_xmalloc2(size_t n, size_t size)
+{
+#if USE_GC_MALLOC_OBJ_INFO_DETAILS
+    ruby_malloc_info_file = __FILE__;
+    ruby_malloc_info_line = __LINE__;
+#endif
+    return ruby_xmalloc2_body(n, size);
+}
+
+void *
+ruby_xcalloc(size_t n, size_t size)
+{
+#if USE_GC_MALLOC_OBJ_INFO_DETAILS
+    ruby_malloc_info_file = __FILE__;
+    ruby_malloc_info_line = __LINE__;
+#endif
+    return ruby_xcalloc_body(n, size);
+}
+
+void *
+ruby_xrealloc(void *ptr, size_t new_size)
+{
+#if USE_GC_MALLOC_OBJ_INFO_DETAILS
+    ruby_malloc_info_file = __FILE__;
+    ruby_malloc_info_line = __LINE__;
+#endif
+    return ruby_xrealloc_body(ptr, new_size);
+}
+
+void *
+ruby_xrealloc2(void *ptr, size_t n, size_t new_size)
+{
+#if USE_GC_MALLOC_OBJ_INFO_DETAILS
+    ruby_malloc_info_file = __FILE__;
+    ruby_malloc_info_line = __LINE__;
+#endif
+    return ruby_xrealloc2_body(ptr, n, new_size);
+}
+

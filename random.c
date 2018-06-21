@@ -558,15 +558,24 @@ static void
 fill_random_seed(uint32_t *seed, size_t cnt)
 {
     static int n = 0;
+#if defined HAVE_CLOCK_GETTIME
+    struct timespec tv;
+#elif defined HAVE_GETTIMEOFDAY
     struct timeval tv;
+#endif
     size_t len = cnt * sizeof(*seed);
 
     memset(seed, 0, len);
 
-    fill_random_bytes(seed, len, TRUE);
+    fill_random_bytes(seed, len, FALSE);
 
+#if defined HAVE_CLOCK_GETTIME
+    clock_gettime(CLOCK_REALTIME, &tv);
+    seed[0] ^= tv.tv_nsec;
+#elif defined HAVE_GETTIMEOFDAY
     gettimeofday(&tv, 0);
     seed[0] ^= tv.tv_usec;
+#endif
     seed[1] ^= (uint32_t)tv.tv_sec;
 #if SIZEOF_TIME_T > SIZEOF_INT
     seed[0] ^= (uint32_t)((time_t)tv.tv_sec >> SIZEOF_INT * CHAR_BIT);
@@ -635,7 +644,7 @@ random_raw_seed(VALUE self, VALUE size)
     long n = NUM2ULONG(size);
     VALUE buf = rb_str_new(0, n);
     if (n == 0) return buf;
-    if (fill_random_bytes(RSTRING_PTR(buf), n, FALSE))
+    if (fill_random_bytes(RSTRING_PTR(buf), n, TRUE))
 	rb_raise(rb_eRuntimeError, "failed to get urandom");
     return buf;
 }

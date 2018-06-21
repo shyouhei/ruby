@@ -20,7 +20,11 @@
 #define ZERO INT2FIX(0)
 #define ONE INT2FIX(1)
 #define TWO INT2FIX(2)
+#if USE_FLONUM
 #define RFLOAT_0 DBL2NUM(0)
+#else
+static VALUE RFLOAT_0;
+#endif
 #if defined(HAVE_SIGNBIT) && defined(__GNUC__) && defined(__sun) && \
     !defined(signbit)
 extern int signbit(double);
@@ -538,6 +542,28 @@ f_complex_polar(VALUE klass, VALUE x, VALUE y)
     return nucomp_s_canonicalize_internal(klass,
 					  f_mul(x, m_cos(y)),
 					  f_mul(x, m_sin(y)));
+}
+
+/* returns a Complex or Float of ang*PI-rotated abs */
+VALUE
+rb_dbl_complex_polar(double abs, double ang)
+{
+    double fi;
+    const double fr = modf(ang, &fi);
+    int pos = fr == +0.5;
+
+    if (pos || fr == -0.5) {
+	if ((modf(fi / 2.0, &fi) != fr) ^ pos) abs = -abs;
+	return rb_complex_new(RFLOAT_0, DBL2NUM(abs));
+    }
+    else if (fr == 0.0) {
+	if (modf(fi / 2.0, &fi) != 0.0) abs = -abs;
+	return DBL2NUM(abs);
+    }
+    else {
+	ang *= M_PI;
+	return rb_complex_new(DBL2NUM(abs * cos(ang)), DBL2NUM(abs * sin(ang)));
+    }
 }
 
 /*
@@ -2248,6 +2274,10 @@ Init_Complex(void)
      */
     rb_define_const(rb_cComplex, "I",
 		    f_complex_new_bang2(rb_cComplex, ZERO, ONE));
+
+#if !USE_FLONUM
+    rb_gc_register_mark_object(RFLOAT_0 = DBL2NUM(0.0));
+#endif
 
     rb_provide("complex.so");	/* for backward compatibility */
 }

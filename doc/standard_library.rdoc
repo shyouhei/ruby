@@ -25,7 +25,6 @@ GetoptLong:: Parse command line options similar to the GNU C getopt_long()
 IPAddr:: Provides methods to manipulate IPv4 and IPv6 IP addresses
 IRB:: Interactive Ruby command-line tool for REPL (Read Eval Print Loop)
 MakeMakefile:: Module used to generate a Makefile for C extensions
-Matrix:: Represents a mathematical matrix.
 Monitor:: Provides an object or module to use safely by more than one thread
 Mutex_m:: Mixin to extend objects to be handled like a Mutex
 Net::FTP:: Support for the File Transfer Protocol
@@ -37,7 +36,6 @@ Observable:: Provides a mechanism for publish/subscribe pattern in Ruby
 OpenURI:: An easy-to-use wrapper for Net::HTTP, Net::HTTPS and Net::FTP
 Open3:: Provides access to stdin, stdout and stderr when running other programs
 OptionParser:: Ruby-oriented class for command-line option analysis
-OpenStruct:: Class to build custom data structures, similar to a Hash
 PP:: Provides a PrettyPrinter for Ruby objects
 PrettyPrinter:: Implements a pretty printing algorithm for readable structure
 profile.rb:: Runs the Ruby Profiler__
@@ -92,6 +90,8 @@ CMath:: Provides Trigonometric and Transcendental functions for complex numbers
 CSV:: Provides an interface to read and write CSV files and data
 FileUtils:: Several file utility methods for copying, moving, removing, etc
 Logger:: Provides a simple logging utility for outputting messages
+Matrix:: Represents a mathematical matrix.
+OpenStruct:: Class to build custom data structures, similar to a Hash
 Prime:: Prime numbers and factorization library
 RDoc:: Produces HTML and command-line documentation for Ruby
 REXML:: An XML toolkit for Ruby

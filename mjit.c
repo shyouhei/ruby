@@ -219,14 +219,31 @@ static char *libruby_pathflag;
 static void remove_file(const char *filename);
 
 /* Return time in milliseconds as a double.  */
+#ifdef __APPLE__
+double ruby_real_ms_time(void);
+#define real_ms_time() ruby_real_ms_time()
+#else
 static double
 real_ms_time(void)
 {
+#ifdef HAVE_CLOCK_GETTIME
+    struct timespec  tv;
+# ifdef CLOCK_MONOTONIC
+    const clockid_t c = CLOCK_MONOTONIC;
+# else
+    const clockid_t c = CLOCK_REALTIME;
+# endif
+
+    clock_gettime(c, &tv);
+    return tv.tv_nsec / 1000000.0 + tv.tv_sec * 1000.0;
+#else
     struct timeval  tv;
 
     gettimeofday(&tv, NULL);
     return tv.tv_usec / 1000.0 + tv.tv_sec * 1000.0;
+#endif
 }
+#endif
 
 /* Make and return copy of STR in the heap. */
 #define get_string ruby_strdup
@@ -913,10 +930,10 @@ convert_unit_to_func(struct rb_mjit_unit *unit)
     return (mjit_func_t)func;
 }
 
-/* Set to TRUE to finish worker.  */
-static int finish_worker_p;
-/* Set to TRUE if worker is finished.  */
-static int worker_finished;
+/* Set to TRUE to stop worker.  */
+static int stop_worker_p;
+/* Set to TRUE if worker is stopped.  */
+static int worker_stopped;
 
 /* The function implementing a worker. It is executed in a separate
    thread by rb_thread_create_mjit_thread. It compiles precompiled header
@@ -927,21 +944,21 @@ worker(void)
     make_pch();
     if (pch_status == PCH_FAILED) {
         mjit_init_p = FALSE;
-        CRITICAL_SECTION_START(3, "in worker to update worker_finished");
-        worker_finished = TRUE;
+        CRITICAL_SECTION_START(3, "in worker to update worker_stopped");
+        worker_stopped = TRUE;
         verbose(3, "Sending wakeup signal to client in a mjit-worker");
         rb_native_cond_signal(&mjit_client_wakeup);
-        CRITICAL_SECTION_FINISH(3, "in worker to update worker_finished");
+        CRITICAL_SECTION_FINISH(3, "in worker to update worker_stopped");
         return; /* TODO: do the same thing in the latter half of mjit_finish */
     }
 
     /* main worker loop */
-    while (!finish_worker_p) {
+    while (!stop_worker_p) {
         struct rb_mjit_unit_node *node;
 
         /* wait until unit is available */
         CRITICAL_SECTION_START(3, "in worker dequeue");
-        while ((unit_queue.head == NULL || active_units.length > mjit_opts.max_cache_size) && !finish_worker_p) {
+        while ((unit_queue.head == NULL || active_units.length > mjit_opts.max_cache_size) && !stop_worker_p) {
             rb_native_cond_wait(&mjit_worker_wakeup, &mjit_engine_mutex);
             verbose(3, "Getting wakeup from client");
         }
@@ -962,7 +979,7 @@ worker(void)
     }
 
     /* To keep mutex unlocked when it is destroyed by mjit_finish, don't wrap CRITICAL_SECTION here. */
-    worker_finished = TRUE;
+    worker_stopped = TRUE;
 }
 
 /* MJIT info related to an existing continutaion.  */
@@ -1421,8 +1438,8 @@ mjit_init(struct mjit_options *opts)
     rb_define_global_const("RUBY_DESCRIPTION", rb_obj_freeze(rb_description));
 
     /* Initialize worker thread */
-    finish_worker_p = FALSE;
-    worker_finished = FALSE;
+    stop_worker_p = FALSE;
+    worker_stopped = FALSE;
     if (!rb_thread_create_mjit_thread(child_after_fork, worker)) {
         mjit_init_p = FALSE;
         rb_native_mutex_destroy(&mjit_engine_mutex);
@@ -1458,8 +1475,8 @@ mjit_finish(void)
     CRITICAL_SECTION_FINISH(3, "in mjit_finish to wakeup from pch");
 
     /* Stop worker */
-    finish_worker_p = TRUE;
-    while (!worker_finished) {
+    stop_worker_p = TRUE;
+    while (!worker_stopped) {
         verbose(3, "Sending cancel signal to workers");
         CRITICAL_SECTION_START(3, "in mjit_finish");
         rb_native_cond_broadcast(&mjit_worker_wakeup);

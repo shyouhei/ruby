@@ -1057,7 +1057,7 @@ class TestArray < Test::Unit::TestCase
     a = @cls[]
     assert_equal("", a.join)
     assert_equal("", a.join(','))
-    assert_equal(Encoding::US_ASCII, a.join.encoding)
+    assert_equal(Encoding::UTF_8, a.join.encoding)
 
     $, = ""
     a = @cls[1, 2]
@@ -1095,7 +1095,7 @@ class TestArray < Test::Unit::TestCase
 
     e = ''.force_encoding('EUC-JP')
     u = ''.force_encoding('UTF-8')
-    assert_equal(Encoding::US_ASCII, [[]].join.encoding)
+    assert_equal(__ENCODING__, [[]].join.encoding)
     assert_equal(Encoding::US_ASCII, [1, [u]].join.encoding)
     assert_equal(Encoding::UTF_8, [u, [e]].join.encoding)
     assert_equal(Encoding::UTF_8, [u, [1]].join.encoding)

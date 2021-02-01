@@ -1026,13 +1026,6 @@ rb_funcallv_scope(VALUE recv, ID mid, int argc, const VALUE *argv, call_type sco
 #ifdef rb_funcallv
 #undef rb_funcallv
 #endif
-/*!
- * Calls a method
- * \param recv   receiver of the method
- * \param mid    an ID that represents the name of the method
- * \param argc   the number of arguments
- * \param argv   pointer to an array of method arguments
- */
 VALUE
 rb_funcallv(VALUE recv, ID mid, int argc, const VALUE *argv)
 {
@@ -1077,15 +1070,7 @@ rb_apply(VALUE recv, ID mid, VALUE args)
 #ifdef rb_funcall
 #undef rb_funcall
 #endif
-/*!
- * Calls a method
- * \param recv   receiver of the method
- * \param mid    an ID that represents the name of the method
- * \param n      the number of arguments
- * \param ...    arbitrary number of method arguments
- *
- * \pre each of arguments after \a n must be a VALUE.
- */
+
 VALUE
 rb_funcall(VALUE recv, ID mid, int n, ...)
 {
@@ -1137,15 +1122,6 @@ rb_check_funcall_basic_kw(VALUE recv, ID mid, VALUE ancestor, int argc, const VA
     return Qundef;
 }
 
-/*!
- * Calls a method.
- *
- * Same as rb_funcallv but this function can call only public methods.
- * \param recv   receiver of the method
- * \param mid    an ID that represents the name of the method
- * \param argc   the number of arguments
- * \param argv   pointer to an array of method arguments
- */
 VALUE
 rb_funcallv_public(VALUE recv, ID mid, int argc, const VALUE *argv)
 {
@@ -1815,18 +1791,6 @@ ruby_eval_string_from_file(const char *str, const char *filename)
     return eval_string_with_cref(rb_vm_top_self(), rb_str_new2(str), NULL, file, 1);
 }
 
-/**
- * Evaluates the given string in an isolated binding.
- *
- * Here "isolated" means the binding does not inherit any other binding. This
- * behaves same as the binding for required libraries.
- *
- * __FILE__ will be "(eval)", and __LINE__ starts from 1 in the evaluation.
- *
- * @param str Ruby code to evaluate.
- * @return The evaluated result.
- * @throw Exception   Raises an exception on error.
- */
 VALUE
 rb_eval_string(const char *str)
 {
@@ -1839,16 +1803,6 @@ eval_string_protect(VALUE str)
     return rb_eval_string((char *)str);
 }
 
-/**
- * Evaluates the given string in an isolated binding.
- *
- * __FILE__ will be "(eval)", and __LINE__ starts from 1 in the evaluation.
- *
- * @sa rb_eval_string
- * @param str Ruby code to evaluate.
- * @param state Being set to zero if succeeded. Nonzero if an error occurred.
- * @return The evaluated result if succeeded, an undefined value if otherwise.
- */
 VALUE
 rb_eval_string_protect(const char *str, int *pstate)
 {
@@ -1870,17 +1824,6 @@ eval_string_wrap_protect(VALUE data)
     return eval_string_with_cref(arg->top_self, rb_str_new_cstr(arg->str), cref, rb_str_new_cstr("eval"), 1);
 }
 
-/**
- * Evaluates the given string under a module binding in an isolated binding.
- * This is the same as the binding for loaded libraries on "load('foo', true)".
- *
- * __FILE__ will be "(eval)", and __LINE__ starts from 1 in the evaluation.
- *
- * @sa rb_eval_string
- * @param str Ruby code to evaluate.
- * @param state Being set to zero if succeeded. Nonzero if an error occurred.
- * @return The evaluated result if succeeded, an undefined value if otherwise.
- */
 VALUE
 rb_eval_string_wrap(const char *str, int *pstate)
 {

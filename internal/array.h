@@ -36,12 +36,6 @@ static inline bool ARY_PTR_USING_P(VALUE ary);
 static inline void RARY_TRANSIENT_SET(VALUE ary);
 static inline void RARY_TRANSIENT_UNSET(VALUE ary);
 
-RUBY_SYMBOL_EXPORT_BEGIN
-/* array.c (export) */
-void rb_ary_detransient(VALUE a);
-void rb_ary_ptr_use_end(VALUE ary);
-RUBY_SYMBOL_EXPORT_END
-
 MJIT_SYMBOL_EXPORT_BEGIN
 VALUE rb_ary_tmp_new_from_values(VALUE, long, const VALUE *);
 VALUE rb_check_to_array(VALUE ary);

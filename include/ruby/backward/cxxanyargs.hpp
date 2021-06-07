@@ -6,7 +6,7 @@
 ///             Permission  is hereby  granted, to  either redistribute  and/or
 ///             modify this file, provided that the conditions mentioned in the
 ///             file COPYING are met.  Consult the file for details.
-/// @note       DO NOT  MODERNIZE THIS FILE!   As the  file name implies  it is
+/// @note       DO NOT  MODERNISE THIS FILE!   As the  file name implies  it is
 ///             meant to  be a backwards  compatibility shim.  Please  stick to
 ///             C++ 98 and never use newer features, like `constexpr`.
 /// @brief      Provides old prototypes for C++ programs.
@@ -39,7 +39,7 @@ namespace ruby {
 /// Backwards compatibility layer.
 namespace backward {
 
-/// Provides  ANYARGS deprecation  warnings. In  C, ANYARGS  means there  is no
+/// Provides ANYARGS  deprecation warnings.   In C, ANYARGS  means there  is no
 /// function prototype.  Literally  anything, even including nothing,  can be a
 /// valid ANYARGS.   So passing a  correctly prototyped function pointer  to an
 /// ANYARGS-ed  function  parameter is  valid,  at  the  same time  passing  an
@@ -68,7 +68,7 @@ RUBY_CXX_DEPRECATED("Use of ANYARGS in this function is deprecated")
 /// @param[in]   e  Setter function.
 /// @note        Both functions can be nullptr.
 /// @see         rb_define_hooked_variable()
-/// @deprecated  Use glanular typed overload instead.
+/// @deprecated  Use granular typed overload instead.
 inline void
 rb_define_virtual_variable(const char *q, type *w, void_type *e)
 {
@@ -131,7 +131,7 @@ RUBY_CXX_DEPRECATED("Use of ANYARGS in this function is deprecated")
 /// @param[in]   r  Setter function.
 /// @note        Both functions can be nullptr.
 /// @see         rb_define_virtual_variable()
-/// @deprecated  Use glanular typed overload instead.
+/// @deprecated  Use granular typed overload instead.
 inline void
 rb_define_hooked_variable(const char *q, VALUE *w, type *e, void_type *r)
 {
@@ -198,7 +198,7 @@ RUBY_CXX_DEPRECATED("Use of ANYARGS in this function is deprecated")
 /// @param[in]   r  Passed to `e`.
 /// @return      The return value of `q`.
 /// @note        `e` can be nullptr.
-/// @deprecated  This function is obsolated since  long before 2.x era.  Do not
+/// @deprecated  This function is obsoleted since  long before 2.x era.  Do not
 ///              use it any longer.  rb_block_call() is provided instead.
 inline VALUE
 rb_iterate(onearg_type *q, VALUE w, type *e, VALUE r)
@@ -225,7 +225,7 @@ RUBY_CXX_DEPRECATED("Use of ANYARGS in this function is deprecated")
 /// @param[in]   y  Passed to `t`
 /// @return      Return value of `q#w(*r,&t)`
 /// @note        't' can be nullptr.
-/// @deprecated  Use glanular typed overload instead.
+/// @deprecated  Use granular typed overload instead.
 inline VALUE
 rb_block_call(VALUE q, ID w, int e, const VALUE *r, type *t, VALUE y)
 {
@@ -253,7 +253,7 @@ RUBY_CXX_DEPRECATED("Use of ANYARGS in this function is deprecated")
 /// @see         rb_ensure()
 /// @see         rb_rescue2()
 /// @see         rb_protect()
-/// @deprecated  Use glanular typed overload instead.
+/// @deprecated  Use granular typed overload instead.
 inline VALUE
 rb_rescue(type *q, VALUE w, type *e, VALUE r)
 {
@@ -277,7 +277,7 @@ RUBY_CXX_DEPRECATED("Use of ANYARGS in this function is deprecated")
 /// @see         rb_ensure()
 /// @see         rb_rescue()
 /// @see         rb_protect()
-/// @deprecated  Use glanular typed overload instead.
+/// @deprecated  Use granular typed overload instead.
 inline VALUE
 rb_rescue2(type *q, VALUE w, type *e, VALUE r, ...)
 {
@@ -303,7 +303,7 @@ RUBY_CXX_DEPRECATED("Use of ANYARGS in this function is deprecated")
 /// @see         rb_rescue()
 /// @see         rb_rescue2()
 /// @see         rb_protect()
-/// @deprecated  Use glanular typed overload instead.
+/// @deprecated  Use granular typed overload instead.
 inline VALUE
 rb_ensure(type *q, VALUE w, type *e, VALUE r)
 {
@@ -324,7 +324,7 @@ RUBY_CXX_DEPRECATED("Use of ANYARGS in this function is deprecated")
 /// @see         rb_protect()
 /// @see         rb_rb_catch_obj()
 /// @see         rb_rescue()
-/// @deprecated  Use glanular typed overload instead.
+/// @deprecated  Use granular typed overload instead.
 inline VALUE
 rb_catch(const char *q, type *w, VALUE e)
 {
@@ -351,7 +351,7 @@ RUBY_CXX_DEPRECATED("Use of ANYARGS in this function is deprecated")
 /// @see         rb_protect()
 /// @see         rb_rb_catch_obj()
 /// @see         rb_rescue()
-/// @deprecated  Use glanular typed overload instead.
+/// @deprecated  Use granular typed overload instead.
 inline VALUE
 rb_catch_obj(VALUE q, type *w, VALUE e)
 {
@@ -370,8 +370,8 @@ RUBY_CXX_DEPRECATED("Use of ANYARGS in this function is deprecated")
 /// @return      What was allocated.
 /// @note        It makes no sense to pass nullptr to`q`.
 /// @see         rb_proc_new()
-/// @see         rb_thread_creatr()
-/// @deprecated  Use glanular typed overload instead.
+/// @see         rb_thread_create()
+/// @deprecated  Use granular typed overload instead.
 inline VALUE
 rb_fiber_new(type *q, VALUE w)
 {
@@ -386,8 +386,8 @@ RUBY_CXX_DEPRECATED("Use of ANYARGS in this function is deprecated")
 /// @return      What was allocated.
 /// @note        It makes no sense to pass nullptr to`q`.
 /// @see         rb_fiber_new()
-/// @see         rb_thread_creatr()
-/// @deprecated  Use glanular typed overload instead.
+/// @see         rb_thread_create()
+/// @deprecated  Use granular typed overload instead.
 inline VALUE
 rb_proc_new(type *q, VALUE w)
 {
@@ -403,7 +403,7 @@ RUBY_CXX_DEPRECATED("Use of ANYARGS in this function is deprecated")
 /// @note        It makes no sense to pass nullptr to`q`.
 /// @see         rb_proc_new()
 /// @see         rb_fiber_new()
-/// @deprecated  Use glanular typed overload instead.
+/// @deprecated  Use granular typed overload instead.
 inline VALUE
 rb_thread_create(type *q, void *w)
 {
@@ -425,7 +425,7 @@ RUBY_CXX_DEPRECATED("Use of ANYARGS in this function is deprecated")
 /// @note        It makes no sense to pass nullptr to`w`.
 /// @see         st_foreach_check()
 /// @see         rb_hash_foreach()
-/// @deprecated  Use glanular typed overload instead.
+/// @deprecated  Use granular typed overload instead.
 inline int
 st_foreach(st_table *q, int_type *w, st_data_t e)
 {
@@ -443,7 +443,7 @@ RUBY_CXX_DEPRECATED("Use of ANYARGS in this function is deprecated")
 /// @retval      1  Element removed during traversing.
 /// @note        It makes no sense to pass nullptr to`w`.
 /// @see         st_foreach()
-/// @deprecated  Use glanular typed overload instead.
+/// @deprecated  Use granular typed overload instead.
 inline int
 st_foreach_check(st_table *q, int_type *w, st_data_t e, st_data_t)
 {
@@ -459,7 +459,7 @@ RUBY_CXX_DEPRECATED("Use of ANYARGS in this function is deprecated")
 /// @param[in]   e  Passed to `w`.
 /// @note        It makes no sense to pass nullptr to`w`.
 /// @see         st_foreach_check()
-/// @deprecated  Use glanular typed overload instead.
+/// @deprecated  Use granular typed overload instead.
 inline void
 st_foreach_safe(st_table *q, int_type *w, st_data_t e)
 {
@@ -475,7 +475,7 @@ RUBY_CXX_DEPRECATED("Use of ANYARGS in this function is deprecated")
 /// @param[in]   e  Passed to `w`.
 /// @note        It makes no sense to pass nullptr to`w`.
 /// @see         st_foreach()
-/// @deprecated  Use glanular typed overload instead.
+/// @deprecated  Use granular typed overload instead.
 inline void
 rb_hash_foreach(VALUE q, int_type *w, VALUE e)
 {
@@ -491,7 +491,7 @@ RUBY_CXX_DEPRECATED("Use of ANYARGS in this function is deprecated")
 /// @param[in]   e  Passed to `w`.
 /// @note        It makes no sense to pass nullptr to`w`.
 /// @see         st_foreach()
-/// @deprecated  Use glanular typed overload instead.
+/// @deprecated  Use granular typed overload instead.
 inline void
 rb_ivar_foreach(VALUE q, int_type *w, VALUE e)
 {
@@ -539,7 +539,7 @@ struct driver {
         RUBY_CXX_DEPRECATED("use of ANYARGS is deprecated")
 #endif
         /// @copydoc define(VALUE klass, T mid, U func)
-        /// @deprecated  Pass corrctly typed function instead.
+        /// @deprecated  Pass correctly typed function instead.
         static inline void
         define(VALUE klass, T mid, type func)
         {
@@ -592,27 +592,42 @@ struct driver {
 
 /* We could perhaps merge this struct into the one above using variadic
  * template parameters if we could assume C++11, but sadly we cannot. */
+/// @copydoc ruby::backward::cxxanyargs::define_method::driver
 template<typename T, void (*F)(T mid, type func, int arity)>
 struct driver0 {
+
+    /// @brief      Defines a method
+    /// @tparam     N  Arity of the function.
+    /// @tparam     U  The function in question
     template<int N, typename U>
     struct engine {
         RUBY_CXX_DEPRECATED("use of ANYARGS is deprecated")
+        /// @copydoc define(T mid, U func)
+        /// @deprecated  Pass correctly typed function instead.
         static inline void
         define(T mid, type func)
         {
             F(mid, func, N);
         }
+
+        /// @brief      Defines Kernel#mid as func, whose arity is N.
+        /// @param[in]  mid    Name of the method to define.
+        /// @param[in]  func   Function that implements klass#mid.
         static inline void
         define(T mid, U func)
         {
             F(mid, reinterpret_cast<type *>(func), N);
         }
+
+        /// @copydoc define(T mid, U func)
+        /// @deprecated  Pass correctly typed function instead.
         static inline void
         define(T mid, notimpl_type func)
         {
             F(mid, reinterpret_cast<type *>(func), N);
         }
     };
+
     /// @cond INTERNAL_MACRO
     template<int N, bool = false> struct specific : public engine<N, type *> {};
     template<bool b> struct specific<15, b> : public engine<15, VALUE(*)(VALUE, VALUE, VALUE, VALUE, VALUE, VALUE, VALUE, VALUE, VALUE, VALUE, VALUE, VALUE, VALUE, VALUE, VALUE, VALUE)> {};

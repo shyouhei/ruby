@@ -1753,6 +1753,21 @@ RVALUE_AGE_INC(rb_objspace_t *objspace, VALUE obj)
     check_rvalue_consistency(obj);
 }
 
+#if RGENGC_OLD_NEWOBJ_CHECK > 0
+/* set age to RVALUE_OLD_AGE */
+static inline void
+RVALUE_AGE_SET_OLD(rb_objspace_t *objspace, VALUE obj)
+{
+    check_rvalue_consistency(obj);
+    GC_ASSERT(!RVALUE_OLD_P(obj));
+
+    RBASIC(obj)->flags = RVALUE_FLAGS_AGE_SET(RBASIC(obj)->flags, RVALUE_OLD_AGE);
+    RVALUE_OLD_UNCOLLECTIBLE_SET(objspace, obj);
+
+    check_rvalue_consistency(obj);
+}
+#endif
+
 static inline void
 RVALUE_DEMOTE_RAW(rb_objspace_t *objspace, VALUE obj)
 {

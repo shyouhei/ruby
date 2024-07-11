@@ -466,10 +466,6 @@ int ruby_gc_debug_indent = 0;
 # define RGENGC_OBJ_INFO RGENGC_CHECK_MODE
 #endif
 
-#ifndef CALC_EXACT_MALLOC_SIZE
-# define CALC_EXACT_MALLOC_SIZE 0
-#endif
-
 VALUE rb_mGC;
 
 static size_t malloc_offset = 0;
@@ -4455,22 +4451,7 @@ void *
 ruby_mimmalloc(size_t size)
 {
     void *mem;
-#if CALC_EXACT_MALLOC_SIZE
-    size += sizeof(struct malloc_obj_info);
-#endif
     mem = malloc(size);
-#if CALC_EXACT_MALLOC_SIZE
-    if (!mem) {
-        return NULL;
-    }
-    else
-    /* set 0 for consistency of allocated_size/allocations */
-    {
-        struct malloc_obj_info *info = mem;
-        info->size = 0;
-        mem = info + 1;
-    }
-#endif
     return mem;
 }
 
@@ -4478,36 +4459,13 @@ void *
 ruby_mimcalloc(size_t num, size_t size)
 {
     void *mem;
-#if CALC_EXACT_MALLOC_SIZE
-    struct rbimpl_size_mul_overflow_tag t = rbimpl_size_mul_overflow(num, size);
-    if (UNLIKELY(t.left)) {
-        return NULL;
-    }
-    size = t.right + sizeof(struct malloc_obj_info);
-    mem = calloc1(size);
-    if (!mem) {
-        return NULL;
-    }
-    else
-    /* set 0 for consistency of allocated_size/allocations */
-    {
-        struct malloc_obj_info *info = mem;
-        info->size = 0;
-        mem = info + 1;
-    }
-#else
     mem = calloc(num, size);
-#endif
     return mem;
 }
 
 void
 ruby_mimfree(void *ptr)
 {
-#if CALC_EXACT_MALLOC_SIZE
-    struct malloc_obj_info *info = (struct malloc_obj_info *)ptr - 1;
-    ptr = info;
-#endif
     free(ptr);
 }
 
